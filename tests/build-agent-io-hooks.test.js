@@ -386,6 +386,27 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
+  it("finalizes a placeholder-only reasoning message without inspect data", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: ["Thinking..."],
+      text: "Thinking...",
+    });
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: [],
+      text: "",
+    });
+
+    assert.equal(subject.sent.length, 1);
+    assert.deepEqual(subject.reasoningUpdates, [{ kind: "text", text: "Thought" }]);
+    assert.deepEqual(subject.reasoningInspects, []);
+  });
+
   it("does not duplicate reasoning text repeated by a synthetic completion", async () => {
     const subject = createReasoningSubject();
 

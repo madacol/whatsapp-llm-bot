@@ -139,6 +139,7 @@ export function buildAgentIoHooks(
   let reasoningHandle = null;
   let pendingEncryptedReasoning = false;
   let reasoningInspectAttached = false;
+  let reasoningFinalized = false;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let snapshotFlushTimer = null;
 
@@ -232,12 +233,23 @@ export function buildAgentIoHooks(
     return true;
   }
 
+  /**
+   * @param {{ text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
+   * @returns {boolean}
+   */
+  function shouldCreateReasoningHandle(event) {
+    return event.hasEncryptedContent === true || getReasoningTraceParts(event).length > 0;
+  }
+
   return {
     onReasoning: async (event) => {
       if (!visibility.thinking) {
         return;
       }
       if (!reasoningHandle) {
+        if (event.status === "completed" && !shouldCreateReasoningHandle(event)) {
+          return;
+        }
         reasoningHandle = await emitWhileWorking(() => context.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]))) ?? null;
       }
       if (!reasoningHandle) {
@@ -249,7 +261,9 @@ export function buildAgentIoHooks(
       }
 
       if (event.status === "completed") {
-        if (attachCompletedReasoningInspect(event)) {
+        attachCompletedReasoningInspect(event);
+        if (!reasoningFinalized) {
+          reasoningFinalized = true;
           await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
         }
       }
