@@ -144,6 +144,8 @@ export function createHarnessRuntimeEventDispatcher(input) {
   const subagentThreads = new Map();
   /** @type {Set<string>} */
   const deliveredSubagentResponses = new Set();
+  /** @type {{ contentParts: string[], summaryParts: string[] } | null} */
+  let openReasoning = null;
 
   /** @type {AgentResult} */
   const result = {
@@ -263,6 +265,45 @@ export function createHarnessRuntimeEventDispatcher(input) {
 
   /**
    * @param {HarnessRuntimeEvent} event
+   * @returns {void}
+   */
+  function rememberReasoning(event) {
+    if (event.type !== "reasoning.started" && event.type !== "reasoning.updated" && event.type !== "reasoning.completed") {
+      return;
+    }
+    if (!openReasoning) {
+      openReasoning = { contentParts: [], summaryParts: [] };
+    }
+    const contentParts = event.contentParts ?? [event.text];
+    const summaryParts = event.summaryParts ?? [];
+    openReasoning.contentParts.push(...contentParts);
+    openReasoning.summaryParts.push(...summaryParts);
+    if (event.type === "reasoning.completed") {
+      openReasoning = null;
+    }
+  }
+
+  /**
+   * @returns {Promise<void>}
+   */
+  async function completeOpenReasoning() {
+    if (!openReasoning) {
+      return;
+    }
+    const contentParts = openReasoning.contentParts.map((part) => part.trim()).filter(Boolean);
+    const summaryParts = openReasoning.summaryParts.map((part) => part.trim()).filter(Boolean);
+    const text = [...contentParts, ...summaryParts].join("\n\n").trim();
+    openReasoning = null;
+    await hooks.onReasoning({
+      status: "completed",
+      summaryParts,
+      contentParts,
+      text,
+    });
+  }
+
+  /**
+   * @param {HarnessRuntimeEvent} event
    * @returns {Promise<void>}
    */
   async function captureRawEvent(event) {
@@ -310,6 +351,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "reasoning.started":
       case "reasoning.updated":
       case "reasoning.completed":
+        rememberReasoning(normalizedEvent);
         await hooks.onReasoning({
           status: normalizedEvent.status,
           summaryParts: normalizedEvent.summaryParts ?? [],
@@ -318,6 +360,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
         });
         return;
       case "assistant.completed":
+        await completeOpenReasoning();
         if (normalizedEvent.responseMode === "append") {
           result.response.push({ type: normalizedEvent.contentType, text: normalizedEvent.text });
         } else if (normalizedEvent.responseMode !== "none") {
@@ -340,6 +383,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
         }
         return;
       case "subagent.completed":
+        await completeOpenReasoning();
         await hooks.onLlmResponse(normalizedEvent.text, {
           source: "subagent",
           ...(normalizedEvent.metadata ?? {}),
@@ -355,7 +399,12 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "session.updated":
       case "session.stopped":
       case "turn.started":
+        await emitRuntimeEvent(normalizedEvent);
+        return;
       case "turn.completed":
+        await completeOpenReasoning();
+        await emitRuntimeEvent(normalizedEvent);
+        return;
       case "request.opened":
       case "request.resolved":
       case "user-input.requested":
@@ -366,6 +415,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
         return;
       case "item.completed":
         if (normalizedEvent.item.kind === "assistant") {
+          await completeOpenReasoning();
           const text = normalizedEvent.item.text ?? "";
           result.response = [{ type: "markdown", text }];
           if (text) {

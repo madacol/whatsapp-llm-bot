@@ -10,6 +10,7 @@ import { createHarnessRuntimeEventDispatcher } from "../harnesses/harness-runtim
 import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { sendEvent } from "../whatsapp/outbound/send-content.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 
 process.env.TESTING = "1";
 
@@ -50,6 +51,20 @@ function createMockSock() {
 }
 
 /**
+ * @param {() => boolean} predicate
+ * @returns {Promise<void>}
+ */
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail("Timed out waiting for condition");
+}
+
+/**
  * @param {{
  *   sock: ReturnType<typeof createMockSock>["sock"],
  *   chatId: string,
@@ -57,6 +72,7 @@ function createMockSock() {
  *   visibility: import("../chat-output-visibility.js").OutputVisibility,
  *   outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
  *   pinnedStatusDelivery: Array<Record<string, unknown>>,
+ *   reactionRuntime?: import("../whatsapp/runtime/reaction-runtime.js").ReactionRuntime,
  * }} input
  * @returns {AgentIOHooks}
  */
@@ -65,7 +81,7 @@ function buildObservedWhatsAppHooks(input) {
     {
       send: async (event) => {
         input.outboundEvents.push({ via: "send", event });
-        return sendEvent(input.sock, input.chatId, event, undefined, undefined, {
+        return sendEvent(input.sock, input.chatId, event, undefined, input.reactionRuntime, {
           outputVisibility: input.visibility,
           pinnedStatusDeliveryObserver: (deliveryEvent) => {
             input.pinnedStatusDelivery.push(deliveryEvent);
@@ -74,7 +90,7 @@ function buildObservedWhatsAppHooks(input) {
       },
       reply: async (event) => {
         input.outboundEvents.push({ via: "reply", event });
-        return sendEvent(input.sock, input.chatId, event, undefined, undefined, {
+        return sendEvent(input.sock, input.chatId, event, undefined, input.reactionRuntime, {
           outputVisibility: input.visibility,
           pinnedStatusDeliveryObserver: (deliveryEvent) => {
             input.pinnedStatusDelivery.push(deliveryEvent);
@@ -91,7 +107,7 @@ function buildObservedWhatsAppHooks(input) {
 
 /**
  * @param {Record<string, unknown>[]} payloads
- * @param {{ chatId?: string, cwd?: string | null, visibility?: import("../chat-output-visibility.js").OutputVisibility, beforeEvents?: Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent> }} [options]
+ * @param {{ chatId?: string, cwd?: string | null, visibility?: import("../chat-output-visibility.js").OutputVisibility, beforeEvents?: Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>, enableInspectReactions?: boolean }} [options]
  * @returns {Promise<{
  *   sent: Array<{ chatId: string, msg: Record<string, unknown> }>,
  *   relayed: Array<{ chatId: string, msg: Record<string, unknown>, opts: Record<string, unknown> }>,
@@ -107,6 +123,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
   const chatId = options.chatId ?? `acp-payload-${Date.now()}@s.whatsapp.net`;
   const cwd = options.cwd ?? "/repo";
   const { sock, sent, relayed } = createMockSock();
+  const reactionRuntime = options.enableInspectReactions ? createReactionRuntime() : undefined;
   /** @type {Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>} */
   const runtimeEvents = [];
   /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
@@ -121,6 +138,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
     visibility: options.visibility ?? DEFAULT_OUTPUT_VISIBILITY,
     outboundEvents,
     pinnedStatusDelivery,
+    reactionRuntime,
   });
   const dispatcher = createHarnessRuntimeEventDispatcher({
     provider: "acp",
@@ -523,6 +541,50 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       ["pin.succeeded", chatId, "msg-1", undefined],
       ["status.edited", chatId, "msg-1", "💭 *LLM*  thinking"],
     ]);
+  });
+
+  it("makes the standalone thinking message inspectable when the assistant item completes", async () => {
+    const chatId = "acp-payload-thinking-inspect@s.whatsapp.net";
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Inspecting the request." },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Done." },
+        },
+      },
+    ], {
+      chatId,
+      enableInspectReactions: true,
+      beforeEvents: [{
+        type: "turn.started",
+        provider: "acp",
+        turn: { id: "turn-1", chatId, status: "started" },
+      }],
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
+      "turn.started",
+      "reasoning.updated",
+      "item.started",
+      "content.delta",
+      "item.completed",
+    ]);
+    const thinkingMessageIndex = sent.findIndex((entry) => entry.msg.text === "🤖 Thinking...");
+    assert.notEqual(thinkingMessageIndex, -1, `Expected standalone Thinking message, got ${JSON.stringify(sent)}`);
+    const thinkingMessageId = `msg-${thinkingMessageIndex + 1}`;
+
+    await waitFor(() => sent.some((entry) => {
+      const react = /** @type {{ text?: unknown, key?: { id?: unknown } } | undefined} */ (entry.msg.react);
+      return react?.text === "👁" && react.key?.id === thinkingMessageId;
+    }));
   });
 
   it("updates or ignores pinned status intentionally for real ACP session update shapes", async () => {
