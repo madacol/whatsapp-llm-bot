@@ -589,11 +589,11 @@
           "  }",
           "}",
           "",
-          "Normalized HarnessRuntimeEvent",
+          "HarnessRuntimeEventInput",
           "{",
           "  type: \"content.delta\" | \"tool.updated\" | \"usage.updated\" | ...",
           "  provider: \"acp\",",
-          "  raw: { source: \"acp.jsonrpc\", method: \"session/update\", payload: params }",
+          "  diagnosticRaw?: { source: \"acp.jsonrpc\", method: \"session/update\", payload: params }",
           "}"
         ],
         x: 640,
@@ -725,7 +725,7 @@
           "    newText?: string,",
           "    cwd?: string | null",
           "  },",
-          "  raw?: HarnessRuntimeRawEvent",
+          "  diagnosticRaw?: HarnessRuntimeRawEvent // adapter-to-dispatcher input only",
           "}"
         ],
         x: 570,
