@@ -16,14 +16,15 @@ If every producer receives a generic `emitOutboundEvent(event)` function, it bec
 
 Keep OutboundEvent delivery unified, but split OutboundEvent creation by producer ownership.
 
-Agent Run Activity should receive a narrow agent-run output port that can create only the OutboundEvents it owns. App and command modules should receive narrow app output ports that can create only the OutboundEvents they own. External clients should not create OutboundEvents; they submit inbound turns or commands.
+Agent Run Activity should receive `AgentRunOutputPort`, a narrow agent-run output port that can create only the OutboundEvents it owns. App and command modules should receive `AppOutputPort`, a narrow app output port that can create only the OutboundEvents they own. External clients should not create OutboundEvents; they submit inbound turns or commands.
 
-Output ports should expose semantic methods or tightly-scoped builders, not a generic free-form `emitOutboundEvent` escape hatch. Generic persistence, queue, replay, and delivery adapters may accept already-created OutboundEvents because they are infrastructure consumers, not domain producers.
+Output ports should expose semantic methods or tightly-scoped builders, not a generic free-form `emitOutboundEvent` escape hatch. Generic persistence, queue, replay, and delivery adapters should use `OutboundEventSink`, an infrastructure seam that accepts already-created OutboundEvents because those adapters are infrastructure consumers, not domain producers.
 
 ## Consequences
 
 - Creation is ownership-specific; delivery remains unified.
 - The shared queue can store one OutboundEvent stream without giving producers permission to create arbitrary event names.
+- `AgentRunOutputPort`, `AppOutputPort`, and `OutboundEventSink` are the initial seam names. This ADR names their responsibilities but does not prescribe every method yet.
 - Agent Run Activity cannot emit app-owned events unless an output port explicitly exposes that capability.
 - App command modules cannot emit agent-run lifecycle/tool/file/usage events unless an output port explicitly exposes that capability.
 - Tests should cover output ports as producer seams, not only final Presentation rendering.
