@@ -675,7 +675,7 @@ describe("ACP harness", () => {
             path: path.relative(tempDir, String(change.path ?? "")),
             kind: change.kind,
             source: change.source,
-            fromSnapshot: /** @type {{ raw?: { source?: unknown } }} */ (event).raw?.source,
+            fromSnapshot: /** @type {{ diagnosticRaw?: { source?: unknown } }} */ (event).diagnosticRaw?.source,
             hasPrebuiltDiff: change.diff !== undefined,
             oldText: change.oldText,
             newText: change.newText,

@@ -216,7 +216,7 @@ describe("ACP file changes", () => {
       after,
       emittedPaths: new Set(),
       summary: "apply_patch",
-      raw: { source: "test" },
+      diagnosticRaw: { source: "test" },
     });
 
     assert.deepEqual(changes.map((event) => [event.change.path, event.change.kind]), [

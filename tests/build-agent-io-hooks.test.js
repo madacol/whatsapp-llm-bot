@@ -206,7 +206,7 @@ describe("buildAgentIoHooks", () => {
         name: "Read",
         arguments: { file_path: "/repo/src/app.js" },
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -906,7 +906,7 @@ describe("buildAgentIoHooks", () => {
         source: /** @type {const} */ ("snapshot"),
         newText: `generated ${index}\n`,
       },
-      raw: { source: "workdir-snapshot" },
+      diagnosticRaw: { source: "workdir-snapshot" },
     }));
 
     for (const event of events) {

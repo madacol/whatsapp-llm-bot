@@ -1,10 +1,11 @@
 import { createLogger } from "../logger.js";
 import { getHarnessRawEventLogger } from "./raw-event-log.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
-import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
+import { getHarnessRuntimeDiagnosticRaw, normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 
 /**
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeEvent} HarnessRuntimeEvent
+ * @typedef {import("./harness-runtime-events.js").HarnessRuntimeEventInput} HarnessRuntimeEventInput
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeProvider} HarnessRuntimeProvider
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeTool} HarnessRuntimeTool
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeUsage} HarnessRuntimeUsage
@@ -162,7 +163,7 @@ function cleanCompletedReasoningParts(parts) {
  * }} input
  * @returns {{
  *   result: AgentResult,
- *   handleEvent: (event: HarnessRuntimeEvent) => Promise<void>,
+ *   handleEvent: (event: HarnessRuntimeEventInput) => Promise<void>,
  * }}
  */
 export function createHarnessRuntimeEventDispatcher(input) {
@@ -344,10 +345,11 @@ export function createHarnessRuntimeEventDispatcher(input) {
 
   /**
    * @param {HarnessRuntimeEvent} event
+   * @param {import("./harness-runtime-events.js").HarnessRuntimeRawEvent | undefined} diagnosticRaw
    * @returns {Promise<void>}
    */
-  async function captureRawEvent(event) {
-    if (!rawEventLogger || !event.raw) {
+  async function captureRawEvent(event, diagnosticRaw) {
+    if (!rawEventLogger || !diagnosticRaw) {
       return;
     }
     try {
@@ -357,7 +359,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
         ...(event.eventId ? { eventId: event.eventId } : {}),
         ...(event.createdAt ? { createdAt: event.createdAt } : {}),
         ...(event.providerInstanceId ? { providerInstanceId: event.providerInstanceId } : {}),
-        raw: event.raw,
+        raw: diagnosticRaw,
       });
     } catch (error) {
       log.warn("Failed to capture raw harness runtime event:", error);
@@ -365,12 +367,13 @@ export function createHarnessRuntimeEventDispatcher(input) {
   }
 
   /**
-   * @param {HarnessRuntimeEvent} event
+   * @param {HarnessRuntimeEventInput} event
    * @returns {Promise<void>}
    */
   async function handleEvent(event) {
+    const diagnosticRaw = getHarnessRuntimeDiagnosticRaw(event);
     const normalizedEvent = normalizeHarnessRuntimeEvent(event);
-    await captureRawEvent(normalizedEvent);
+    await captureRawEvent(normalizedEvent, diagnosticRaw);
     if (shouldSuppressChatRuntimeProgress(normalizedEvent)) {
       return;
     }

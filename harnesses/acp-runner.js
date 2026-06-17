@@ -40,7 +40,7 @@ const ACP_PROMPT_TIMEOUT_MS = 20 * 60_000;
  *   hooks?: AgentIOHooks,
  *   env?: NodeJS.ProcessEnv,
  *   signal?: AbortSignal,
- *   emitEvent?: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => void,
+ *   emitEvent?: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => void,
  *   dispatchRuntimeEventsToHooks?: boolean,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
@@ -411,7 +411,7 @@ async function rememberApplyPatchSnapshot(update, pendingApplyPatchSnapshots, ru
  * }>} pendingApplyPatchSnapshots
  * @param {HarnessRunConfig | undefined} runConfig
  * @param {Set<string>} emittedFileChangePaths
- * @param {(event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>} emitRuntimeEvent
+ * @param {(event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>} emitRuntimeEvent
  * @returns {Promise<void>}
  */
 async function emitTerminalApplyPatchFileChanges(
@@ -436,7 +436,7 @@ async function emitTerminalApplyPatchFileChanges(
     after,
     emittedPaths: emittedFileChangePaths,
     summary: snapshot.summary,
-    raw: createAcpRawPayload("session/update", { update }),
+    diagnosticRaw: createAcpRawPayload("session/update", { update }),
   });
   for (const event of events) {
     await emitRuntimeEvent(event);
@@ -764,11 +764,11 @@ async function handlePromptUsage(input, runtimeDispatcher, promptResult) {
   if (!isRecord(promptResult) || !isRecord(promptResult.usage)) {
     return;
   }
-  const event = /** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+  const event = /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput} */ ({
     type: "usage.updated",
     provider: "acp",
     usage: normalizeAcpUsage(promptResult.usage),
-    raw: { promptResult },
+    diagnosticRaw: { promptResult },
   });
   input.emitEvent?.(event);
   await runtimeDispatcher.handleEvent(event);
@@ -913,7 +913,7 @@ export async function startAcpRun(input) {
    * }>} */
   const pendingApplyPatchSnapshots = new Map();
   const runtimeModel = createAcpRuntimeModel();
-  const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
+  const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput} */ event) => {
     const reconciled = reconcileAcpFileChangeWithBaseline(event, reconciliationBaseline, input.runConfig?.workdir);
     if (reconciled.type === "file-change.completed") {
       const protectedMatch = matchProtectedPath(input.runConfig, reconciled.change.path);
@@ -940,7 +940,7 @@ export async function startAcpRun(input) {
           hadOldText: reconciled.change.oldText !== undefined,
         });
         const message = `Protected path change reverted: ${protectedApproval.match.relativePath}`;
-        /** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */
+        /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput} */
         const failureEvent = {
           type: "tool.failed",
           provider: "acp",
@@ -950,7 +950,7 @@ export async function startAcpRun(input) {
             arguments: { path: protectedApproval.match.relativePath },
             output: message,
           },
-          raw: reconciled.raw,
+          diagnosticRaw: reconciled.diagnosticRaw,
         };
         input.emitEvent?.(failureEvent);
         await runtimeDispatcher.handleEvent(failureEvent);

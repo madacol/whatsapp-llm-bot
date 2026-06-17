@@ -250,7 +250,7 @@ async function waitForExternalPermissionDecision(decision, timeoutMs) {
  * @param {{
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
  *   runConfig?: HarnessRunConfig,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<unknown>,
  *   approvedProtectedPaths?: Set<string>,
  *   pendingEditDiffPaths?: Map<string, string[]>,
@@ -282,7 +282,7 @@ async function handleAcpPermissionRequest(message, options) {
       summary: title,
       detail: labels.join(", "),
     },
-    raw: createAcpRawPayload("session/request_permission", message.params),
+    diagnosticRaw: createAcpRawPayload("session/request_permission", message.params),
   });
   const protectedEditOptionId = await resolveProtectedEditPermissionOptionId({
     params,
@@ -301,7 +301,7 @@ async function handleAcpPermissionRequest(message, options) {
         kind: "tool-user-input",
         summary: `selected:${protectedEditOptionId}`,
       },
-      raw: createAcpRawPayload("session/request_permission", { optionId: protectedEditOptionId }),
+      diagnosticRaw: createAcpRawPayload("session/request_permission", { optionId: protectedEditOptionId }),
     });
     return { outcome: { outcome: "selected", optionId: protectedEditOptionId } };
   }
@@ -319,7 +319,7 @@ async function handleAcpPermissionRequest(message, options) {
       kind: "tool-user-input",
       summary: optionId ? `selected:${optionId}` : "cancelled",
     },
-    raw: createAcpRawPayload("session/request_permission", { optionId }),
+    diagnosticRaw: createAcpRawPayload("session/request_permission", { optionId }),
   });
   return optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } };
 }
@@ -432,7 +432,7 @@ function normalizeExternalElicitationResponse(response, questions) {
  * @param {Record<string, unknown>} message
  * @param {{
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>,
  *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
  * }} options
  * @returns {Promise<{ action: "accept", content?: Record<string, unknown> } | { action: "decline" } | { action: "cancel" }>}
@@ -470,7 +470,7 @@ async function handleAcpElicitationCreate(message, options) {
     type: "user-input.requested",
     provider: "acp",
     request: runtimeRequest,
-    raw: createAcpRawPayload("elicitation/create", message.params),
+    diagnosticRaw: createAcpRawPayload("elicitation/create", message.params),
   });
   const askViaHooks = async () => {
     /** @type {Record<string, unknown>} */
@@ -503,7 +503,7 @@ async function handleAcpElicitationCreate(message, options) {
     type: "user-input.resolved",
     provider: "acp",
     request: runtimeRequest,
-    raw: createAcpRawPayload("elicitation/create", decision),
+    diagnosticRaw: createAcpRawPayload("elicitation/create", decision),
   });
   return decision;
 }
@@ -512,7 +512,7 @@ async function handleAcpElicitationCreate(message, options) {
  * @param {{
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
  *   runConfig?: HarnessRunConfig,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>,
  * }} options
  */
 function createAcpTerminalManager(options) {
@@ -558,7 +558,7 @@ function createAcpTerminalManager(options) {
       type: "command.started",
       provider: "acp",
       command: { command: commandLine, status: "started" },
-      raw: { message },
+      diagnosticRaw: { message },
     });
     const proc = spawn(params.command, args, {
       cwd,
@@ -598,7 +598,7 @@ function createAcpTerminalManager(options) {
           status: status.exitCode === 0 ? "completed" : "failed",
           ...(terminal.output ? { output: terminal.output } : {}),
         },
-        raw: { message, exitStatus },
+        diagnosticRaw: { message, exitStatus },
       });
       resolveExit?.(status);
     }
@@ -691,7 +691,7 @@ function createAcpTerminalManager(options) {
  * @param {{
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
  *   runConfig?: HarnessRunConfig,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
  *   approvedProtectedPaths?: Set<string>,

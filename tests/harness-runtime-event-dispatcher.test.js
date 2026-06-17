@@ -4,11 +4,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHarnessRuntimeEventDispatcher } from "../harnesses/harness-runtime-event-dispatcher.js";
-import { normalizeHarnessRuntimeEvent } from "../harnesses/harness-runtime-events.js";
+import { getHarnessRuntimeDiagnosticRaw, normalizeHarnessRuntimeEvent } from "../harnesses/harness-runtime-events.js";
 import { createNdjsonRawEventLogger } from "../harnesses/raw-event-log.js";
 
 describe("createHarnessRuntimeEventDispatcher", () => {
-  it("adds stable runtime metadata without discarding provider raw references", () => {
+  it("adds stable runtime metadata without embedding diagnostic raw payloads", () => {
     const event = normalizeHarnessRuntimeEvent({
       type: "content.delta",
       provider: "codex",
@@ -17,7 +17,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       itemId: "assistant-1",
       text: "Done",
       contentType: "markdown",
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: { sequence: 1 },
@@ -38,7 +38,20 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       providerTurnId: "provider-turn-1",
       providerItemId: "provider-item-1",
     });
-    assert.deepEqual(event.raw, {
+    assert.equal("diagnosticRaw" in event, false);
+    assert.equal("raw" in event, false);
+    assert.deepEqual(getHarnessRuntimeDiagnosticRaw({
+      type: "content.delta",
+      provider: "codex",
+      itemId: "assistant-1",
+      text: "Done",
+      contentType: "markdown",
+      diagnosticRaw: {
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: { sequence: 1 },
+      },
+    }), {
       source: "acp.jsonrpc",
       method: "session/update",
       payload: { sequence: 1 },
@@ -78,7 +91,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       provider: "pi",
       text: "Reading files.",
       status: "updated",
-      raw: { type: "message_update" },
+      diagnosticRaw: { type: "message_update" },
     });
     await dispatcher.handleEvent({
       type: "assistant.completed",
@@ -412,7 +425,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         output: "noisy log chunk",
         suppressProgress: true,
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -581,7 +594,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         command: "pnpm type-check",
         status: "started",
       },
-      raw: { source: "acp.jsonrpc", method: "session/update" },
+      diagnosticRaw: { source: "acp.jsonrpc", method: "session/update" },
     });
     await dispatcher.handleEvent({
       type: "file-change.completed",
@@ -592,15 +605,17 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         source: "snapshot",
         diff: "--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-before\n+after",
       },
-      raw: { source: "acp.jsonrpc", method: "session/update" },
+      diagnosticRaw: { source: "acp.jsonrpc", method: "session/update" },
     });
 
     assert.equal(runtimeEvents.length, 2);
     assert.equal(runtimeEvents[0]?.type, "command.started");
-    assert.deepEqual(runtimeEvents[0]?.raw, { source: "acp.jsonrpc", method: "session/update" });
+    assert.equal("raw" in (runtimeEvents[0] ?? {}), false);
+    assert.equal("diagnosticRaw" in (runtimeEvents[0] ?? {}), false);
     assert.equal(runtimeEvents[1]?.type, "file-change.completed");
     assert.equal(runtimeEvents[1]?.type === "file-change.completed" ? runtimeEvents[1].change.cwd : undefined, "/repo");
-    assert.deepEqual(runtimeEvents[1]?.raw, { source: "acp.jsonrpc", method: "session/update" });
+    assert.equal("raw" in (runtimeEvents[1] ?? {}), false);
+    assert.equal("diagnosticRaw" in (runtimeEvents[1] ?? {}), false);
   });
 
   it("emits ACP progress through the runtime event sink instead of the legacy runtime hook", async () => {
@@ -703,7 +718,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         provider: "codex",
         text: "Done.",
         contentType: "markdown",
-        raw: { msg: { type: "agent_message_delta", delta: "Done." } },
+        diagnosticRaw: { msg: { type: "agent_message_delta", delta: "Done." } },
       });
 
       const logFiles = await fs.readdir(tempDir);

@@ -193,10 +193,10 @@ export function isAcpFileChangeIgnored(runConfig, filePath) {
 }
 
 /**
- * @param {import("./harness-runtime-events.js").HarnessRuntimeEvent} event
+ * @param {import("./harness-runtime-events.js").HarnessRuntimeEventInput} event
  * @param {Map<string, string> | null} baseline
  * @param {string | null | undefined} workdir
- * @returns {import("./harness-runtime-events.js").HarnessRuntimeEvent}
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput}
  */
 export function reconcileAcpFileChangeWithBaseline(event, baseline, workdir) {
   if (event.type !== "file-change.completed" || !baseline) {
@@ -243,7 +243,7 @@ export function reconcileAcpFileChangeWithBaseline(event, baseline, workdir) {
 
 /**
  * @param {Map<string, string> | null} baseline
- * @param {import("./harness-runtime-events.js").HarnessRuntimeEvent} event
+ * @param {import("./harness-runtime-events.js").HarnessRuntimeEventInput} event
  * @param {string | null | undefined} workdir
  * @returns {void}
  */
@@ -267,13 +267,13 @@ export function updateAcpFileChangeBaseline(baseline, event, workdir) {
  *   after: Map<string, string> | null,
  *   emittedPaths: Set<string>,
  * }} input
- * @returns {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]}
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]}
  */
 export function collectAcpSnapshotFileChanges(input) {
   if (!input.before || !input.after) {
     return [];
   }
-  /** @type {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]} */
+  /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]} */
   const events = [];
   for (const [filePath, newText] of input.after) {
     if (input.emittedPaths.has(filePath)) {
@@ -294,7 +294,7 @@ export function collectAcpSnapshotFileChanges(input) {
         ...(oldText !== undefined ? { oldText } : {}),
         newText,
       },
-      raw: { source: "workdir-snapshot" },
+      diagnosticRaw: { source: "workdir-snapshot" },
     });
   }
   for (const [filePath, oldText] of input.before) {
@@ -311,7 +311,7 @@ export function collectAcpSnapshotFileChanges(input) {
         source: "snapshot",
         oldText,
       },
-      raw: { source: "workdir-snapshot" },
+      diagnosticRaw: { source: "workdir-snapshot" },
     });
   }
   return events;
@@ -323,12 +323,12 @@ export function collectAcpSnapshotFileChanges(input) {
  *   after: Map<string, string>,
  *   emittedPaths: Set<string>,
  *   summary: string,
- *   raw: Record<string, unknown>,
+ *   diagnosticRaw: Record<string, unknown>,
  * }} input
- * @returns {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]}
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]}
  */
 export function collectAcpTargetedFileChanges(input) {
-  /** @type {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]} */
+  /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]} */
   const events = [];
   for (const [filePath, newText] of input.after) {
     if (input.emittedPaths.has(filePath)) {
@@ -352,7 +352,7 @@ export function collectAcpTargetedFileChanges(input) {
         newText,
         ...(diff ? { diff } : {}),
       },
-      raw: input.raw,
+      diagnosticRaw: input.diagnosticRaw,
     });
   }
   for (const [filePath, oldText] of input.before) {
@@ -371,15 +371,15 @@ export function collectAcpTargetedFileChanges(input) {
         oldText,
         ...(diff ? { diff } : {}),
       },
-      raw: input.raw,
+      diagnosticRaw: input.diagnosticRaw,
     });
   }
   return events;
 }
 
 /**
- * @param {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]} events
- * @param {(event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>} emitRuntimeEvent
+ * @param {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]} events
+ * @param {(event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>} emitRuntimeEvent
  * @returns {Promise<void>}
  */
 export async function emitAcpSnapshotFileChangeEvents(events, emitRuntimeEvent) {
@@ -393,7 +393,7 @@ export async function emitAcpSnapshotFileChangeEvents(events, emitRuntimeEvent) 
  *   before: Map<string, string> | null,
  *   after: Map<string, string> | null,
  *   emittedPaths: Set<string>,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>,
  * }} input
  * @returns {Promise<void>}
  */

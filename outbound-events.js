@@ -87,8 +87,9 @@ export function subagentMessageEvent(input) {
  * @returns {RuntimeEventOutboundEvent["event"]}
  */
 function canonicalRuntimeEvent(event) {
-  const { raw, ...canonicalEvent } = event;
-  void raw;
+  const canonicalEvent = /** @type {Record<string, unknown>} */ ({ ...event });
+  delete canonicalEvent.raw;
+  delete canonicalEvent.diagnosticRaw;
   return /** @type {RuntimeEventOutboundEvent["event"]} */ (canonicalEvent);
 }
 
