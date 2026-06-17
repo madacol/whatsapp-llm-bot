@@ -24,7 +24,9 @@ Raw provider payloads are input to the Run Event layer only.
 
 Canonical Run Events must not include raw provider payloads. App Messages and Presentation inputs must not include raw provider payloads either.
 
-If any module downstream of the Run Event layer needs a provider-derived fact, the Run Event layer must expose that fact through a canonical Run Event field. Raw payloads may be retained only by diagnostic facilities such as raw-event logs or provider troubleshooting records, not as behavior or rendering inputs.
+If any module downstream of the Run Event layer needs a provider-derived fact, the Run Event layer must expose that fact through a canonical Run Event field.
+
+Raw payloads may be retained only in a diagnostic side channel such as raw-event logs or provider troubleshooting records. Those diagnostics must be keyed by canonical correlation IDs, such as event, turn, item, request, or provider reference IDs, rather than embedded in canonical events.
 
 ## Consequences
 
@@ -32,4 +34,5 @@ If any module downstream of the Run Event layer needs a provider-derived fact, t
 - The Run Event dispatcher must not branch on raw ACP metadata after normalization.
 - Existing `raw` fields on runtime events are migration debt and should be removed in cleanup slices.
 - Current WhatsApp raw ACP helpers should be replaced by canonical Run Event fields for tool display facts such as semantic kind, paths, line ranges, commands, web action details, and progress visibility.
+- Diagnostic records can keep raw ACP/provider payloads for troubleshooting without making those payloads part of the Run Event interface.
 - Tests should prove that downstream rendering and dispatch behavior follows canonical Run Event fields even when raw provider payloads are absent.
