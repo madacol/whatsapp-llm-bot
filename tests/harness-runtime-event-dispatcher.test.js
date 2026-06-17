@@ -410,6 +410,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         name: "execute",
         arguments: { command: "rg noisy logs" },
         output: "noisy log chunk",
+        suppressProgress: true,
       },
       raw: {
         source: "acp.jsonrpc",
