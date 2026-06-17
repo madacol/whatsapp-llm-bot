@@ -195,6 +195,46 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.every((entry) => entry.event.kind === "runtime_event"), true);
   });
 
+  it("does not embed provider raw payloads in runtime outbound events", async () => {
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
+
+    await hooks.onRuntimeEvent?.({
+      type: "tool.started",
+      provider: "acp",
+      tool: {
+        id: "read-1",
+        name: "Read",
+        arguments: { file_path: "/repo/src/app.js" },
+      },
+      raw: {
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          update: {
+            sessionUpdate: "tool_call",
+            rawInput: { path: "/repo/src/app.js" },
+          },
+        },
+      },
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.event.kind, "runtime_event");
+    if (sent[0]?.event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
+    }
+    assert.equal("raw" in sent[0].event.event, false);
+    assert.deepEqual(sent[0].event.event, {
+      type: "tool.started",
+      provider: "acp",
+      tool: {
+        id: "read-1",
+        name: "Read",
+        arguments: { file_path: "/repo/src/app.js" },
+      },
+    });
+  });
+
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onPlan?.(buildToolPresentation("update_plan", {
@@ -555,7 +595,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(sent, []);
   });
 
-  it("emits direct tool lifecycle as raw runtime events", async () => {
+  it("emits direct tool lifecycle as runtime outbound events", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
     const toolCall = {
       id: "tool-complete-1",
@@ -629,7 +669,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.cwd, "/repo");
   });
 
-  it("passes command failures as raw runtime events instead of sending a separate error message", async () => {
+  it("passes command failures as runtime outbound events instead of sending a separate error message", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
     await emitRuntimeCommand(hooks, "pnpm test", "started");
