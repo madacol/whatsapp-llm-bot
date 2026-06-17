@@ -17,3 +17,4 @@
 
 - Presentation must not branch on raw provider payloads for user-facing rendering. If presentation needs a fact from ACP or another provider protocol, the Run Event layer must expose that fact through canonical Run Event fields.
 - Harness vocabulary migration should break hard inside internal seams and keep compatibility only at external/config surfaces. Existing chat config, database fields, and environment/config inputs may translate legacy harness names at the edge; new docs, tests, and internal interfaces should use Agent Runtime, ACP adapter, or Run Event vocabulary.
+- Presentation should consume Run Events as the only agent-run progress input. Legacy agent-run outbound event kinds such as tool calls, tool activity, plans, usage, subagent messages, and file changes should collapse into canonical Run Event types; generic content and non-run notifications may remain separate presentation inputs.
