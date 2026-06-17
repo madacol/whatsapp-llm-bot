@@ -81,6 +81,18 @@ export function subagentMessageEvent(input) {
 }
 
 /**
+ * Raw provider payloads are diagnostic side-channel material. Runtime
+ * OutboundEvents carry only canonical app-owned fields.
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @returns {RuntimeEventOutboundEvent["event"]}
+ */
+function canonicalRuntimeEvent(event) {
+  const { raw, ...canonicalEvent } = event;
+  void raw;
+  return /** @type {RuntimeEventOutboundEvent["event"]} */ (canonicalEvent);
+}
+
+/**
  * @param {RuntimeEventOutboundEvent["event"]} event
  * @param {{ cwd?: string | null }} [options]
  * @returns {RuntimeEventOutboundEvent}
@@ -88,7 +100,7 @@ export function subagentMessageEvent(input) {
 export function runtimeEvent(event, options = {}) {
   return {
     kind: "runtime_event",
-    event,
+    event: canonicalRuntimeEvent(event),
     ...(options.cwd !== undefined && { cwd: options.cwd }),
   };
 }
