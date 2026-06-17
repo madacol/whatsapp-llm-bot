@@ -32,7 +32,7 @@ import { extractApplyPatchText } from "./apply-patch-parser.js";
  * @typedef {{
  *   id: string,
  *   text: string,
- *   raw: Record<string, unknown>,
+ *   diagnosticRaw: Record<string, unknown>,
  * }} AcpAssistantSegment
  */
 
@@ -354,10 +354,10 @@ export function normalizeAcpUsage(usage) {
 /**
  * @param {Record<string, unknown>} block
  * @param {AcpToolCallState} toolCall
- * @param {Record<string, unknown>} raw
- * @returns {HarnessRuntimeEvent}
+ * @param {Record<string, unknown>} diagnosticRaw
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput}
  */
-function makeFileChangeEvent(block, toolCall, raw) {
+function makeFileChangeEvent(block, toolCall, diagnosticRaw) {
   const oldText = typeof block.oldText === "string" ? block.oldText : undefined;
   const newText = typeof block.newText === "string" ? block.newText : undefined;
   const diff = typeof block.diff === "string"
@@ -384,7 +384,7 @@ function makeFileChangeEvent(block, toolCall, raw) {
       ...(oldText !== undefined ? { oldText } : {}),
       ...(newText !== undefined ? { newText } : {}),
     },
-    raw,
+    diagnosticRaw,
   };
 }
 
@@ -647,11 +647,11 @@ function makeRuntimeTool(toolCall) {
 
 /**
  * @param {AcpToolCallState} toolCall
- * @param {Record<string, unknown>} raw
+ * @param {Record<string, unknown>} diagnosticRaw
  * @param {{ wasActive?: boolean }} [options]
- * @returns {HarnessRuntimeEvent[]}
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]}
  */
-function makeToolEvents(toolCall, raw, options = {}) {
+function makeToolEvents(toolCall, diagnosticRaw, options = {}) {
   const status = normalizeToolStatus(toolCall.status);
   const type = status === "failed"
     ? "tool.failed"
@@ -660,11 +660,11 @@ function makeToolEvents(toolCall, raw, options = {}) {
       : status === "started" && !options.wasActive
         ? "tool.started"
         : "tool.updated";
-  const events = /** @type {HarnessRuntimeEvent[]} */ ([{
+  const events = /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]} */ ([{
     type,
     provider: "acp",
     tool: makeRuntimeTool(toolCall),
-    raw,
+    diagnosticRaw,
   }]);
   if (status === "completed") {
     const contentDiffBlocks = extractDiffBlocks(toolCall.content);
@@ -672,7 +672,7 @@ function makeToolEvents(toolCall, raw, options = {}) {
       ? contentDiffBlocks
       : extractApplyPatchDiffBlocks(toolCall.rawInput);
     for (const diffBlock of diffBlocks) {
-      events.push(makeFileChangeEvent(diffBlock, toolCall, raw));
+      events.push(makeFileChangeEvent(diffBlock, toolCall, diagnosticRaw));
     }
   }
   return events;
@@ -680,8 +680,8 @@ function makeToolEvents(toolCall, raw, options = {}) {
 
 /**
  * @returns {{
- *   acceptSessionUpdate: (raw: Record<string, unknown>) => HarnessRuntimeEvent[],
- *   flushAssistantSegment: () => HarnessRuntimeEvent[],
+ *   acceptSessionUpdate: (raw: Record<string, unknown>) => import("./harness-runtime-events.js").HarnessRuntimeEventInput[],
+ *   flushAssistantSegment: () => import("./harness-runtime-events.js").HarnessRuntimeEventInput[],
  * }}
  */
 export function createAcpRuntimeModel() {
@@ -692,7 +692,7 @@ export function createAcpRuntimeModel() {
   let nextAssistantId = 1;
 
   /**
-   * @returns {HarnessRuntimeEvent[]}
+   * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]}
    */
   function flushAssistantSegment() {
     if (!assistantSegment) return [];
@@ -706,7 +706,7 @@ export function createAcpRuntimeModel() {
         kind: "assistant",
         text: completed.text,
       },
-      raw: completed.raw,
+      diagnosticRaw: completed.diagnosticRaw,
     }];
   }
 
@@ -734,7 +734,7 @@ export function createAcpRuntimeModel() {
 
   /**
    * @param {Record<string, unknown>} raw
-   * @returns {HarnessRuntimeEvent[]}
+   * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]}
    */
   function acceptSessionUpdate(raw) {
     const update = isRecord(raw.update) ? raw.update : null;
@@ -753,24 +753,24 @@ export function createAcpRuntimeModel() {
             provider: "acp",
             text,
             metadata: subagentMetadata,
-            raw: eventRaw,
+            diagnosticRaw: eventRaw,
           },
         ];
       }
-      /** @type {HarnessRuntimeEvent[]} */
+      /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]} */
       const events = [];
       if (!assistantSegment) {
         assistantSegment = {
           id: `acp-assistant-${nextAssistantId}`,
           text: "",
-          raw: eventRaw,
+          diagnosticRaw: eventRaw,
         };
         nextAssistantId += 1;
         events.push({
           type: "item.started",
           provider: "acp",
           item: { id: assistantSegment.id, kind: "assistant" },
-          raw: eventRaw,
+          diagnosticRaw: eventRaw,
         });
       }
       assistantSegment.text += text;
@@ -781,7 +781,7 @@ export function createAcpRuntimeModel() {
         text,
         displayText: text,
         contentType: "markdown",
-        raw: eventRaw,
+        diagnosticRaw: eventRaw,
       });
       return events;
     }
@@ -799,7 +799,7 @@ export function createAcpRuntimeModel() {
             contentParts: [text],
             summaryParts: [],
             appendMode: "delta",
-            raw: eventRaw,
+            diagnosticRaw: eventRaw,
           }]
         : prefix;
     }
@@ -821,7 +821,7 @@ export function createAcpRuntimeModel() {
           explanation: stringOrNull(update.explanation),
           entries,
         },
-        raw: eventRaw,
+        diagnosticRaw: eventRaw,
       }];
     }
 
@@ -830,7 +830,7 @@ export function createAcpRuntimeModel() {
         type: "usage.updated",
         provider: "acp",
         usage: normalizeAcpUsage(update),
-        raw: eventRaw,
+        diagnosticRaw: eventRaw,
       }];
     }
 
@@ -841,7 +841,7 @@ export function createAcpRuntimeModel() {
         ...(firstString(update, ["fromModel", "from_model", "from"]) ? { fromModel: firstString(update, ["fromModel", "from_model", "from"]) } : {}),
         ...(firstString(update, ["toModel", "to_model", "to"]) ? { toModel: firstString(update, ["toModel", "to_model", "to"]) } : {}),
         ...(firstString(update, ["reason", "message"]) ? { reason: firstString(update, ["reason", "message"]) } : {}),
-        raw: eventRaw,
+        diagnosticRaw: eventRaw,
       }];
     }
 
@@ -852,7 +852,7 @@ export function createAcpRuntimeModel() {
         ...(firstString(update, ["summary", "message"]) ? { summary: firstString(update, ["summary", "message"]) } : {}),
         ...(firstString(update, ["details", "detail"]) ? { details: firstString(update, ["details", "detail"]) } : {}),
         ...(firstString(update, ["path"]) ? { path: firstString(update, ["path"]) } : {}),
-        raw: eventRaw,
+        diagnosticRaw: eventRaw,
       }];
     }
 
@@ -869,7 +869,7 @@ export function createAcpRuntimeModel() {
         ...(firstString(update, ["message", "summary"]) ? { message: firstString(update, ["message", "summary"]) } : {}),
         ...(firstString(update, ["details", "detail"]) ? { details: firstString(update, ["details", "detail"]) } : {}),
         ...(isError ? { class: "provider_error" } : {}),
-        raw: eventRaw,
+        diagnosticRaw: eventRaw,
       }];
     }
 
@@ -898,7 +898,7 @@ export function createAcpRuntimeModel() {
 /**
  * Stateless compatibility helper for tests and one-off normalization.
  * @param {Record<string, unknown>} raw
- * @returns {HarnessRuntimeEvent[]}
+   * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]}
  */
 export function normalizeAcpSessionUpdate(raw) {
   return createAcpRuntimeModel().acceptSessionUpdate(raw);

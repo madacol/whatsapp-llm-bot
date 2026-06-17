@@ -148,7 +148,7 @@ describe("ACP event normalization", () => {
     assert.equal(assistantEvents[1]?.provider, "acp");
     assert.equal(assistantEvents[1]?.text, "Done.");
     assert.equal(assistantEvents[1]?.contentType, "markdown");
-    assert.deepEqual(assistantEvents[1]?.raw?.payload, {
+    assert.deepEqual(assistantEvents[1]?.diagnosticRaw?.payload, {
       sessionId: "s1",
       update: {
         sessionUpdate: "agent_message_chunk",
@@ -176,7 +176,7 @@ describe("ACP event normalization", () => {
           { text: "Patch ACP", status: "in_progress" },
         ],
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -219,7 +219,7 @@ describe("ACP event normalization", () => {
           subagent_type: "code-reviewer",
         },
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -257,7 +257,7 @@ describe("ACP event normalization", () => {
         threadId: "toolu-task-1",
         agentNickname: "Reviewer",
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -294,7 +294,7 @@ describe("ACP event normalization", () => {
         arguments: {},
         output: "app.js",
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -324,7 +324,7 @@ describe("ACP event normalization", () => {
         oldText: "old",
         newText: "new",
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -366,7 +366,7 @@ describe("ACP event normalization", () => {
         cost: 0.045,
         contextWindow: 200,
       },
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -420,7 +420,7 @@ describe("ACP event normalization", () => {
       summary: "Invalid MCP server",
       details: "Missing command",
       path: "/repo/.codex/config.toml",
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {
@@ -449,7 +449,7 @@ describe("ACP event normalization", () => {
       fromModel: "gpt-5.4",
       toModel: "gpt-5.4-mini",
       reason: "capacity",
-      raw: {
+      diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",
         payload: {

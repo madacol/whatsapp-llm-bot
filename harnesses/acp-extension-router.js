@@ -22,7 +22,7 @@ export class AcpUnsupportedMethodError extends Error {
  * @typedef {{
  *   requestHandlers?: Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>,
  *   notificationHandlers?: Map<string, (message: Record<string, unknown>) => Promise<void> | void>,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>,
  *   createRawPayload: (method: string, payload: unknown) => Record<string, unknown>,
  * }} AcpExtensionRouterInput
  */
@@ -51,7 +51,7 @@ export function createAcpExtensionRouter(input) {
           provider: "acp",
           method,
           payload: message.params,
-          raw: input.createRawPayload(method, message.params),
+          diagnosticRaw: input.createRawPayload(method, message.params),
         });
         throw new AcpUnsupportedMethodError(method);
       }
@@ -73,7 +73,7 @@ export function createAcpExtensionRouter(input) {
         provider: "acp",
         method,
         payload: message.params,
-        raw: input.createRawPayload(method, message.params),
+        diagnosticRaw: input.createRawPayload(method, message.params),
       });
     },
   };

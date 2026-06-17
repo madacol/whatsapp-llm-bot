@@ -65,7 +65,7 @@ async function assertSandboxAccess(input) {
  * @param {{
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
  *   runConfig?: HarnessRunConfig,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEventInput) => Promise<void>,
  *   approvedProtectedPaths?: Set<string>,
  * }} options
  */
@@ -163,7 +163,7 @@ export function createAcpFilesystemCapability(options) {
         ...(oldText !== undefined ? { oldText } : {}),
         newText: params.content,
       },
-      raw: { message },
+      diagnosticRaw: { message },
     });
     return {};
   }

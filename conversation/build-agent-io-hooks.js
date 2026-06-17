@@ -179,10 +179,6 @@ export function buildAgentIoHooks(
           summary: "Snapshot file changes skipped",
           message: `Skipped ${batch.length} unreported snapshot file changes.`,
           details: sample,
-          raw: {
-            source: "whatsapp.presentation",
-            payload: { skippedFileChanges: batch.length },
-          },
         });
         return;
       }

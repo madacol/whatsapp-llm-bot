@@ -20,6 +20,15 @@
  */
 
 /**
+ * Diagnostic payload accepted at producer/adapter seams. This is not part of
+ * canonical runtime events; dispatchers may log it and must drop it before
+ * app-facing hooks or OutboundEvents see the event.
+ * @typedef {{
+ *   diagnosticRaw?: HarnessRuntimeRawEvent,
+ * }} HarnessRuntimeDiagnosticInput
+ */
+
+/**
  * @typedef {{
  *   eventId?: string,
  *   createdAt?: string,
@@ -105,7 +114,6 @@
  *   type: "session.started" | "session.updated" | "session.stopped",
  *   provider: HarnessRuntimeProvider,
  *   session: HarnessRuntimeSession,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeSessionEvent
  */
 
@@ -115,7 +123,6 @@
  *   type: "turn.started" | "turn.completed",
  *   provider: HarnessRuntimeProvider,
  *   turn: HarnessRuntimeTurn,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeTurnEvent
  */
 
@@ -125,7 +132,6 @@
  *   type: "request.opened" | "request.resolved",
  *   provider: HarnessRuntimeProvider,
  *   request: HarnessRuntimeRequest,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeRequestEvent
  */
 
@@ -135,7 +141,6 @@
  *   type: "user-input.requested" | "user-input.resolved",
  *   provider: HarnessRuntimeProvider,
  *   request: HarnessRuntimeUserInputRequest,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeUserInputEvent
  */
 
@@ -145,7 +150,6 @@
  *   type: "item.started" | "item.updated" | "item.completed",
  *   provider: HarnessRuntimeProvider,
  *   item: HarnessRuntimeItem,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeItemEvent
  */
 
@@ -159,7 +163,6 @@
  *   displayText?: string,
  *   contentType: "text" | "markdown",
  *   notify?: boolean,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeContentDeltaEvent
  */
 
@@ -170,7 +173,6 @@
  *   provider: HarnessRuntimeProvider,
  *   method: string,
  *   payload: unknown,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeExtensionEvent
  */
 
@@ -180,7 +182,6 @@
  *   type: "file-change.completed",
  *   provider: HarnessRuntimeProvider,
  *   change: Parameters<Required<AgentIOHooks>["onFileChange"]>[0] & { cwd?: string | null },
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileChangeEvent
  */
 
@@ -194,7 +195,6 @@
  *   summaryParts?: string[],
  *   contentParts?: string[],
  *   appendMode?: "delta" | "part",
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeReasoningEvent
  */
 
@@ -204,7 +204,6 @@
  *   type: "tool.started" | "tool.updated" | "tool.completed" | "tool.failed",
  *   provider: HarnessRuntimeProvider,
  *   tool: HarnessRuntimeTool,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeToolEvent
  */
 
@@ -214,7 +213,6 @@
  *   type: "command.started" | "command.completed" | "command.failed",
  *   provider: HarnessRuntimeProvider,
  *   command: { command: string, status: "started" | "completed" | "failed", output?: string },
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeCommandEvent
  */
 
@@ -230,7 +228,6 @@
  *   notify?: boolean,
  *   usage?: HarnessRuntimeUsage,
  *   usageMode?: "replace" | "add",
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeAssistantCompletedEvent
  */
 
@@ -241,7 +238,6 @@
  *   provider: HarnessRuntimeProvider,
  *   text: string,
  *   metadata?: LlmResponseMetadata,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeSubagentCompletedEvent
  */
 
@@ -254,7 +250,6 @@
  *     explanation?: string | null,
  *     entries: Array<{ text: string, status: "completed" | "in_progress" | "pending" | "unknown" }>,
  *   },
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimePlanUpdatedEvent
  */
 
@@ -264,7 +259,6 @@
  *   type: "usage.updated",
  *   provider: HarnessRuntimeProvider,
  *   usage: HarnessRuntimeUsage,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeUsageEvent
  */
 
@@ -276,7 +270,6 @@
  *   fromModel?: string,
  *   toModel?: string,
  *   reason?: string,
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeModelReroutedEvent
  */
 
@@ -290,7 +283,6 @@
  *   details?: string,
  *   path?: string,
  *   class?: "provider_error" | "transport_error" | "permission_error" | "validation_error" | "unknown",
- *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeDiagnosticEvent
  */
 
@@ -314,6 +306,10 @@
  *   | HarnessRuntimeModelReroutedEvent
  *   | HarnessRuntimeDiagnosticEvent
  * )} HarnessRuntimeEvent
+ */
+
+/**
+ * @typedef {HarnessRuntimeEvent & HarnessRuntimeDiagnosticInput} HarnessRuntimeEventInput
  */
 
 let nextRuntimeEventId = 1;
@@ -353,28 +349,26 @@ function normalizeRawEvent(raw) {
 }
 
 /**
- * @template {HarnessRuntimeEvent | ({ type: string, provider: string } & Record<string, unknown>)} T
- * @param {T} event
- * @returns {T}
+ * @param {HarnessRuntimeEventInput | ({ type: string, provider: string } & Record<string, unknown>)} event
+ * @returns {HarnessRuntimeEvent}
  */
 function normalizeRuntimeEventPayload(event) {
-  return event;
+  const canonicalEvent = /** @type {Record<string, unknown>} */ ({ ...event });
+  delete canonicalEvent.raw;
+  delete canonicalEvent.diagnosticRaw;
+  return /** @type {HarnessRuntimeEvent} */ (canonicalEvent);
 }
 
 /**
  * Normalize provider events at the boundary so subscribers can rely on routing
  * and debugging metadata even when individual adapters emit lean events.
- * @template {HarnessRuntimeEvent | ({ type: string, provider: string } & Record<string, unknown>)} T
- * @param {T} event
- * @param {Partial<HarnessRuntimeEventEnvelope> & { raw?: Record<string, unknown> }} [defaults]
- * @returns {T & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>}
+ * @param {HarnessRuntimeEventInput | ({ type: string, provider: string } & Record<string, unknown>)} event
+ * @param {Partial<HarnessRuntimeEventEnvelope> & HarnessRuntimeDiagnosticInput} [defaults]
+ * @returns {HarnessRuntimeEvent & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>}
  */
 export function normalizeHarnessRuntimeEvent(event, defaults = {}) {
   const normalizedEvent = normalizeRuntimeEventPayload(event);
-  const raw = isRecord(event.raw)
-    ? normalizeRawEvent(event.raw)
-    : normalizeRawEvent(defaults.raw);
-  return /** @type {T & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>} */ ({
+  return /** @type {HarnessRuntimeEvent & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>} */ ({
     ...normalizedEvent,
     eventId: typeof normalizedEvent.eventId === "string"
       ? normalizedEvent.eventId
@@ -394,6 +388,16 @@ export function normalizeHarnessRuntimeEvent(event, defaults = {}) {
     ...(normalizedEvent.providerRefs
       ? { providerRefs: normalizedEvent.providerRefs }
       : defaults.providerRefs ? { providerRefs: defaults.providerRefs } : {}),
-    ...(raw ? { raw } : {}),
   });
+}
+
+/**
+ * @param {HarnessRuntimeDiagnosticInput} event
+ * @param {HarnessRuntimeDiagnosticInput} [defaults]
+ * @returns {HarnessRuntimeRawEvent | undefined}
+ */
+export function getHarnessRuntimeDiagnosticRaw(event, defaults = {}) {
+  return isRecord(event.diagnosticRaw)
+    ? normalizeRawEvent(event.diagnosticRaw)
+    : normalizeRawEvent(defaults.diagnosticRaw);
 }
