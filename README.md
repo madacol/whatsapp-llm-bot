@@ -1,10 +1,8 @@
 # Whatsapp LLM Bot
 
-A whatsapp bot that uses LLMs to generate messages, and `yt-dlp` to download videos/audios and re-upload them into the chat.
+A whatsapp bot that uses LLMs to generate messages.
 
 Available commands:
-- `!video <link>`: downloads the video and re-uploads it into the chat
-- `!audio <link>`: downloads the audio and re-uploads it into the chat
 - `!new <name>`: creates another workspace chat for the current project
 - `!list`: lists the active workspaces in the current project
 - `!status`: shows the current workspace status
@@ -30,14 +28,7 @@ If no command is given, the AI will handle the response.
     pnpm start
     ```
 
-3. While you scan the QR code for authentication, install these:
-
-    ```bash
-    pip3 install pipx
-    pipx install yt-dlp
-    ```
-
-4. Restart `index.js`
+3. Restart `index.js`
 
 ## HTTP API Transport
 
