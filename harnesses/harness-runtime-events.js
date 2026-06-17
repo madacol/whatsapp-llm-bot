@@ -50,6 +50,7 @@
  *   output?: string,
  *   outputBlocks?: ToolContentBlock[],
  *   permissions?: PermissionFlags,
+ *   suppressProgress?: boolean,
  * }} HarnessRuntimeTool
  */
 

@@ -22,6 +22,8 @@ import { extractApplyPatchText } from "./apply-patch-parser.js";
  *   status?: string,
  *   rawInput?: unknown,
  *   rawOutput?: unknown,
+ *   locations?: unknown,
+ *   meta?: unknown,
  *   content?: unknown,
  * }} AcpToolCallState
  */
@@ -48,6 +50,14 @@ function isRecord(value) {
  */
 function stringOrNull(value) {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 /**
@@ -140,6 +150,114 @@ function extractTextContent(update) {
  */
 function normalizeToolArguments(rawInput) {
   return isRecord(rawInput) ? { ...rawInput } : {};
+}
+
+/**
+ * @param {unknown} value
+ * @returns {{ start: number, end: number } | null}
+ */
+function normalizeLineRange(value) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { start, end } = value;
+  if (typeof start !== "number"
+    || typeof end !== "number"
+    || !Number.isInteger(start)
+    || !Number.isInteger(end)
+    || start <= 0
+    || end < start) {
+    return null;
+  }
+  return { start, end };
+}
+
+/**
+ * @param {unknown} locations
+ * @returns {Record<string, unknown> | null}
+ */
+function getFirstLocation(locations) {
+  const entries = Array.isArray(locations) ? locations : [];
+  for (const location of entries) {
+    if (isRecord(location) && nonEmptyString(location.path)) {
+      return location;
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {AcpToolCallState} toolCall
+ * @returns {{ start: number, end: number } | null}
+ */
+function getCodexLineRange(toolCall) {
+  const meta = isRecord(toolCall.meta) ? toolCall.meta : null;
+  const codex = isRecord(meta?.codex) ? meta.codex : null;
+  return normalizeLineRange(codex?.lineRange);
+}
+
+/**
+ * @param {string} output
+ * @returns {{ start: number, end: number } | null}
+ */
+function parseNumberedLineRange(output) {
+  /** @type {number | null} */
+  let start = null;
+  /** @type {number | null} */
+  let end = null;
+  for (const line of output.split("\n")) {
+    const match = line.match(/^\s*(\d+)(?:\t|→)/u);
+    if (!match) {
+      continue;
+    }
+    const lineNumber = Number(match[1]);
+    if (!Number.isInteger(lineNumber) || lineNumber <= 0) {
+      continue;
+    }
+    start ??= lineNumber;
+    end = lineNumber;
+  }
+  return start !== null && end !== null ? { start, end } : null;
+}
+
+/**
+ * @param {AcpToolCallState} toolCall
+ * @returns {{ start: number, end: number } | null}
+ */
+function getOutputLineRange(toolCall) {
+  const rawOutput = isRecord(toolCall.rawOutput) ? toolCall.rawOutput : null;
+  return typeof rawOutput?.formatted_output === "string"
+    ? parseNumberedLineRange(rawOutput.formatted_output)
+    : null;
+}
+
+/**
+ * @param {AcpToolCallState} toolCall
+ * @returns {boolean}
+ */
+function hasTerminalOutputDelta(toolCall) {
+  const meta = isRecord(toolCall.meta) ? toolCall.meta : null;
+  return isRecord(meta?.terminal_output_delta);
+}
+
+/**
+ * @param {string | null} title
+ * @returns {boolean}
+ */
+function isListFilesTitle(title) {
+  return title === "List files" || !!title?.startsWith("List files in ");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function joinedStringList(value) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const entries = value.map(nonEmptyString).filter((entry) => entry !== null);
+  return entries.length > 0 ? entries.join(", ") : null;
 }
 
 /**
@@ -371,6 +489,8 @@ export function mergeAcpToolCallState(previous, next) {
     status: next.status ?? previous?.status,
     rawInput: next.rawInput ?? previous?.rawInput,
     rawOutput: next.rawOutput ?? previous?.rawOutput,
+    locations: next.locations ?? previous?.locations,
+    meta: next.meta ?? previous?.meta,
     content: next.content ?? previous?.content,
   };
 }
@@ -392,6 +512,8 @@ function readToolCallState(update) {
     ...(status ? { status } : {}),
     ...("rawInput" in update ? { rawInput: update.rawInput } : {}),
     ...("rawOutput" in update ? { rawOutput: update.rawOutput } : {}),
+    ...("locations" in update ? { locations: update.locations } : {}),
+    ...("_meta" in update ? { meta: update._meta } : {}),
     ...("content" in update ? { content: update.content } : {}),
   };
 }
@@ -402,8 +524,115 @@ function readToolCallState(update) {
  */
 function makeRuntimeTool(toolCall) {
   const rawInput = normalizeToolArguments(toolCall.rawInput);
+  const rawInputRecord = isRecord(toolCall.rawInput) ? toolCall.rawInput : null;
+  const kind = stringOrNull(toolCall.kind);
   const name = normalizeToolName(toolCall);
   const includeTitleArgument = name === "Task" && typeof toolCall.title === "string" && toolCall.title.length > 0;
+  const suppressProgress = hasTerminalOutputDelta(toolCall);
+  if (kind === "read") {
+    const title = nonEmptyString(toolCall.title);
+    if (isListFilesTitle(title)) {
+      const listPath = nonEmptyString(getFirstLocation(toolCall.locations)?.path);
+      return {
+        id: toolCall.id,
+        name: "List",
+        arguments: {
+          ...(listPath ? { path: listPath } : {}),
+        },
+        ...(suppressProgress ? { suppressProgress } : {}),
+        ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
+      };
+    }
+    const location = getFirstLocation(toolCall.locations);
+    const readPath = nonEmptyString(location?.path) ?? nonEmptyString(rawInputRecord?.path);
+    if (readPath) {
+      const codexRange = getCodexLineRange(toolCall);
+      const outputRange = getOutputLineRange(toolCall);
+      const rawLine = numberOrUndefined(rawInputRecord?.line) ?? numberOrUndefined(rawInputRecord?.offset);
+      const line = codexRange?.start ?? numberOrUndefined(location?.line) ?? rawLine ?? outputRange?.start;
+      const limit = codexRange
+        ? codexRange.end - codexRange.start + 1
+        : numberOrUndefined(rawInputRecord?.limit) ?? (outputRange ? outputRange.end - outputRange.start + 1 : undefined);
+      return {
+        id: toolCall.id,
+        name: "Read",
+        arguments: {
+          file_path: readPath,
+          ...(line !== undefined ? { line } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        },
+        ...(suppressProgress ? { suppressProgress } : {}),
+        ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
+      };
+    }
+  }
+  if (kind === "execute") {
+    const command = nonEmptyString(rawInputRecord?.command)
+      ?? (nonEmptyString(toolCall.title) !== "Editing files" ? nonEmptyString(toolCall.title) : null);
+    if (command) {
+      return {
+        id: toolCall.id,
+        name: "Shell",
+        arguments: {
+          command,
+        },
+        ...(suppressProgress ? { suppressProgress } : {}),
+        ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
+      };
+    }
+  }
+  const action = isRecord(rawInputRecord?.action) ? rawInputRecord.action : null;
+  const actionType = nonEmptyString(action?.type);
+  if (kind === "search" && action && actionType) {
+    if (actionType === "other") {
+      return {
+        id: toolCall.id,
+        name: "web_action_pending",
+        arguments: {},
+        ...(suppressProgress ? { suppressProgress } : {}),
+        ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
+      };
+    }
+    if (actionType === "search") {
+      const query = nonEmptyString(action.query)
+        ?? joinedStringList(action.queries)
+        ?? nonEmptyString(rawInputRecord?.query);
+      if (query) {
+        return {
+          id: toolCall.id,
+          name: "web_search_action",
+          arguments: { query },
+          ...(suppressProgress ? { suppressProgress } : {}),
+          ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
+        };
+      }
+    }
+    if (actionType === "openPage" || actionType === "open_page") {
+      const refId = nonEmptyString(action.url);
+      if (refId) {
+        return {
+          id: toolCall.id,
+          name: "open",
+          arguments: { ref_id: refId },
+          ...(suppressProgress ? { suppressProgress } : {}),
+          ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
+        };
+      }
+    }
+    if (actionType === "findInPage" || actionType === "find_in_page") {
+      const pattern = nonEmptyString(action.pattern);
+      const refId = nonEmptyString(action.url);
+      if (pattern && refId) {
+        return {
+          id: toolCall.id,
+          name: "find",
+          arguments: { pattern, ref_id: refId },
+          ...(suppressProgress ? { suppressProgress } : {}),
+          ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
+        };
+      }
+    }
+  }
   return {
     id: toolCall.id,
     name,
@@ -411,6 +640,7 @@ function makeRuntimeTool(toolCall) {
       ...(includeTitleArgument ? { title: toolCall.title } : {}),
       ...rawInput,
     },
+    ...(suppressProgress ? { suppressProgress } : {}),
     ...(summarizeToolContent(toolCall.content) ? { output: summarizeToolContent(toolCall.content) } : {}),
   };
 }

@@ -373,274 +373,6 @@ async function relayObservedWhatsAppMessage(sock, chatId, msg, options) {
 }
 
 /**
- * @param {RuntimeEventOutboundEvent} event
- * @returns {Record<string, unknown> | null}
- */
-function getRawAcpSessionUpdate(event) {
-  const raw = event.event.raw;
-  if (!isRecord(raw) || raw.source !== "acp.jsonrpc" || raw.method !== "session/update") {
-    return null;
-  }
-  const payload = isRecord(raw.payload) ? raw.payload : null;
-  const update = isRecord(payload?.update) ? payload.update : null;
-  if (update?.sessionUpdate !== "tool_call" && update?.sessionUpdate !== "tool_call_update") {
-    return null;
-  }
-  return update;
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {Record<string, unknown> | null}
- */
-function getRawAcpFirstLocation(update) {
-  const locations = Array.isArray(update.locations) ? update.locations : [];
-  for (const location of locations) {
-    if (isRecord(location) && typeof location.path === "string" && location.path.length > 0) {
-      return location;
-    }
-  }
-  return null;
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {string | null}
- */
-function getRawAcpFirstLocationPath(update) {
-  const location = getRawAcpFirstLocation(update);
-  return typeof location?.path === "string" ? location.path : null;
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {number | undefined}
- */
-function getRawAcpFirstLocationLine(update) {
-  const location = getRawAcpFirstLocation(update);
-  return typeof location?.line === "number" ? location.line : undefined;
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {Record<string, unknown> | null}
- */
-function getRawAcpInput(update) {
-  return isRecord(update.rawInput) ? update.rawInput : null;
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {string | null}
- */
-function getRawAcpReadPath(update) {
-  const locationPath = getRawAcpFirstLocationPath(update);
-  if (locationPath) {
-    return locationPath;
-  }
-  const rawInput = getRawAcpInput(update);
-  return typeof rawInput?.path === "string" && rawInput.path.length > 0 ? rawInput.path : null;
-}
-
-/**
- * @param {unknown} value
- * @returns {{ start: number, end: number } | null}
- */
-function normalizeLineRange(value) {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const { start, end } = value;
-  if (typeof start !== "number"
-    || typeof end !== "number"
-    || !Number.isInteger(start)
-    || !Number.isInteger(end)
-    || start <= 0
-    || end < start) {
-    return null;
-  }
-  return { start, end };
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {{ start: number, end: number } | null}
- */
-function getRawAcpCodexLineRange(update) {
-  const meta = isRecord(update._meta) ? update._meta : null;
-  const codex = isRecord(meta?.codex) ? meta.codex : null;
-  return normalizeLineRange(codex?.lineRange);
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {string | null}
- */
-function getRawAcpTitle(update) {
-  return typeof update.title === "string" && update.title.trim().length > 0
-    ? update.title.trim()
-    : null;
-}
-
-/**
- * @param {string | null} title
- * @returns {boolean}
- */
-function isRawAcpListFilesTitle(title) {
-  return title === "List files" || !!title?.startsWith("List files in ");
-}
-
-/**
- * @param {unknown} value
- * @returns {string | null}
- */
-function nonEmptyString(value) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-/**
- * @param {unknown} value
- * @returns {string | null}
- */
-function joinedStringList(value) {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const entries = value.map(nonEmptyString).filter((entry) => entry !== null);
-  return entries.length > 0 ? entries.join(", ") : null;
-}
-
-/**
- * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
- * @param {Record<string, unknown>} update
- * @returns {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"] | null}
- */
-function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
-  const rawInput = getRawAcpInput(update);
-  const action = isRecord(rawInput?.action) ? rawInput.action : null;
-  const actionType = nonEmptyString(action?.type);
-  if (!rawInput || !action || !actionType) {
-    return null;
-  }
-  switch (actionType) {
-    case "other":
-      return {
-        ...tool,
-        name: "web_action_pending",
-        arguments: { ...tool.arguments },
-      };
-    case "search": {
-      const query = nonEmptyString(action.query)
-        ?? joinedStringList(action.queries)
-        ?? nonEmptyString(rawInput.query);
-      return query
-        ? {
-          ...tool,
-          name: "web_search_action",
-          arguments: { ...tool.arguments, query },
-        }
-        : null;
-    }
-    case "openPage":
-    case "open_page": {
-      const refId = nonEmptyString(action.url);
-      return refId
-        ? {
-          ...tool,
-          name: "open",
-          arguments: { ...tool.arguments, ref_id: refId },
-        }
-        : null;
-    }
-    case "findInPage":
-    case "find_in_page": {
-      const pattern = nonEmptyString(action.pattern);
-      const refId = nonEmptyString(action.url);
-      return pattern && refId
-        ? {
-          ...tool,
-          name: "find",
-          arguments: { ...tool.arguments, pattern, ref_id: refId },
-        }
-        : null;
-    }
-    default:
-      return null;
-  }
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {boolean}
- */
-function hasRawAcpWebAction(update) {
-  return buildWhatsAppWebRuntimeToolFromRawAcp({
-    id: "",
-    name: "",
-    arguments: {},
-  }, update) !== null;
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {string | null}
- */
-function getRawAcpCommand(update) {
-  const rawInput = isRecord(update.rawInput) ? update.rawInput : null;
-  if (rawInput && typeof rawInput.command === "string" && rawInput.command.trim().length > 0) {
-    return rawInput.command.trim();
-  }
-  const title = getRawAcpTitle(update);
-  return title && title !== "Editing files" ? title : null;
-}
-
-/**
- * @param {Record<string, unknown>} update
- * @returns {string | null}
- */
-function getRawAcpFormattedOutput(update) {
-  const rawOutput = isRecord(update.rawOutput) ? update.rawOutput : null;
-  return typeof rawOutput?.formatted_output === "string" ? rawOutput.formatted_output : null;
-}
-
-/**
- * @param {string} output
- * @returns {{ start: number, end: number } | null}
- */
-function parseNumberedLineRange(output) {
-  /** @type {number | null} */
-  let start = null;
-  /** @type {number | null} */
-  let end = null;
-  for (const line of output.split("\n")) {
-    const match = line.match(/^\s*(\d+)(?:\t|→)/u);
-    if (!match) {
-      continue;
-    }
-    const lineNumber = Number(match[1]);
-    if (!Number.isInteger(lineNumber) || lineNumber <= 0) {
-      continue;
-    }
-    start ??= lineNumber;
-    end = lineNumber;
-  }
-  return start !== null && end !== null ? { start, end } : null;
-}
-
-/**
- * @param {RuntimeEventOutboundEvent} event
- * @returns {{ start: number, end: number } | null}
- */
-function getRawAcpReadOutputLineRange(event) {
-  const update = getRawAcpSessionUpdate(event);
-  if (!update || update.status !== "completed") {
-    return null;
-  }
-  const output = getRawAcpFormattedOutput(update);
-  return output ? parseNumberedLineRange(output) : null;
-}
-
-/**
  * @param {{ start: number, end: number }} range
  * @returns {string}
  */
@@ -674,79 +406,15 @@ function lineLimitToRange(line, limit) {
 }
 
 /**
- * WhatsApp owns raw ACP presentation. Use the protocol payload when it carries
- * richer display facts than the canonical runtime event.
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
- * @param {RuntimeEventOutboundEvent} event
- * @returns {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]}
+ * @returns {{ start: number, end: number } | null}
  */
-function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
-  const update = getRawAcpSessionUpdate(event);
-  if (!update) {
-    return tool;
-  }
-  if (update.kind === "read") {
-    const title = getRawAcpTitle(update);
-    if (isRawAcpListFilesTitle(title)) {
-      const listPath = getRawAcpFirstLocationPath(update);
-      if (listPath) {
-        return {
-          ...tool,
-          name: "List",
-          arguments: {
-            ...tool.arguments,
-            path: listPath,
-          },
-        };
-      }
-    }
-    const readPath = getRawAcpReadPath(update);
-    if (readPath) {
-      const rawInput = getRawAcpInput(update);
-      const codexLineRange = getRawAcpCodexLineRange(update);
-      const rawLine = typeof rawInput?.line === "number"
-        ? rawInput.line
-        : typeof rawInput?.offset === "number"
-          ? rawInput.offset
-          : undefined;
-      const line = codexLineRange?.start ?? getRawAcpFirstLocationLine(update) ?? rawLine;
-      const limit = codexLineRange
-        ? codexLineRange.end - codexLineRange.start + 1
-        : typeof rawInput?.limit === "number"
-          ? rawInput.limit
-          : undefined;
-      return {
-        ...tool,
-        name: "Read",
-        arguments: {
-          ...tool.arguments,
-          ...(typeof line === "number" ? { line } : {}),
-          ...(typeof limit === "number" ? { limit } : {}),
-          file_path: readPath,
-        },
-      };
-    }
-  }
-  if (update.kind === "search" || hasRawAcpWebAction(update)) {
-    const webTool = buildWhatsAppWebRuntimeToolFromRawAcp(tool, update);
-    if (webTool) {
-      return webTool;
-    }
-  }
-  if (update.kind === "execute") {
-    const command = getRawAcpCommand(update);
-    if (command) {
-      return {
-        ...tool,
-        name: "Shell",
-        arguments: {
-          ...tool.arguments,
-          command,
-        },
-      };
-    }
-  }
-  return tool;
+function getRuntimeToolReadLineRange(tool) {
+  const line = typeof tool.arguments.line === "number"
+    ? tool.arguments.line
+    : typeof tool.arguments.offset === "number" ? tool.arguments.offset : undefined;
+  const limit = typeof tool.arguments.limit === "number" ? tool.arguments.limit : undefined;
+  return lineLimitToRange(line, limit);
 }
 
 /**
@@ -2062,14 +1730,14 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   if (isNoopRuntimeTool(toolEvent.tool)) {
     return undefined;
   }
-  const displayTool = buildWhatsAppRuntimeToolFromRawAcp(toolEvent.tool, event);
+  const displayTool = toolEvent.tool;
 
   const status = toolEvent.type.split(".")[1];
   if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
     return undefined;
   }
   const summary = formatRuntimeToolSummary(displayTool, event.cwd);
-  const readRange = getRawAcpReadOutputLineRange(event);
+  const readRange = getRuntimeToolReadLineRange(displayTool);
   if (!summary) {
     return undefined;
   }
@@ -2679,7 +2347,7 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     if (!state || isNoopRuntimeTool(runtimeEvent.tool)) {
       return null;
     }
-    const displayTool = buildWhatsAppRuntimeToolFromRawAcp(runtimeEvent.tool, event);
+    const displayTool = runtimeEvent.tool;
     if (formatRuntimeToolSummary(displayTool, event.cwd)) {
       return null;
     }
@@ -2702,7 +2370,7 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     return {
       key,
       icon: getRuntimeToolIcon(status),
-      summary: appendReadLineRange(summaryBase, getRawAcpReadOutputLineRange(event)),
+      summary: appendReadLineRange(summaryBase, getRuntimeToolReadLineRange(displayTool)),
     };
   }
 

@@ -67,37 +67,14 @@ function shouldEmitAsRuntimeProgress(event) {
 }
 
 /**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
  * ACP terminal output deltas can arrive many times per second and may contain
- * very large chunks. They remain in raw logs, but chat only needs the started
- * and completed tool lifecycle.
+ * very large chunks. ACP normalization marks those tool events so chat only
+ * emits the started and completed lifecycle.
  * @param {HarnessRuntimeEvent} event
  * @returns {boolean}
  */
 function shouldSuppressChatRuntimeProgress(event) {
-  if (event.type !== "tool.updated" || event.raw?.source !== "acp.jsonrpc") {
-    return false;
-  }
-  const payload = event.raw.payload;
-  if (!isRecord(payload)) {
-    return false;
-  }
-  const update = payload.update;
-  if (!isRecord(update)) {
-    return false;
-  }
-  const meta = update._meta;
-  if (!isRecord(meta)) {
-    return false;
-  }
-  return isRecord(meta.terminal_output_delta);
+  return event.type === "tool.updated" && event.tool.suppressProgress === true;
 }
 
 /**

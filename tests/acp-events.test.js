@@ -3,6 +3,70 @@ import assert from "node:assert/strict";
 import { createAcpRuntimeModel, normalizeAcpSessionUpdate } from "../harnesses/acp-events.js";
 
 describe("ACP event normalization", () => {
+  it("normalizes ACP read display facts onto the canonical tool event", () => {
+    const events = normalizeAcpSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "read-real-shape-range",
+        title: "Read file",
+        kind: "read",
+        status: "in_progress",
+        rawInput: {
+          path: "/repo/src/app.js",
+          line: 10,
+          limit: 3,
+        },
+        locations: [{ path: "/repo/src/app.js" }],
+      },
+    });
+
+    assert.deepEqual(events.map((event) => event.type), ["tool.started"]);
+    assert.deepEqual(events[0]?.type === "tool.started" ? events[0].tool : null, {
+      id: "read-real-shape-range",
+      name: "Read",
+      arguments: {
+        file_path: "/repo/src/app.js",
+        line: 10,
+        limit: 3,
+      },
+    });
+  });
+
+  it("marks ACP terminal output delta tools for progress suppression", () => {
+    const model = createAcpRuntimeModel();
+    model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "terminal-1",
+        status: "in_progress",
+        kind: "execute",
+        rawInput: { command: "rg noisy logs" },
+      },
+    });
+    const events = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "terminal-1",
+        status: "in_progress",
+        kind: "execute",
+        rawInput: { command: "rg noisy logs" },
+        rawOutput: { formatted_output: "noisy log chunk" },
+        _meta: {
+          terminal_output_delta: {
+            data: "noisy log chunk",
+            terminal_id: "terminal-1",
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(events.map((event) => event.type), ["tool.updated"]);
+    assert.equal(events[0]?.type === "tool.updated" ? events[0].tool.suppressProgress : false, true);
+  });
+
   it("does not re-emit repeated in-progress tool snapshots as fresh starts", () => {
     const model = createAcpRuntimeModel();
     const first = model.acceptSessionUpdate({
