@@ -21,3 +21,6 @@
 - Final assistant output is part of the agent-run lifecycle and should be represented as a Run Event first. Generic content projection may exist only as a compatibility or delivery convenience, such as accumulated text for simple blocking HTTP clients.
 - Presentation has two semantically distinct input seams: Run Events for anything caused by an agent run, and App Messages for app-originated output not caused by an agent run. Raw provider data must not be a presentation input.
 - User-visible command output should be App Messages unless the command starts or participates in an agent run and emits Run Events.
+- Snapshot file changes detected as run reconciliation are Run Events. They are app-observed rather than provider-generated, but they are still caused by the agent run and belong behind the Run Event layer's normalization and deduplication policy.
+- Cancelling an active agent run should emit a Run Event for the run lifecycle change. A user-facing acknowledgement may be rendered from that Run Event rather than as a separate App Message; "nothing to cancel" remains an App Message.
+- Clearing conversation history is an App Message. Clearing, stopping, or replacing an active agent runtime session should additionally emit Run Events when there is run/session lifecycle behavior to show.
