@@ -195,7 +195,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.every((entry) => entry.event.kind === "runtime_event"), true);
   });
 
-  it("does not embed provider raw payloads in runtime outbound events", async () => {
+  it("emits canonical runtime outbound events without diagnostic payloads", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
 
     await hooks.onRuntimeEvent?.({
@@ -205,16 +205,6 @@ describe("buildAgentIoHooks", () => {
         id: "read-1",
         name: "Read",
         arguments: { file_path: "/repo/src/app.js" },
-      },
-      diagnosticRaw: {
-        source: "acp.jsonrpc",
-        method: "session/update",
-        payload: {
-          update: {
-            sessionUpdate: "tool_call",
-            rawInput: { path: "/repo/src/app.js" },
-          },
-        },
       },
     });
 
@@ -906,7 +896,6 @@ describe("buildAgentIoHooks", () => {
         source: /** @type {const} */ ("snapshot"),
         newText: `generated ${index}\n`,
       },
-      diagnosticRaw: { source: "workdir-snapshot" },
     }));
 
     for (const event of events) {
