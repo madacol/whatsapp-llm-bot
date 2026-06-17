@@ -10,12 +10,14 @@
 - **Run Event**: A canonical event describing agent-run activity, such as reasoning, assistant output, tool activity, command activity, file changes, snapshots, usage, plans, subagents, warnings, or run-scoped user-input/approval lifecycle. Run Events must not include raw provider payloads.
 - **App Message**: App-originated output that is not caused by an agent run, such as reminders, restart acknowledgements, setup replies, status replies, command errors, or plain system notifications.
 - **Raw provider payload**: Diagnostic material from ACP or another provider protocol. It is input to the Run Event layer and may be retained only in provider diagnostics or raw-event logs; it must not be part of canonical Run Events, App Messages, or Presentation inputs.
+- **Diagnostic side channel**: Provider troubleshooting records kept outside canonical app events, such as raw-event logs keyed by event, turn, item, request, or provider correlation IDs. Diagnostics may preserve raw provider payloads, but they must not define user-facing behavior.
 - **Presentation**: The layer that renders canonical app events for a concrete output surface. Presentation decides display policy, not provider payload meaning.
 - **Harness**: Legacy implementation vocabulary for agent runtime modules. Treat harness naming as architecture debt to migrate in slices. Prefer Agent Runtime, ACP adapter, or Run Event layer in new interfaces, docs, and touched modules.
 
 ## Architectural Constraints
 
 - Raw provider payloads must die inside the Run Event layer. If any downstream module needs a fact from ACP or another provider protocol, the Run Event layer must expose that fact through canonical Run Event fields.
+- Raw provider payload diagnostics must stay in a side channel keyed by canonical correlation IDs. Do not carry raw payloads through Run Events, App Messages, or Presentation just to make debugging convenient.
 - Harness vocabulary migration should break hard inside internal seams and keep compatibility only at external/config surfaces. Existing chat config, database fields, and environment/config inputs may translate legacy harness names at the edge; new docs, tests, and internal interfaces should use Agent Runtime, ACP adapter, or Run Event vocabulary.
 - Presentation should consume Run Events as the only agent-run progress input. Legacy agent-run outbound event kinds such as tool calls, tool activity, plans, usage, subagent messages, and file changes should collapse into canonical Run Event types; generic content and App Messages may remain separate presentation inputs.
 - Final assistant output is part of the agent-run lifecycle and should be represented as a Run Event first. Generic content projection may exist only as a compatibility or delivery convenience, such as accumulated text for simple blocking HTTP clients.
