@@ -11,7 +11,7 @@
 - **Raw provider payload**: Diagnostic material from ACP or another provider protocol. It may be retained for troubleshooting at the runtime/diagnostic layer, but presentation should not branch on raw provider payloads for user-facing rendering.
 - **Presentation**: The layer that renders canonical app events for a concrete output surface. Presentation decides display policy, not provider payload meaning.
 - **Non-run notification**: App-originated output such as reminders or restart acknowledgements. These may enter presentation, but they are not part of the agent-run pipeline or the Run Event layer.
-- **Harness**: Legacy implementation vocabulary for agent runtime modules. Prefer Agent Runtime, ACP adapter, or Run Event layer in new architecture language.
+- **Harness**: Legacy implementation vocabulary for agent runtime modules. Treat harness naming as architecture debt to migrate in slices. Prefer Agent Runtime, ACP adapter, or Run Event layer in new interfaces, docs, and touched modules.
 
 ## Architectural Constraints
 
