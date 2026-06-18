@@ -90,7 +90,7 @@ async function postTurn(transport, payload, query = "") {
 }
 
 describe("http-api transport", () => {
-  it("accepts a JSON text turn through the transport API and emits raw outbound events", async () => {
+  it("accepts a JSON text turn through the transport API and emits semantic outbound events", async () => {
     const transport = await createHttpApiTransport({
       port: 0,
       host: "127.0.0.1",
@@ -102,8 +102,7 @@ describe("http-api transport", () => {
     await transport.start(async (turn) => {
       turns.push(turn);
       await turn.io.reply({
-        kind: "content",
-        source: "llm",
+        kind: "assistant_output",
         content: "Done.",
       });
     });
@@ -137,10 +136,9 @@ describe("http-api transport", () => {
       eventId: "1",
       turnId: accepted.turnId,
       chatId: "api:client-1",
-      kind: "content",
+      kind: "assistant_output",
       event: {
-        kind: "content",
-        source: "llm",
+        kind: "assistant_output",
         content: "Done.",
       },
     });
@@ -189,8 +187,7 @@ describe("http-api transport", () => {
       handlerStarted = true;
       await handlerReleased;
       await turn.io.reply({
-        kind: "content",
-        source: "llm",
+        kind: "assistant_output",
         content: "Async done.",
       });
       handlerCompleted = true;
@@ -223,8 +220,7 @@ describe("http-api transport", () => {
     transports.push(transport);
     await transport.start(async (turn) => {
       await turn.io.reply({
-        kind: "content",
-        source: "llm",
+        kind: "assistant_output",
         content: [{ type: "text", text: "Light is on." }],
       });
     });

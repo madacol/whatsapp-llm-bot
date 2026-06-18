@@ -29,12 +29,33 @@ describe("HTTP API transport turn ledger", () => {
 
     ledger.setActiveTurn(payload.chatId, first.record.turnId);
     ledger.appendEvent(payload.chatId, {
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: [{ type: "text", text: "Done." }],
     }, ledger.getActiveTurnId(payload.chatId));
 
     assert.equal(first.record.text, "Done.");
     assert.deepEqual(ledger.listEvents(payload.chatId, 0).map((event) => event.eventId), ["1"]);
+  });
+
+  it("keeps legacy llm content text accumulation as transport compatibility", () => {
+    const ledger = createHttpTransportTurnLedger({
+      createTurnId: () => "turn-1",
+      now: () => "2026-06-16T00:00:00.000Z",
+      maxEvents: 10,
+    });
+    const payload = {
+      requestId: "request-1",
+      chatId: "api:client-1",
+    };
+
+    const turn = ledger.createOrGetTurn("voice", payload);
+    ledger.setActiveTurn(payload.chatId, turn.record.turnId);
+    ledger.appendEvent(payload.chatId, {
+      kind: "content",
+      source: "llm",
+      content: [{ type: "text", text: "Legacy done." }],
+    }, ledger.getActiveTurnId(payload.chatId));
+
+    assert.equal(turn.record.text, "Legacy done.");
   });
 });
