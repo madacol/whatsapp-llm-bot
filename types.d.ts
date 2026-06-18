@@ -246,6 +246,10 @@ type ToolFlowState = {
   steps: ToolFlowStep[];
 };
 
+/**
+ * @deprecated legacy compatibility ContentEvent for transport/render/queue adapters only.
+ * Producer output ports should emit semantic OutboundEvent variants instead.
+ */
 type ContentEvent = {
   kind: "content";
   source: MessageSource;

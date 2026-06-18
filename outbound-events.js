@@ -1,8 +1,11 @@
 /**
- * Helpers for constructing semantic outbound adapter events.
+ * Helpers for constructing outbound adapter events.
  */
 
 /**
+ * Legacy compatibility helper for transport/render/queue adapters.
+ *
+ * @deprecated Use semantic output-port methods or semantic event constructors for new producers.
  * @param {MessageSource} source
  * @param {SendContent} content
  * @param {{ cwd?: string | null, replyToTriggeringMessage?: boolean, stream?: ContentEvent["stream"] }} [options]

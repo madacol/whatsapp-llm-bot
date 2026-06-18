@@ -4,19 +4,14 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../../logger.js";
-import { parseToolArgs } from "../../agent-io-defaults.js";
 import { getDefaultRuntimeDiagnosticsState } from "../../diagnostics-config.js";
 import { renderBlocks } from "../../message-renderer.js";
-import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presenter.js";
 import { buildToolPresentation, shortenPath } from "../tool-presentation-model.js";
-import { formatUsageEventText } from "../../usage-formatting.js";
 import { makeImageMessage, makeTextMessage } from "../message-payloads.js";
 import {
   formatToolPresentationInspect,
   formatToolPresentationSummary,
-  renderToolActivityContent,
-  renderToolPresentationContent,
 } from "../tool-presenter.js";
 import { sendImageHD } from "../../whatsapp-hd-media.js";
 import {
@@ -26,9 +21,16 @@ import {
   splitSnapshotDiffText,
 } from "./file-change-content.js";
 import {
+  buildToolPresentationFromToolCallEvent,
+  renderLegacyContentEvent,
   renderAgentToolResultEvent,
   renderAppMessageEvent,
   renderAssistantOutputEvent,
+  renderPlanEvent,
+  renderSubagentMessageEvent,
+  renderToolActivityEvent,
+  renderToolCallEvent,
+  renderUsageEvent,
 } from "./event-rendering.js";
 export { renderFileChangeContent } from "./file-change-content.js";
 
@@ -712,18 +714,6 @@ async function unpinWhatsAppMessage(sock, chatId, key, observer) {
 }
 
 /**
- * @param {SubagentMessageEvent} event
- * @returns {SendContent}
- */
-function renderSubagentMessageContent(event) {
-  const title = event.agentNickname
-    ? `**Sub-agent ${event.agentNickname}**`
-    : "**Sub-agent**";
-  const detail = event.agentRole ? `_${event.agentRole}_` : "";
-  return [{ type: "markdown", text: [`🧩 ${title}`, detail, event.text].filter(Boolean).join("\n") }];
-}
-
-/**
  * @param {unknown} value
  * @returns {string}
  */
@@ -1376,32 +1366,6 @@ function formatCompactToolActivitySummary(activity, cwd) {
     default:
       return formatCompactEntry(activity.toolCall.name);
   }
-}
-
-/**
- * @param {ToolCallEvent} event
- * @returns {ToolPresentation | null}
- */
-function buildToolPresentationFromToolCallEvent(event) {
-  const args = parseToolArgs(event.toolCall.arguments);
-  const formatToolCall = typeof event.displaySummary === "string"
-    ? () => event.displaySummary ?? ""
-    : undefined;
-  return buildToolPresentation(
-    event.toolCall.name,
-    args,
-    formatToolCall,
-    event.cwd ?? null,
-    event.context,
-  );
-}
-
-/**
- * @param {import("../tool-presentation-model.js").ToolActivitySummary} activity
- * @returns {boolean}
- */
-function shouldSuppressToolActivity(activity) {
-  return activity.title === "stdin" && activity.lines.length === 0;
 }
 
 /**
@@ -2764,41 +2728,25 @@ function formatInspectEditText(summary, text) {
 function renderOutboundEvent(event) {
   switch (event.kind) {
     case "content":
-      return {
-        source: event.source,
-        content: event.content,
-        ...(event.cwd !== undefined && { cwd: event.cwd }),
-      };
+      return renderLegacyContentEvent(event);
     case "app_message":
       return renderAppMessageEvent(event);
     case "assistant_output":
       return renderAssistantOutputEvent(event);
     case "agent_tool_result":
       return renderAgentToolResultEvent(event);
-    case "tool_call": {
-      const presentation = buildToolPresentationFromToolCallEvent(event);
-      return presentation
-        ? { source: "tool-call", content: renderToolPresentationContent(presentation) }
-        : null;
-    }
+    case "tool_call":
+      return renderToolCallEvent(event);
     case "tool_activity":
-      return shouldSuppressToolActivity(event.activity)
-        ? null
-        : { source: "tool-call", content: renderToolActivityContent(event.activity) };
+      return renderToolActivityEvent(event);
     case "plan":
-      return { source: "llm", content: [{ type: "markdown", text: formatPlanPresentationText(event.presentation) }] };
+      return renderPlanEvent(event);
     case "file_change":
       return { source: "tool-call", content: renderFileChangeContent(event) };
     case "usage":
-      return {
-        source: "usage",
-        content: formatUsageEventText(event),
-      };
+      return renderUsageEvent(event);
     case "subagent_message":
-      return {
-        source: "plain",
-        content: renderSubagentMessageContent(event),
-      };
+      return renderSubagentMessageEvent(event);
     default:
       return null;
   }

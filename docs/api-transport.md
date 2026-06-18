@@ -68,7 +68,7 @@ For the simplest text-to-text client, use:
 POST /api/transports/:transportId/turns?wait=true
 ```
 
-The transport waits for the bot turn handler to finish and returns accumulated assistant text from `source: "llm"` content events:
+The transport waits for the bot turn handler to finish and returns accumulated assistant text from semantic `assistant_output` events. Legacy `source: "llm"` content events are still accepted by compatibility infrastructure.
 
 ```json
 {
@@ -153,7 +153,7 @@ Implemented:
 - `requestId` idempotency;
 - blocking text responses through `wait=true`;
 - turn status lookup;
-- raw outbound event polling and SSE streaming.
+- semantic outbound event polling and SSE streaming.
 
 Deferred:
 
