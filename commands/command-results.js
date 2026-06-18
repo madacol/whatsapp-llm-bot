@@ -1,4 +1,4 @@
-import { contentEvent } from "../outbound-events.js";
+import { createAppOutputPort } from "../app-output-port.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { isHtmlContent } from "../utils.js";
 
@@ -12,17 +12,18 @@ import { isHtmlContent } from "../utils.js";
  * @returns {Promise<void>}
  */
 export async function replyCommandResult({ chatId, context, result, afterResponse }) {
+  const appOutput = createAppOutputPort(context);
   /** @type {MessageHandle | undefined} */
   let responseHandle;
   if (isHtmlContent(result)) {
     const linkText = await storeAndLinkHtml(chatId, result);
-    responseHandle = await context.reply(contentEvent("tool-result", linkText));
+    responseHandle = await appOutput.replyWithToolResult(linkText);
   } else if (typeof result === "string") {
-    responseHandle = await context.reply(contentEvent("tool-result", result));
+    responseHandle = await appOutput.replyWithToolResult(result);
   } else if (Array.isArray(result)) {
-    responseHandle = await context.reply(contentEvent("tool-result", /** @type {ToolContentBlock[]} */ (result)));
+    responseHandle = await appOutput.replyWithToolResult(/** @type {ToolContentBlock[]} */ (result));
   } else {
-    responseHandle = await context.reply(contentEvent("tool-result", JSON.stringify(result, null, 2)));
+    responseHandle = await appOutput.replyWithToolResult(JSON.stringify(result, null, 2));
   }
   await afterResponse?.({ handle: responseHandle });
 }
@@ -33,5 +34,5 @@ export async function replyCommandResult({ chatId, context, result, afterRespons
  * @returns {Promise<void>}
  */
 export async function replyCommandError(context, message) {
-  await context.reply(contentEvent("error", message));
+  await createAppOutputPort(context).replyWithError(message);
 }

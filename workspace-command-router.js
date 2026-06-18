@@ -1,5 +1,5 @@
 import { formatCancelCommand } from "./chat-commands.js";
-import { contentEvent } from "./outbound-events.js";
+import { createAppOutputPort } from "./app-output-port.js";
 
 /**
  * @typedef {{
@@ -83,7 +83,7 @@ function isWorkspaceOnlyCommand(loweredCommandText) {
  * @returns {Promise<void>}
  */
 async function replyToolResult(context, message) {
-  await context.reply(contentEvent("tool-result", message));
+  await createAppOutputPort(context).replyWithToolResult(message);
 }
 
 /**
@@ -92,7 +92,7 @@ async function replyToolResult(context, message) {
  * @returns {Promise<void>}
  */
 async function replyError(context, message) {
-  await context.reply(contentEvent("error", message));
+  await createAppOutputPort(context).replyWithError(message);
 }
 
 /**

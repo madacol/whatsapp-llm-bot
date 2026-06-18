@@ -1,4 +1,4 @@
-import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
+import { getHarnessRuntimeDiagnosticRaw, normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 
 /**
  * Semantic harness adapter contract and runtime event stream helpers.
@@ -52,7 +52,7 @@ import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 
 /**
  * @param {string} provider
- * @param {Partial<import("./harness-runtime-events.js").HarnessRuntimeEventEnvelope>} [defaults]
+ * @param {Partial<import("./harness-runtime-events.js").HarnessRuntimeEventEnvelope> & import("./harness-runtime-events.js").HarnessRuntimeDiagnosticInput} [defaults]
  * @returns {{
  *   emit: (event: { type: string, provider?: string } & Record<string, unknown>) => void,
  *   subscribe: (handler: (event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void,
@@ -68,8 +68,13 @@ export function createHarnessEventStreamController(provider, defaults = {}) {
         ...event,
         provider: event.provider ?? provider,
       }, defaults);
+      const diagnosticRaw = getHarnessRuntimeDiagnosticRaw(
+        /** @type {import("./harness-runtime-events.js").HarnessRuntimeDiagnosticInput} */ (event),
+        defaults,
+      );
+      const streamEvent = diagnosticRaw ? { ...normalized, diagnosticRaw } : normalized;
       for (const listener of listeners) {
-        void listener(normalized);
+        void listener(streamEvent);
       }
     },
     subscribe(handler) {

@@ -2,7 +2,7 @@ import { CANCEL_COMMAND, CHAT_SETTINGS_COMMAND } from "../chat-commands.js";
 import { parseCommandArgs } from "../message-formatting.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { errorToString } from "../utils.js";
-import { contentEvent } from "../outbound-events.js";
+import { createAppOutputPort } from "../app-output-port.js";
 import { runChatSettingsCommand, CHAT_SETTINGS_COMMAND_PARAMETERS } from "./chat-settings-command.js";
 import { runSetupCommand } from "./setup-command.js";
 import { createRestartCommandHandler, RESTART_COMMAND_PARAMETERS } from "./restart-command.js";
@@ -75,6 +75,7 @@ export function createBangCommandRouter({
     context,
     resolvedBinding,
   }) {
+    const appOutput = createAppOutputPort(context);
     const inputText = firstBlock.text.slice(1).trim();
     const { name, argsText, lowered } = parseBangCommandText(inputText);
 
@@ -94,9 +95,9 @@ export function createBangCommandRouter({
 
     if (lowered === CANCEL_COMMAND) {
       if (await cancelActiveRun(chatId, chatInfo)) {
-        await context.reply(contentEvent("tool-result", "Cancelled."));
+        await appOutput.replyWithToolResult("Cancelled.");
       } else {
-        await context.reply(contentEvent("tool-result", "Nothing to cancel."));
+        await appOutput.replyWithToolResult("Nothing to cancel.");
       }
       return;
     }

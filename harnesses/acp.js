@@ -14,7 +14,7 @@ import {
 import { buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
 import { formatCodexStatusForReply, readCodexCliStatus } from "./codex-cli-status.js";
 import { updateActiveHarnessConfig, getActiveHarnessConfig } from "../harness-config.js";
-import { contentEvent } from "../outbound-events.js";
+import { createAppOutputPort } from "../app-output-port.js";
 import { handleSessionControlCommand } from "../session-control-commands.js";
 import { createLogger } from "../logger.js";
 
@@ -825,6 +825,7 @@ async function persistAcpCommandConfigValue(params) {
  */
 function createGenericAcpCommandHandler(options) {
   return async (input) => {
+    const appOutput = createAppOutputPort(input.context);
     const handledSessionCommand = await handleSessionControlCommand({
       command: input.command,
       chatId: input.chatId,
@@ -840,10 +841,10 @@ function createGenericAcpCommandHandler(options) {
     if (/^status$/i.test(trimmed) && options.sessionKind === "codex" && options.readCodexStatus) {
       try {
         const status = await options.readCodexStatus();
-        await input.context.reply(contentEvent("tool-result", formatCodexStatusForReply(status)));
+        await appOutput.replyWithToolResult(formatCodexStatusForReply(status));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await input.context.reply(contentEvent("tool-result", `Codex status failed: ${message}`));
+        await appOutput.replyWithToolResult(`Codex status failed: ${message}`);
       }
       return true;
     }
@@ -852,7 +853,7 @@ function createGenericAcpCommandHandler(options) {
       const currentSessionId = input.chatInfo?.harness_session_id ?? null;
       const currentKind = input.chatInfo?.harness_session_kind ?? options.sessionKind;
       if (!currentSessionId || !input.sessionForkControl) {
-        await input.context.reply(contentEvent("tool-result", `Can't fork yet. Start a ${options.label} ACP session first.`));
+        await appOutput.replyWithToolResult(`Can't fork yet. Start a ${options.label} ACP session first.`);
         return true;
       }
       try {
@@ -866,27 +867,27 @@ function createGenericAcpCommandHandler(options) {
           label: `${options.label} ACP session`,
         });
         await input.sessionForkControl.save(input.chatId, { id: forkedSessionId, kind: currentKind });
-        await input.context.reply(contentEvent("tool-result", `Forked ${options.label} ACP session. You are now in a side thread. Use \`/back\` to return.`));
+        await appOutput.replyWithToolResult(`Forked ${options.label} ACP session. You are now in a side thread. Use \`/back\` to return.`);
         return true;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await input.context.reply(contentEvent("tool-result", `${options.label} ACP fork failed: ${message}`));
+        await appOutput.replyWithToolResult(`${options.label} ACP fork failed: ${message}`);
         return true;
       }
     }
 
     if (/^back$/i.test(trimmed)) {
       if (!input.sessionForkControl) {
-        await input.context.reply(contentEvent("tool-result", "No parent fork to return to."));
+        await appOutput.replyWithToolResult("No parent fork to return to.");
         return true;
       }
       const parent = await input.sessionForkControl.pop(input.chatId);
       if (!parent) {
-        await input.context.reply(contentEvent("tool-result", "No parent fork to return to."));
+        await appOutput.replyWithToolResult("No parent fork to return to.");
         return true;
       }
       await input.sessionForkControl.save(input.chatId, { id: parent.id, kind: parent.kind });
-      await input.context.reply(contentEvent("tool-result", `Returned to previous ${options.label} ACP session${parent.label ? `: ${parent.label}` : ""}.`));
+      await appOutput.replyWithToolResult(`Returned to previous ${options.label} ACP session${parent.label ? `: ${parent.label}` : ""}.`);
       return true;
     }
 
@@ -895,25 +896,25 @@ function createGenericAcpCommandHandler(options) {
       const currentSessionId = input.chatInfo?.harness_session_id ?? null;
       const configOptions = await loadAcpCommandConfigOptions(currentSessionId, options.commandSpec);
       if (configOptions.length === 0) {
-        await input.context.reply(contentEvent("tool-result", `${options.label} did not expose ACP config options for this session.`));
+        await appOutput.replyWithToolResult(`${options.label} did not expose ACP config options for this session.`);
         return true;
       }
       const configId = configMatch[1]?.trim() ?? null;
       const rawValue = configMatch[2]?.trim() ?? null;
       if (!configId) {
-        await input.context.reply(contentEvent("tool-result", `${options.label} config:\n${configOptions.map(formatConfigOption).join("\n")}`));
+        await appOutput.replyWithToolResult(`${options.label} config:\n${configOptions.map(formatConfigOption).join("\n")}`);
         return true;
       }
       const option = configOptions.find((candidate) => candidate.id === configId);
       if (!option || typeof option.id !== "string") {
-        await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} config option: \`${configId}\``));
+        await appOutput.replyWithToolResult(`Unknown ${options.label} config option: \`${configId}\``);
         return true;
       }
       let value = rawValue ? resolveCommandConfigValue(option, rawValue) : null;
       if (value === null) {
         const values = configOptionValues(option);
         if (values.length === 0) {
-          await input.context.reply(contentEvent("tool-result", `Config option \`${configId}\` cannot be set interactively.`));
+          await appOutput.replyWithToolResult(`Config option \`${configId}\` cannot be set interactively.`);
           return true;
         }
         const selected = await input.context.select(`Choose ${option.name ?? configId}`, values, {
@@ -923,7 +924,7 @@ function createGenericAcpCommandHandler(options) {
         value = resolveCommandConfigValue(option, selected);
       }
       if (value === null) {
-        await input.context.reply(contentEvent("tool-result", `Unknown value for \`${configId}\`.`));
+        await appOutput.replyWithToolResult(`Unknown value for \`${configId}\`.`);
         return true;
       }
       const updatedOptions = await persistAcpCommandConfigValue({
@@ -934,7 +935,7 @@ function createGenericAcpCommandHandler(options) {
         currentSessionId,
       });
       const updated = updatedOptions.find((candidate) => candidate.id === option.id) ?? { ...option, currentValue: value };
-      await input.context.reply(contentEvent("tool-result", `${options.label} config updated:\n${formatConfigOption(updated)}`));
+      await appOutput.replyWithToolResult(`${options.label} config updated:\n${formatConfigOption(updated)}`);
       return true;
     }
 
@@ -944,17 +945,17 @@ function createGenericAcpCommandHandler(options) {
       if (!arg) {
         const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
         const mode = typeof config.mode === "string" ? config.mode : "default";
-        await input.context.reply(contentEvent("tool-result", `${options.label} mode: \`${mode}\``));
+        await appOutput.replyWithToolResult(`${options.label} mode: \`${mode}\``);
         return true;
       }
       const lowered = arg.toLowerCase();
       if (lowered === "off" || lowered === "default" || lowered === "none") {
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { mode: null });
-        await input.context.reply(contentEvent("tool-result", `${options.label} mode reset to default.`));
+        await appOutput.replyWithToolResult(`${options.label} mode reset to default.`);
         return true;
       }
       await updateActiveHarnessConfig(input.chatId, options.harnessName, { mode: arg });
-      await input.context.reply(contentEvent("tool-result", `${options.label} mode set to \`${arg}\``));
+      await appOutput.replyWithToolResult(`${options.label} mode set to \`${arg}\``);
       return true;
     }
 
@@ -1079,7 +1080,7 @@ function createGenericAcpCommandHandler(options) {
         if (fastModeOption && typeof fastModeOption.id === "string" && updatedConfigValues[fastModeOption.id] !== undefined) {
           replyOptions.push(`${fastModeOption.name ?? "Fast mode"}: \`${String(updatedConfigValues[fastModeOption.id])}\``);
         }
-        await input.context.reply(contentEvent("tool-result", replyOptions.join("\n")));
+        await appOutput.replyWithToolResult(replyOptions.join("\n"));
         return true;
       }
       const fastMatch = arg.match(/^fast(?:\s+(.+))?$/i);
@@ -1104,7 +1105,7 @@ function createGenericAcpCommandHandler(options) {
           value,
           currentSessionId,
         });
-        await input.context.reply(contentEvent("tool-result", `${fastModeOption.name ?? "Fast mode"} set to \`${String(value)}\``));
+        await appOutput.replyWithToolResult(`${fastModeOption.name ?? "Fast mode"} set to \`${String(value)}\``);
         return true;
       }
       const effortMatch = arg.match(/^effort\s+(.+)$/i);
@@ -1112,11 +1113,11 @@ function createGenericAcpCommandHandler(options) {
         const effort = effortMatch[1].trim().toLowerCase();
         if (effort === "off" || effort === "default" || effort === "none") {
           await updateActiveHarnessConfig(input.chatId, options.harnessName, { reasoningEffort: null });
-          await input.context.reply(contentEvent("tool-result", `${options.label} effort reset to default.`));
+          await appOutput.replyWithToolResult(`${options.label} effort reset to default.`);
           return true;
         }
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { reasoningEffort: effort });
-        await input.context.reply(contentEvent("tool-result", `${options.label} effort set to \`${effort}\``));
+        await appOutput.replyWithToolResult(`${options.label} effort set to \`${effort}\``);
         return true;
       }
       const modelReset = arg.toLowerCase();
@@ -1131,13 +1132,13 @@ function createGenericAcpCommandHandler(options) {
           });
         }
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: null });
-        await input.context.reply(contentEvent("tool-result", `${options.label} model reset to default.`));
+        await appOutput.replyWithToolResult(`${options.label} model reset to default.`);
         return true;
       }
       if (modelOption && typeof modelOption.id === "string") {
         const value = resolveCommandConfigValue(modelOption, arg);
         if (value === null) {
-          await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} model \`${arg}\`.`));
+          await appOutput.replyWithToolResult(`Unknown ${options.label} model \`${arg}\`.`);
           return true;
         }
         await persistAcpCommandConfigValue({
@@ -1148,11 +1149,11 @@ function createGenericAcpCommandHandler(options) {
           currentSessionId,
         });
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: String(value) });
-        await input.context.reply(contentEvent("tool-result", `${options.label} model set to \`${value}\``));
+        await appOutput.replyWithToolResult(`${options.label} model set to \`${value}\``);
         return true;
       }
       await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: arg });
-      await input.context.reply(contentEvent("tool-result", `${options.label} model set to \`${arg}\``));
+      await appOutput.replyWithToolResult(`${options.label} model set to \`${arg}\``);
       return true;
     }
 
@@ -1162,18 +1163,18 @@ function createGenericAcpCommandHandler(options) {
       if (arg) {
         if (arg === "off" || arg === "default" || arg === "none") {
           await updateActiveHarnessConfig(input.chatId, options.harnessName, { sandboxMode: null });
-          await input.context.reply(contentEvent("tool-result", `${options.label} permissions reset to default.`));
+          await appOutput.replyWithToolResult(`${options.label} permissions reset to default.`);
           return true;
         }
         const normalized = arg === "write" || arg === "workspace" ? "workspace-write"
           : arg === "readonly" || arg === "read" ? "read-only"
             : arg === "full" || arg === "full-access" ? "danger-full-access" : arg;
         if (!["read-only", "workspace-write", "danger-full-access"].includes(normalized)) {
-          await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} permissions mode \`${arg}\`. Use: read-only, workspace-write, danger-full-access.`));
+          await appOutput.replyWithToolResult(`Unknown ${options.label} permissions mode \`${arg}\`. Use: read-only, workspace-write, danger-full-access.`);
           return true;
         }
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { sandboxMode: normalized });
-        await input.context.reply(contentEvent("tool-result", `${options.label} permissions set to \`${normalized}\``));
+        await appOutput.replyWithToolResult(`${options.label} permissions set to \`${normalized}\``);
         return true;
       }
       const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
@@ -1190,7 +1191,7 @@ function createGenericAcpCommandHandler(options) {
         });
       }
       const updated = await getActiveHarnessConfig(input.chatId, options.harnessName);
-      await input.context.reply(contentEvent("tool-result", `${options.label} permissions: \`${typeof updated.sandboxMode === "string" ? updated.sandboxMode : "default"}\``));
+      await appOutput.replyWithToolResult(`${options.label} permissions: \`${typeof updated.sandboxMode === "string" ? updated.sandboxMode : "default"}\``);
       return true;
     }
 
@@ -1200,15 +1201,15 @@ function createGenericAcpCommandHandler(options) {
       if (arg) {
         if (arg === "off" || arg === "default" || arg === "none") {
           await updateActiveHarnessConfig(input.chatId, options.harnessName, { approvalPolicy: null });
-          await input.context.reply(contentEvent("tool-result", `${options.label} approval policy reset to default.`));
+          await appOutput.replyWithToolResult(`${options.label} approval policy reset to default.`);
           return true;
         }
         if (!["untrusted", "on-failure", "on-request", "never"].includes(arg)) {
-          await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} approval policy \`${arg}\`. Use: untrusted, on-failure, on-request, never.`));
+          await appOutput.replyWithToolResult(`Unknown ${options.label} approval policy \`${arg}\`. Use: untrusted, on-failure, on-request, never.`);
           return true;
         }
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { approvalPolicy: arg });
-        await input.context.reply(contentEvent("tool-result", `${options.label} approval policy set to \`${arg}\``));
+        await appOutput.replyWithToolResult(`${options.label} approval policy set to \`${arg}\``);
         return true;
       }
       const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
@@ -1226,7 +1227,7 @@ function createGenericAcpCommandHandler(options) {
         });
       }
       const updated = await getActiveHarnessConfig(input.chatId, options.harnessName);
-      await input.context.reply(contentEvent("tool-result", `${options.label} approval policy: \`${typeof updated.approvalPolicy === "string" ? updated.approvalPolicy : "default"}\``));
+      await appOutput.replyWithToolResult(`${options.label} approval policy: \`${typeof updated.approvalPolicy === "string" ? updated.approvalPolicy : "default"}\``);
       return true;
     }
 

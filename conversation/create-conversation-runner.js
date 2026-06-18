@@ -8,7 +8,8 @@ import {
   getHarnessSessionDirectory,
 } from "#harnesses";
 import { getHarnessInstanceConfig } from "../harness-config.js";
-import { contentEvent } from "../outbound-events.js";
+import { createAgentRunOutputPort } from "../agent-run-output-port.js";
+import { createAppOutputPort } from "../app-output-port.js";
 import { shouldRespond } from "../message-formatting.js";
 import { createMessageActionContext } from "../execute-action-context.js";
 import { errorToString } from "../utils.js";
@@ -171,6 +172,7 @@ function formatAudioTranscriptionInspectText(transcriptions) {
  * }}
  */
 function createAudioTranscriptionStatusObserver(context) {
+  const appOutput = createAppOutputPort(context);
   /** @type {Promise<MessageHandle | undefined> | null} */
   let handlePromise = null;
   /** @type {string[]} */
@@ -181,9 +183,9 @@ function createAudioTranscriptionStatusObserver(context) {
    */
   async function ensureHandle() {
     if (!handlePromise) {
-      handlePromise = context.reply(contentEvent("plain", "Transcribing audio...", {
+      handlePromise = appOutput.replyWithPlain("Transcribing audio...", {
         replyToTriggeringMessage: true,
-      }));
+      });
     }
     return handlePromise;
   }
@@ -834,6 +836,7 @@ export function createConversationRunner({
     resolvedBinding,
     audioTranscriptionObserver = createAudioTranscriptionStatusObserver(context),
   }) {
+    const appOutput = createAppOutputPort(context);
     const { chatId, senderIds, content } = turn;
     const message = buildUserMessage(turn);
     await addMessage(chatId, message, senderIds);
@@ -845,10 +848,7 @@ export function createConversationRunner({
     });
 
     if (!harness) {
-      await context.reply(contentEvent(
-        "error",
-        "No ACP harness is selected for this chat and the central default is disabled. Set one with `!s harness codex`.",
-      ));
+      await appOutput.replyWithError("No ACP harness is selected for this chat and the central default is disabled. Set one with `!s harness codex`.");
       return null;
     }
 
@@ -917,6 +917,7 @@ export function createConversationRunner({
     audioTranscriptionObserver,
   }) {
     const { chatId } = turn;
+    const agentOutput = createAgentRunOutputPort(context);
     /** @type {ChatTurn | null} */
     let nextTurn = null;
     try {
@@ -936,7 +937,7 @@ export function createConversationRunner({
         if (!deliveredContentSignatures.has(responseSignature)) {
           const undeliveredResponse = filterUndeliveredContentBlocks(result.response, deliveredContentSignatures);
           if (undeliveredResponse.length > 0) {
-            await context.reply(contentEvent("llm", undeliveredResponse));
+            await agentOutput.replyWithAssistantOutput(undeliveredResponse);
           }
         }
       }
@@ -950,7 +951,7 @@ export function createConversationRunner({
       log.error("handleLlmMessage failed:", error);
       const errorMessage = errorToString(error);
       try {
-        await context.reply(contentEvent("error", errorMessage));
+        await agentOutput.replyWithError(errorMessage);
       } catch {
         // best effort
       }
@@ -980,6 +981,7 @@ export function createConversationRunner({
 
     const chatInfo = await getChat(chatId);
     const context = createMessageActionContext(turn);
+    const appOutput = createAppOutputPort(context);
     const resolvedBinding = await workspaceBinding.resolveChatBinding(
       chatId,
       chatInfo?.harness_cwd,
@@ -1009,10 +1011,7 @@ export function createConversationRunner({
     });
 
     if (route.type === "archived-workspace-error") {
-      await context.reply(contentEvent(
-        "error",
-        "This workspace is archived and no longer accepts work.",
-      ));
+      await appOutput.replyWithError("This workspace is archived and no longer accepts work.");
       return null;
     }
 
@@ -1086,10 +1085,7 @@ export function createConversationRunner({
         const message = buildUserMessage(turn);
         await addMessage(chatId, message, senderIds);
         if (!harness) {
-          await context.reply(contentEvent(
-            "error",
-            "No ACP harness is selected for this chat and the central default is disabled. Set one with `!s harness codex`.",
-          ));
+          await appOutput.replyWithError("No ACP harness is selected for this chat and the central default is disabled. Set one with `!s harness codex`.");
           runCoordinator.finishRun(chatId);
           return null;
         }
@@ -1114,7 +1110,7 @@ export function createConversationRunner({
     }
 
     if (route.type === "disabled-slash-command") {
-      await context.reply(contentEvent("error", `Bot is not enabled in this chat. Use ${formatChatSettingsCommand("enabled on")}`));
+      await appOutput.replyWithError(`Bot is not enabled in this chat. Use ${formatChatSettingsCommand("enabled on")}`);
       return null;
     }
 
@@ -1129,7 +1125,7 @@ export function createConversationRunner({
       if (slashCommand === "diff" || slashCommand.startsWith("diff ")) {
         const slashWorkdir = buildRunConfig(chatId, chatInfo, turn.chatName, harnessSelection.harnessName, resolvedBinding).workdir;
         if (!slashWorkdir) {
-          await context.reply(contentEvent("error", "Could not resolve a workdir for `/diff`."));
+          await appOutput.replyWithError("Could not resolve a workdir for `/diff`.");
           return null;
         }
         const handledSlashDiff = await handleSlashDiffCommand({
@@ -1164,10 +1160,10 @@ export function createConversationRunner({
         await sessionBinding.clearActiveSession(chatId, chatInfo);
         const result = await runClearConversationCommand(context);
         if (result !== "Conversation history cleared.") {
-          await context.reply(contentEvent("tool-result", result));
+          await appOutput.replyWithToolResult(result);
           return null;
         }
-        await context.reply(contentEvent("tool-result", "Session cleared\n\nNext message starts fresh."));
+        await appOutput.replyWithToolResult("Session cleared\n\nNext message starts fresh.");
         return clearFollowUp.followUpTurn;
       }
 

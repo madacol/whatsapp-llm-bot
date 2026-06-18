@@ -364,6 +364,61 @@ type OutboundEvent =
   | RuntimeEventOutboundEvent
   | UsageEvent;
 
+type OutboundEventSink = {
+  send: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
+  reply: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
+};
+
+type AppOutputPort = {
+  replyWithToolResult: (content: SendContent) => Promise<MessageHandle | undefined>;
+  replyWithError: (message: string) => Promise<MessageHandle | undefined>;
+  replyWithPlain: (
+    content: SendContent,
+    options?: { replyToTriggeringMessage?: boolean },
+  ) => Promise<MessageHandle | undefined>;
+  sendPlain: (content: SendContent) => Promise<MessageHandle | undefined>;
+  sendMemory: (content: SendContent) => Promise<MessageHandle | undefined>;
+  replyWithFileChange: (change: Omit<FileChangeEvent, "kind">) => Promise<MessageHandle | undefined>;
+};
+
+type AgentRunOutputPort = {
+  sendRuntimeEvent: (
+    event: import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent,
+    options?: { cwd?: string | null },
+  ) => Promise<MessageHandle | undefined>;
+  sendToolCall: (
+    toolCall: LlmChatResponse["toolCalls"][0],
+    options?: {
+      cwd?: string | null;
+      displaySummary?: string;
+      context?: ToolCallEvent["context"];
+    },
+  ) => Promise<MessageHandle | undefined>;
+  replyWithAssistantOutput: (
+    content: SendContent,
+    options?: {
+      cwd?: string | null;
+      stream?: ContentEvent["stream"];
+    },
+  ) => Promise<MessageHandle | undefined>;
+  replyWithThinking: () => Promise<MessageHandle | undefined>;
+  replyWithSubagentMessage: (input: {
+    text: string;
+    threadId?: string;
+    parentThreadId?: string;
+    agentNickname?: string;
+    agentRole?: string;
+  }) => Promise<MessageHandle | undefined>;
+  sendToolResult: (
+    content: SendContent,
+    options?: { cwd?: string | null },
+  ) => Promise<MessageHandle | undefined>;
+  sendError: (message: string) => Promise<MessageHandle | undefined>;
+  replyWithError: (message: string) => Promise<MessageHandle | undefined>;
+  replyWithPlan: (presentation: import("./plan-presentation.js").PlanPresentation) => Promise<MessageHandle | undefined>;
+  sendUsage: (cost: string, tokens: UsageTokens) => Promise<MessageHandle | undefined>;
+};
+
 type MessageHandleUpdate =
   | { kind: "text"; text: string }
   | { kind: "tool_call"; presentation: ToolPresentation }

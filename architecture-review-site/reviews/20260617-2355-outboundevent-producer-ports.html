@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review - whatsapp-llm-bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam-line { border-left: 2px dashed #64748b; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; }
+      .leak { color: #dc2626; border-color: #dc2626; }
+      .label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .08em; }
+      .mass { height: 9rem; display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; align-items: end; }
+      .surface { background: #fecaca; border: 1px solid #dc2626; }
+      .body { background: #dbeafe; border: 1px solid #2563eb; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-6xl mx-auto px-6 py-10 space-y-10">
+      <header class="space-y-4">
+        <div>
+          <p class="label text-slate-500">Architecture review</p>
+          <h1 class="text-4xl font-semibold tracking-normal">whatsapp-llm-bot</h1>
+          <p class="text-sm text-slate-600 mt-1">Generated 2026-06-17 23:55 UTC</p>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div class="bg-white border border-slate-200 rounded-lg p-3">solid box = module</div>
+          <div class="bg-white border border-slate-200 rounded-lg p-3">dashed line = seam</div>
+          <div class="bg-white border border-red-300 text-red-700 rounded-lg p-3">red = leakage</div>
+          <div class="deep rounded-lg p-3">dark box = deep module</div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-8">
+        <article id="producer-ports" class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-2xl font-semibold mr-auto">Deepen OutboundEvent producer ports</h2>
+            <span class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-sm font-medium">Strong</span>
+            <span class="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-sm">ports &amp; adapters</span>
+          </div>
+          <div class="font-mono text-sm text-slate-700 grid md:grid-cols-2 gap-1">
+            <span>outbound-events.js</span>
+            <span>conversation/build-agent-io-hooks.js</span>
+            <span>conversation/create-conversation-runner.js</span>
+            <span>commands/*.js</span>
+            <span>harnesses/acp.js</span>
+            <span>whatsapp/outbound/*.js</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="label text-slate-500 mb-3">Before</p>
+              <pre class="mermaid">
+flowchart TD
+  A[Turn Orchestration] --> G[contentEvent/runtimeEvent]
+  B[Commands] --> G
+  C[Agent Run Activity hooks] --> G
+  D[ACP adapter commands] --> G
+  G -. creates any OutboundEvent .-> E[OutboundEvent]
+  E --> F[WhatsApp queue/replay/send]
+  classDef leak stroke:#dc2626,color:#dc2626,stroke-width:2px;
+  class G leak;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-3">After</p>
+              <pre class="mermaid">
+flowchart TD
+  A[Turn Orchestration] --> AP[AppOutputPort]
+  B[Commands] --> AP
+  C[Agent Run Activity] --> RP[AgentRunOutputPort]
+  D[ACP adapter] --> ARC[Agent Runtime commands]
+  ARC --> AP
+  AP --> E[OutboundEvent]
+  RP --> E
+  E --> S[OutboundEventSink]
+  S --> F[WhatsApp queue/replay/send]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class AP,RP,S deep;
+              </pre>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div><p class="font-semibold">Problem</p><p>Creation ownership leaks across the seam; callers learn the full OutboundEvent interface.</p></div>
+            <div><p class="font-semibold">Solution</p><p>Put semantic creation behind AgentRunOutputPort and AppOutputPort; keep delivery behind OutboundEventSink.</p></div>
+            <div><p class="font-semibold">Wins</p><ul class="list-disc list-inside"><li>locality: producer rules concentrate</li><li>leverage: one interface, many callers</li><li>tests hit owned seams</li><li>ADR 0004 becomes executable</li></ul></div>
+          </div>
+        </article>
+
+        <article id="turn-orchestration" class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-2xl font-semibold mr-auto">Collapse Turn Orchestration around one intake module</h2>
+            <span class="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-medium">Worth exploring</span>
+            <span class="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-sm">in-process</span>
+          </div>
+          <div class="font-mono text-sm text-slate-700 grid md:grid-cols-2 gap-1">
+            <span>conversation/create-conversation-runner.js</span>
+            <span>conversation/turn-routing.js</span>
+            <span>conversation/build-run-config.js</span>
+            <span>conversation/build-run-session.js</span>
+            <span>conversation/harness-session-binding.js</span>
+            <span>conversation/build-harness-turn-input.js</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="label text-slate-500 mb-3">Before</p>
+              <div class="space-y-2">
+                <div class="h-10 border-l-4 border-slate-300 bg-white p-2 text-sm">route decision</div>
+                <div class="h-10 border-l-4 border-slate-300 bg-white p-2 text-sm">message persistence</div>
+                <div class="h-10 border-l-4 border-slate-300 bg-white p-2 text-sm">workspace binding</div>
+                <div class="h-10 border-l-4 border-red-400 bg-red-50 p-2 text-sm">command output creation</div>
+                <div class="h-10 border-l-4 border-slate-300 bg-white p-2 text-sm">pending run policy</div>
+                <div class="h-10 border-l-4 border-slate-300 bg-white p-2 text-sm">Agent Runtime launch</div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-3">After</p>
+              <div class="deep rounded-lg p-5 h-72 flex flex-col justify-between">
+                <div>
+                  <p class="label text-slate-300">Deep module</p>
+                  <p class="text-xl font-semibold">Turn Intake</p>
+                  <p class="text-slate-300 text-sm mt-2">One interface decides persist, command, follow-up, or Agent Runtime start.</p>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-xs text-slate-800">
+                  <div class="bg-slate-200 rounded p-2">routing policy</div>
+                  <div class="bg-slate-200 rounded p-2">pending runs</div>
+                  <div class="bg-slate-200 rounded p-2">session binding</div>
+                  <div class="bg-slate-200 rounded p-2">output ports</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div><p class="font-semibold">Problem</p><p>The runner is 1199 lines; understanding one turn requires bouncing across thin modules and inline branches.</p></div>
+            <div><p class="font-semibold">Solution</p><p>Deepen a Turn Intake module that owns the semantic route and returns an executable intake decision.</p></div>
+            <div><p class="font-semibold">Wins</p><ul class="list-disc list-inside"><li>locality: one turn policy module</li><li>leverage: transport tests shrink</li><li>interface matches user behavior</li><li>fewer branch-only tests</li></ul></div>
+          </div>
+        </article>
+
+        <article id="agent-runtime-control" class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-2xl font-semibold mr-auto">Move ACP control behind an Agent Runtime command module</h2>
+            <span class="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-medium">Worth exploring</span>
+            <span class="px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-sm">local-substitutable</span>
+          </div>
+          <div class="font-mono text-sm text-slate-700 grid md:grid-cols-2 gap-1">
+            <span>harnesses/acp.js</span>
+            <span>session-control-commands.js</span>
+            <span>conversation/create-conversation-runner.js</span>
+            <span>harness-config.js</span>
+            <span>tests/acp-model-command.test.js</span>
+            <span>tests/harness-session-commands.test.js</span>
+          </div>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <p class="label text-slate-500 mb-3">Before</p>
+              <div class="mass">
+                <div>
+                  <div class="surface h-28 rounded-t p-2 text-xs">interface: command strings, context, session controls, config state, reply events</div>
+                  <div class="body h-20 rounded-b p-2 text-xs">implementation: ACP command behavior</div>
+                </div>
+                <div class="seam-line pl-3 text-sm text-red-700">ACP adapter emits app output directly</div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-3">After</p>
+              <div class="mass">
+                <div>
+                  <div class="surface h-10 rounded-t p-2 text-xs">interface: semantic runtime command</div>
+                  <div class="body h-36 rounded-b p-2 text-xs">implementation: parse, validate, persist, apply ACP control, report via AppOutputPort</div>
+                </div>
+                <div class="deep rounded-lg p-4 text-sm">Agent Runtime command module absorbs provider control details.</div>
+              </div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div><p class="font-semibold">Problem</p><p>ACP adapter command handling is shallow: its interface exposes provider control, session control, and app output facts together.</p></div>
+            <div><p class="font-semibold">Solution</p><p>Deepen a command module behind the Agent Runtime seam; Turn Orchestration passes semantic commands only.</p></div>
+            <div><p class="font-semibold">Wins</p><ul class="list-disc list-inside"><li>locality: ACP control concentrates</li><li>leverage: one command interface</li><li>harness vocabulary shrinks</li><li>tests cross runtime seam</li></ul></div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="bg-slate-950 text-white rounded-xl p-6">
+        <p class="label text-slate-300">Top recommendation</p>
+        <h2 class="text-2xl font-semibold mt-1"><a class="underline decoration-slate-500" href="#producer-ports">Deepen OutboundEvent producer ports</a></h2>
+        <p class="mt-2 text-slate-200">Start here because it directly matches ADR 0004, preserves ADR 0003 delivery, and gives Turn Orchestration plus Agent Run Activity smaller interfaces to test.</p>
+      </section>
+    </main>
+  </body>
+</html>
