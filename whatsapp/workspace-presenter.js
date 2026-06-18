@@ -4,7 +4,7 @@ import { formatPlanPresentationText } from "../plan-presentation.js";
 import { parseToolArgs } from "../agent-io-defaults.js";
 import { buildToolPresentation } from "./tool-presentation-model.js";
 import { renderToolActivityContent, renderToolPresentationContent } from "./tool-presenter.js";
-import { contentEvent } from "../outbound-events.js";
+import { createAppOutputPort } from "../app-output-port.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import {
   buildWorkspaceSurfaceName,
@@ -135,10 +135,11 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
    * @returns {Promise<void>}
    */
   async function sendPlainWorkspaceContent(workspaceId, text) {
-    await presenter.sendWorkspaceEvent({
-      workspaceId,
-      event: contentEvent("plain", [{ type: "text", text }]),
+    const appOutput = createAppOutputPort({
+      send: (event) => presenter.sendWorkspaceEvent({ workspaceId, event }).then(() => undefined),
+      reply: (event) => presenter.sendWorkspaceEvent({ workspaceId, event }).then(() => undefined),
     });
+    await appOutput.sendPlain([{ type: "text", text }]);
   }
 
   /**

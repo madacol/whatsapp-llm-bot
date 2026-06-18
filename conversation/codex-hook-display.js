@@ -1,15 +1,16 @@
-import { runtimeEvent } from "../outbound-events.js";
+import { createAgentRunOutputPort } from "../agent-run-output-port.js";
 
 /**
  * Build the Codex-specific display hook for file change rendering.
  * @param {{
- *   context: Pick<ExecuteActionContext, "send">,
+ *   context: Pick<ExecuteActionContext, "send" | "reply">,
  *   cwd: string | null,
  *   visibility: import("../chat-output-visibility.js").OutputVisibility,
  * }} input
  * @returns {Pick<Required<AgentIOHooks>, "onFileChange">}
  */
 export function createCodexDisplayHooks({ context, cwd, visibility }) {
+  const agentOutput = createAgentRunOutputPort(context, { cwd });
   return {
     onFileChange,
   };
@@ -33,7 +34,7 @@ export function createCodexDisplayHooks({ context, cwd, visibility }) {
       return;
     }
 
-    await context.send(runtimeEvent({
+    await agentOutput.sendRuntimeEvent({
       type: "file-change.completed",
       provider: "codex",
       change: {
@@ -48,6 +49,6 @@ export function createCodexDisplayHooks({ context, cwd, visibility }) {
         ...(newText !== undefined && { newText }),
         cwd,
       },
-    }));
+    });
   }
 }

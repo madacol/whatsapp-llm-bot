@@ -1,6 +1,7 @@
 import path from "node:path";
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../agent-io-defaults.js";
-import { contentEvent, planEvent, reasoningInspectState, runtimeEvent, subagentMessageEvent, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
+import { reasoningInspectState, textUpdate } from "../outbound-events.js";
+import { createAgentRunOutputPort } from "../agent-run-output-port.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 
@@ -60,7 +61,7 @@ function shouldDisplayToolCallAsChange(toolCall, actionFormatter, cwd, toolConte
 /**
  * Display a tool call to the user using the formatter shared across harnesses.
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
- * @param {Pick<ExecuteActionContext, "send">} context
+ * @param {Pick<ExecuteActionContext, "send" | "reply">} context
  * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
  * @param {string | null | undefined} cwd
  * @param {{ oldContent?: string; startLine?: number } | undefined} toolContext
@@ -69,11 +70,11 @@ function shouldDisplayToolCallAsChange(toolCall, actionFormatter, cwd, toolConte
 async function displayToolCall(toolCall, context, actionFormatter, cwd, toolContext) {
   const args = parseToolArgs(toolCall.arguments);
   const displaySummary = actionFormatter ? actionFormatter(args) : undefined;
-  return context.send(toolCallEvent(toolCall, {
+  return createAgentRunOutputPort(context, { cwd }).sendToolCall(toolCall, {
     cwd: cwd ?? null,
     ...(displaySummary !== undefined && { displaySummary }),
     ...(toolContext !== undefined && { context: toolContext }),
-  }));
+  });
 }
 
 /**
@@ -117,6 +118,7 @@ export function buildAgentIoHooks(
   visibility = DEFAULT_OUTPUT_VISIBILITY,
   recordDeliveredContent,
 ) {
+  const agentOutput = createAgentRunOutputPort(context, { cwd });
   /**
    * @template T
    * @param {() => Promise<T>} emit
@@ -148,9 +150,7 @@ export function buildAgentIoHooks(
    * @returns {Promise<void>}
    */
   async function sendRuntimePresentationEvent(event) {
-    await emitWhileWorking(() => context.send(runtimeEvent(event, {
-      ...(cwd !== null ? { cwd } : {}),
-    })));
+    await emitWhileWorking(() => agentOutput.sendRuntimeEvent(event));
   }
 
   /**
@@ -246,7 +246,7 @@ export function buildAgentIoHooks(
         if (event.status === "completed" && !shouldCreateReasoningHandle(event)) {
           return;
         }
-        reasoningHandle = await emitWhileWorking(() => context.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]))) ?? null;
+        reasoningHandle = await emitWhileWorking(() => agentOutput.replyWithThinking()) ?? null;
       }
       if (!reasoningHandle) {
         return;
@@ -275,28 +275,27 @@ export function buildAgentIoHooks(
           recordDeliveredContent?.(content);
           return;
         }
-        await context.reply(subagentMessageEvent({
+        await agentOutput.replyWithSubagentMessage({
           text,
           ...(metadata.threadId !== undefined && { threadId: metadata.threadId }),
           ...(metadata.parentThreadId !== undefined && { parentThreadId: metadata.parentThreadId }),
           ...(metadata.agentNickname !== undefined && { agentNickname: metadata.agentNickname }),
           ...(metadata.agentRole !== undefined && { agentRole: metadata.agentRole }),
-        }));
+        });
         recordDeliveredContent?.(content);
         return;
       }
       if (metadata?.streamId) {
-        await context.reply(contentEvent("llm", content, {
-          cwd,
+        await agentOutput.replyWithAssistantOutput(content, {
           stream: {
             id: metadata.streamId,
             status: metadata.streamStatus ?? "partial",
           },
-        }));
+        });
         recordDeliveredContent?.(content);
         return;
       }
-      await context.reply(contentEvent("llm", content, { cwd }));
+      await agentOutput.replyWithAssistantOutput(content);
       recordDeliveredContent?.(content);
     },
     onAskUser: async (question, options, _preamble, descriptions) => {
@@ -324,11 +323,11 @@ export function buildAgentIoHooks(
         }
         if (!pendingRuntimeToolCalls.some((pending) => pending.id === toolCall.id)) {
           pendingRuntimeToolCalls.push(toolCall);
-          await context.send(runtimeEvent({
+          await agentOutput.sendRuntimeEvent({
             type: "tool.started",
             provider: "codex",
             tool: runtimeToolFromToolCall(toolCall),
-          }, { cwd }));
+          });
         }
         return undefined;
       }
@@ -339,11 +338,11 @@ export function buildAgentIoHooks(
         const index = pendingRuntimeToolCalls.findIndex((pending) => pending.id === toolCall.id);
         if (index !== -1) {
           pendingRuntimeToolCalls.splice(index, 1);
-          await context.send(runtimeEvent({
+          await agentOutput.sendRuntimeEvent({
             type: "tool.completed",
             provider: "codex",
             tool: runtimeToolFromToolCall(toolCall),
-          }, { cwd }));
+          });
         }
       }
     },
@@ -351,25 +350,25 @@ export function buildAgentIoHooks(
       if (!visibility.toolDetails) {
         return;
       }
-      await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks, { cwd })));
+      await emitWhileWorking(() => agentOutput.sendToolResult(blocks));
       recordDeliveredContent?.(blocks);
     },
     onToolError: async (message) => {
       if (!visibility.toolDetails) {
         const toolCall = pendingRuntimeToolCalls.pop();
         if (toolCall) {
-          await context.send(runtimeEvent({
+          await agentOutput.sendRuntimeEvent({
             type: "tool.failed",
             provider: "codex",
             tool: runtimeToolFromToolCall(toolCall),
-          }, { cwd }));
+          });
           return;
         }
       }
-      await emitWhileWorking(() => context.send(contentEvent("error", message)));
+      await emitWhileWorking(() => agentOutput.sendError(message));
     },
     onPlan: async (presentation) => {
-      await emitWhileWorking(() => context.reply(planEvent(presentation)));
+      await emitWhileWorking(() => agentOutput.replyWithPlan(presentation));
     },
     onFileChange: async (fileChangeEvent) => {
       await emitWhileWorking(() => codexDisplayHooks.onFileChange(fileChangeEvent));
@@ -379,7 +378,7 @@ export function buildAgentIoHooks(
       `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
     ),
     onUsage: async (cost, tokens) => {
-      await context.send(usageEvent(cost, tokens));
+      await agentOutput.sendUsage(cost, tokens);
     },
     onRuntimeEvent: async (event) => {
       if (event.type === "file-change.completed") {

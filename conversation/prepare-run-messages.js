@@ -1,6 +1,6 @@
 import config from "../config.js";
 import { getChatDb } from "../db.js";
-import { contentEvent } from "../outbound-events.js";
+import { createAppOutputPort } from "../app-output-port.js";
 import {
   extractTextFromMessage,
   findMemories,
@@ -20,11 +20,12 @@ const log = createLogger("conversation:prepare-run-messages");
  *   message: UserMessage,
  *   llmClient: LlmClient,
  *   externalInstructions: string,
- *   context: Pick<ExecuteActionContext, "send">,
+ *   context: Pick<ExecuteActionContext, "send" | "reply">,
  * }} input
  * @returns {Promise<string>}
  */
 async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, externalInstructions, context }) {
+  const appOutput = createAppOutputPort(context);
   const currentText = extractTextFromMessage(message);
   if (currentText.length < 10) {
     return externalInstructions;
@@ -47,7 +48,7 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, e
     const lines = similar.map((memory) =>
       `- [#${memory.id}] (score: ${Number(memory.similarity).toFixed(3)}) ${memory.content.slice(0, 100)}${memory.content.length > 100 ? "..." : ""}`
     );
-    await context.send(contentEvent("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`));
+    await appOutput.sendMemory(`Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
 
     return extended;
   } catch (err) {
@@ -64,7 +65,7 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, e
  *   message: UserMessage,
  *   llmClient: LlmClient,
  *   baseExternalInstructions: string,
- *   context: Pick<ExecuteActionContext, "send" | "prepareMediaRegistry">,
+ *   context: Pick<ExecuteActionContext, "send" | "reply" | "prepareMediaRegistry">,
  *   getMessages: import("../store.js").Store["getMessages"],
  *   bufferedTexts?: string[],
  * }} input

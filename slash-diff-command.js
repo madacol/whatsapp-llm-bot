@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { contentEvent } from "./outbound-events.js";
+import { createAppOutputPort } from "./app-output-port.js";
 
 const GIT_DIFF_MAX_BUFFER = 10 * 1024 * 1024;
 
@@ -204,31 +204,31 @@ export function parseGitDiffFiles(diffText) {
  * @returns {Promise<boolean>}
  */
 export async function handleSlashDiffCommand({ command, workdir, context }) {
+  const appOutput = createAppOutputPort(context);
   const parsedCommand = parseSlashDiffCommand(command);
   if (!parsedCommand.handled) {
     return false;
   }
   if ("error" in parsedCommand) {
-    await context.reply(contentEvent("error", parsedCommand.error));
+    await appOutput.replyWithError(parsedCommand.error);
     return true;
   }
 
   const result = await runGit(workdir, ["diff", "--no-ext-diff", "--find-renames", gitDiffBaseRevision(parsedCommand.depth), "--"]);
   if (result.exitCode !== 0) {
     const details = result.stderr.trim() || result.stdout.trim() || `git diff failed in ${workdir}`;
-    await context.reply(contentEvent("error", details));
+    await appOutput.replyWithError(details);
     return true;
   }
 
   const files = parseGitDiffFiles(result.stdout);
   if (files.length === 0) {
-    await context.reply(contentEvent("tool-result", "No uncommitted changes."));
+    await appOutput.replyWithToolResult("No uncommitted changes.");
     return true;
   }
 
   for (const file of files) {
-    await context.reply({
-      kind: "file_change",
+    await appOutput.replyWithFileChange({
       path: file.path,
       cwd: workdir,
       changeKind: file.changeKind,

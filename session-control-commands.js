@@ -1,5 +1,5 @@
 import { formatRelativeTime } from "./utils.js";
-import { contentEvent } from "./outbound-events.js";
+import { createAppOutputPort } from "./app-output-port.js";
 
 const MAX_RESUME_OPTIONS = 11;
 const RESUME_CANCEL_OPTION_ID = "cancel";
@@ -77,6 +77,7 @@ export async function handleSessionControlCommand({ command, chatId, context, ca
   if (!sessionControl) {
     return false;
   }
+  const appOutput = createAppOutputPort(context);
 
   switch (command) {
     case "clear": {
@@ -84,13 +85,13 @@ export async function handleSessionControlCommand({ command, chatId, context, ca
       const archived = await sessionControl.archive(chatId);
       await sessionControl.clearRuntime?.(chatId);
       const titleLine = archived?.title ? `Session cleared: ${archived.title}\n\n` : "Session cleared\n\n";
-      await context.reply(contentEvent("tool-result", `${titleLine}Next message starts fresh.\nUse */resume* to restore this session later.`));
+      await appOutput.replyWithToolResult(`${titleLine}Next message starts fresh.\nUse */resume* to restore this session later.`);
       return true;
     }
     case "resume": {
       const history = await sessionControl.getHistory(chatId);
       if (history.length === 0) {
-        await context.reply(contentEvent("tool-result", "No previous sessions to resume."));
+        await appOutput.replyWithToolResult("No previous sessions to resume.");
         return true;
       }
       const currentTime = now();
@@ -102,13 +103,13 @@ export async function handleSessionControlCommand({ command, chatId, context, ca
       await sessionControl.archive(chatId);
       const restored = await sessionControl.restore(chatId, sessionId);
       if (!restored) {
-        await context.reply(contentEvent("tool-result", "Failed to restore session."));
+        await appOutput.replyWithToolResult("Failed to restore session.");
         return true;
       }
 
       const agoStr = formatRelativeTime(currentTime.getTime() - new Date(restored.cleared_at).getTime());
       const restoredLabel = restored.title ? `Session restored: ${restored.title}` : "Session restored";
-      await context.reply(contentEvent("tool-result", `${restoredLabel} (cleared ${agoStr}). Your next message will continue that conversation.`));
+      await appOutput.replyWithToolResult(`${restoredLabel} (cleared ${agoStr}). Your next message will continue that conversation.`);
       return true;
     }
     default:
