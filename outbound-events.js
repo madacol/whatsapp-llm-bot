@@ -3,26 +3,6 @@
  */
 
 /**
- * Legacy compatibility helper for transport/render/queue adapters.
- *
- * @deprecated Use semantic output-port methods or semantic event constructors for new producers.
- * @param {MessageSource} source
- * @param {SendContent} content
- * @param {{ cwd?: string | null, replyToTriggeringMessage?: boolean, stream?: ContentEvent["stream"] }} [options]
- * @returns {ContentEvent}
- */
-export function contentEvent(source, content, options = {}) {
-  return {
-    kind: "content",
-    source,
-    content,
-    ...(options.cwd !== undefined && { cwd: options.cwd }),
-    ...(options.replyToTriggeringMessage !== undefined && { replyToTriggeringMessage: options.replyToTriggeringMessage }),
-    ...(options.stream !== undefined && { stream: options.stream }),
-  };
-}
-
-/**
  * @param {AppMessageEvent["role"]} role
  * @param {SendContent} content
  * @param {{ replyToTriggeringMessage?: boolean }} [options]

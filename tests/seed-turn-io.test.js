@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { contentEvent, runtimeEvent } from "../outbound-events.js";
+import { assistantOutputEvent, runtimeEvent } from "../outbound-events.js";
 import { textUpdate } from "../message-handle-events.js";
 import { createSeedTurnIo } from "../conversation/seed-turn-io.js";
 
@@ -44,7 +44,7 @@ describe("seed turn io", () => {
       },
     });
 
-    const contentHandle = await io.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]));
+    const contentHandle = await io.reply(assistantOutputEvent([{ type: "text", text: "Thinking..." }]));
     assert.equal(contentHandle, handle);
 
     const fileHandle = await io.send(runtimeFileChangeEvent({
@@ -59,7 +59,7 @@ describe("seed turn io", () => {
     fileHandle?.setInspect({ kind: "text", text: "full inspect text" });
 
     assert.deepEqual(events, [
-      contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
+      assistantOutputEvent([{ type: "text", text: "Thinking..." }]),
       runtimeFileChangeEvent({
         path: "/repo/app.js",
         diff: "@@ -1 +1 @@\n-old\n+new",

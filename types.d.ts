@@ -246,22 +246,6 @@ type ToolFlowState = {
   steps: ToolFlowStep[];
 };
 
-/**
- * @deprecated legacy compatibility ContentEvent for transport/render/queue adapters only.
- * Producer output ports should emit semantic OutboundEvent variants instead.
- */
-type ContentEvent = {
-  kind: "content";
-  source: MessageSource;
-  content: SendContent;
-  cwd?: string | null;
-  replyToTriggeringMessage?: boolean;
-  stream?: {
-    id: string;
-    status: "partial" | "final";
-  };
-};
-
 type AppMessageEvent = {
   kind: "app_message";
   role: "plain" | "tool_result" | "error" | "memory";
@@ -381,7 +365,6 @@ type UsageTokens = {
 };
 
 type OutboundEvent =
-  | ContentEvent
   | AppMessageEvent
   | AssistantOutputEvent
   | AgentToolResultEvent

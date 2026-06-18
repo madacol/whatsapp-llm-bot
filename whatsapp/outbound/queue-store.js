@@ -37,21 +37,6 @@ function isRecord(value) {
 
 /**
  * @param {unknown} value
- * @returns {value is MessageSource}
- */
-function isMessageSource(value) {
-  return value === "llm"
-    || value === "tool-call"
-    || value === "tool-result"
-    || value === "error"
-    || value === "warning"
-    || value === "usage"
-    || value === "memory"
-    || value === "plain";
-}
-
-/**
- * @param {unknown} value
  * @returns {value is AppMessageEvent["role"]}
  */
 function isAppMessageRole(value) {
@@ -154,19 +139,6 @@ function isOutboundEvent(value) {
   }
 
   switch (value.kind) {
-    case "content":
-      return isMessageSource(value.source)
-        && isSendContent(value.content)
-        && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string")
-        && (value.replyToTriggeringMessage === undefined || typeof value.replyToTriggeringMessage === "boolean")
-        && (
-          value.stream === undefined
-          || (
-            isRecord(value.stream)
-            && typeof value.stream.id === "string"
-            && (value.stream.status === "partial" || value.stream.status === "final")
-          )
-        );
     case "app_message":
       return isAppMessageRole(value.role)
         && isSendContent(value.content)

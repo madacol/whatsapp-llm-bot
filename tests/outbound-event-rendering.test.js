@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildToolPresentationFromToolCallEvent,
-  renderLegacyContentEvent,
   renderAgentToolResultEvent,
   renderAppMessageEvent,
   renderAssistantOutputEvent,
@@ -46,19 +45,6 @@ describe("semantic outbound event rendering", () => {
       source: "tool-result",
       cwd: "/repo",
       content: "command output",
-    });
-  });
-
-  it("renders legacy content events through an explicit compatibility renderer", () => {
-    assert.deepEqual(renderLegacyContentEvent({
-      kind: "content",
-      source: "llm",
-      cwd: "/repo",
-      content: "legacy output",
-    }), {
-      source: "llm",
-      cwd: "/repo",
-      content: "legacy output",
     });
   });
 

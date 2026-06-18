@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { contentEvent } from "../outbound-events.js";
+import { assistantOutputEvent } from "../outbound-events.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
 
 describe("workspace lifecycle service", () => {
@@ -122,10 +122,10 @@ describe("workspace lifecycle service", () => {
     assert.equal(dispatchedTurns.length, 1);
     assert.equal(dispatchedTurns[0]?.chatId, "workspace-chat");
     assert.deepEqual(dispatchedTurns[0]?.content, [{ type: "text", text: "Investigate duplicate charges" }]);
-    await dispatchedTurns[0]?.io.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]));
+    await dispatchedTurns[0]?.io.reply(assistantOutputEvent([{ type: "text", text: "Thinking..." }]));
     assert.deepEqual(workspaceEvents, [{
       workspaceId: "ws-1",
-      event: contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
+      event: assistantOutputEvent([{ type: "text", text: "Thinking..." }]),
     }]);
   });
 });

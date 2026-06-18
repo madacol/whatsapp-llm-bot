@@ -14,7 +14,6 @@ process.env.MODEL = "mock-model";
 import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { createAcpTestHarnessState, registerAcpTestHarness } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
-import { contentEvent } from "../outbound-events.js";
 import { getChatWorkDir } from "../utils.js";
 import { updateChatConfig } from "../chat-config.js";
 import { getChatSqlitePath } from "../chat-paths.js";

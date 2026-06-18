@@ -758,8 +758,7 @@ describe("createTurnIo", () => {
     });
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Plain send",
     });
 
@@ -793,8 +792,7 @@ describe("createTurnIo", () => {
 
     currentSocket = newSocket.sock;
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Recovered send",
     });
 
@@ -826,8 +824,7 @@ describe("createTurnIo", () => {
     });
 
     const handle = await io.reply({
-      kind: "content",
-      source: "tool-result",
+      kind: "agent_tool_result",
       content: "Restart signal sent.",
     });
 
@@ -859,8 +856,7 @@ describe("createTurnIo", () => {
     });
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Send later",
     });
 
@@ -876,8 +872,7 @@ describe("createTurnIo", () => {
       payload_json: {
         kind: "event",
         event: {
-          kind: "content",
-          source: "llm",
+          kind: "assistant_output",
           content: "Send later",
         },
       },
@@ -894,8 +889,7 @@ describe("createTurnIo", () => {
     });
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Working",
     });
     await new Promise((resolve) => setTimeout(resolve, 24));
@@ -919,15 +913,13 @@ describe("createTurnIo", () => {
     });
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "First",
     });
     presenceUpdates.length = 0;
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Second",
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -948,8 +940,7 @@ describe("createTurnIo", () => {
     });
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Still working",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -971,8 +962,7 @@ describe("createTurnIo", () => {
     });
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Before select",
     });
     presenceUpdates.length = 0;
@@ -997,8 +987,7 @@ describe("createTurnIo", () => {
     });
 
     await io.reply({
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "Before confirm",
     });
     presenceUpdates.length = 0;

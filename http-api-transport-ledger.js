@@ -140,10 +140,7 @@ export function createHttpTransportTurnLedger(options = {}) {
       }
       if (turnId) {
         const turn = turnsById.get(turnId);
-        if (turn && (
-          (event.kind === "content" && event.source === "llm")
-          || event.kind === "assistant_output"
-        )) {
+        if (turn && event.kind === "assistant_output") {
           const text = extractTextContent(event.content);
           if (text) {
             turn.text = turn.text ? `${turn.text}\n${text}` : text;

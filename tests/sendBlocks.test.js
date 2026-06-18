@@ -1785,15 +1785,14 @@ Second block:
     );
   });
 
-  it("resolves markdown attachment directives relative to content event cwd", async () => {
+  it("resolves markdown attachment directives relative to assistant output cwd", async () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "attachment-cwd-"));
     await fs.writeFile(path.join(workdir, "website.json"), JSON.stringify({ title: "Demo" }), "utf8");
     const { sock, sent } = createMockSock();
 
     try {
       await sendEvent(sock, "test-chat", {
-        kind: "content",
-        source: "llm",
+        kind: "assistant_output",
         cwd: workdir,
         content: [{
           type: "markdown",

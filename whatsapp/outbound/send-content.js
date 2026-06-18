@@ -22,7 +22,6 @@ import {
 } from "./file-change-content.js";
 import {
   buildToolPresentationFromToolCallEvent,
-  renderLegacyContentEvent,
   renderAgentToolResultEvent,
   renderAppMessageEvent,
   renderAssistantOutputEvent,
@@ -770,10 +769,7 @@ function extractOutboundContentText(content) {
  * @returns {"👍" | "👎" | null}
  */
 function getGuardianReviewPrefixEmoji(event) {
-  if (
-    (event.kind !== "content" || event.source !== "llm")
-    && event.kind !== "assistant_output"
-  ) {
+  if (event.kind !== "assistant_output") {
     return null;
   }
   const text = extractOutboundContentText(event.content).trim();
@@ -2488,24 +2484,6 @@ function formatPinnedStatusPresentation(event, state) {
     return null;
   }
   switch (event.kind) {
-    case "content": {
-      if (event.source !== "llm" || !Array.isArray(event.content)) {
-        return null;
-      }
-      const text = event.content
-        .map((block) => block.type === "text" || block.type === "markdown" ? block.text : "")
-        .join("\n")
-        .trim();
-      if (text !== "Thinking...") {
-        return null;
-      }
-      return {
-        key: "thinking",
-        icon: "💭",
-        provider: "LLM",
-        summary: "thinking",
-      };
-    }
     case "assistant_output": {
       if (!Array.isArray(event.content)) {
         return null;
@@ -2727,8 +2705,6 @@ function formatInspectEditText(summary, text) {
  */
 function renderOutboundEvent(event) {
   switch (event.kind) {
-    case "content":
-      return renderLegacyContentEvent(event);
     case "app_message":
       return renderAppMessageEvent(event);
     case "assistant_output":

@@ -33,18 +33,6 @@ export function appMessageRoleToSource(role) {
 }
 
 /**
- * @param {ContentEvent} event
- * @returns {RenderedOutboundEvent}
- */
-export function renderLegacyContentEvent(event) {
-  return {
-    source: event.source,
-    content: event.content,
-    ...(event.cwd !== undefined && { cwd: event.cwd }),
-  };
-}
-
-/**
  * @param {AppMessageEvent} event
  * @returns {{ source: MessageSource, content: SendContent }}
  */
