@@ -1,7 +1,7 @@
 import { hasMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import { contentHasContextResetCommand } from "../conversation/context-boundary.js";
 import { renderContentBlock } from "../message-formatting.js";
-import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
+import { formatMediaTranslationText, getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
 
 /**
  * @param {string} value
@@ -287,7 +287,7 @@ async function augmentBlocks(blocks, input) {
           contextMessages: input.contextMessages,
           currentText: input.currentText,
         });
-        augmented.push({ type: "text", text: `[Audio description: ${description}]` });
+        augmented.push({ type: "text", text: formatMediaTranslationText("audio", description) });
         changed = true;
       } catch {
         // Keep the canonical audio block when alt generation fails.

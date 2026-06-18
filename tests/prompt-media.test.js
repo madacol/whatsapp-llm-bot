@@ -72,7 +72,8 @@ describe("prompt media augmentation", () => {
     const latest = augmented[augmented.length - 1];
     assert.equal(latest.content.length, 2);
     assert.equal(latest.content[1].type, "text");
-    assert.ok(latest.content[1].text.includes("Audio about the markdown table renderer."));
+    assert.equal(latest.content[1].text, "Audio transcript:\nAudio about the markdown table renderer.");
+    assert.equal(latest.content[1].text.includes("[Audio description:"), false);
 
     const [request] = mockServer.getRequests();
     const allText = JSON.stringify(request.messages);

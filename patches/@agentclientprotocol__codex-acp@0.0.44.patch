@@ -71,6 +71,49 @@
      };
    }
    return {
+@@ -17452,6 +17491,13 @@
+   }
+   return "Search";
+ }
++function extractMoveTargetPathFromDiff(diff) {
++  const match = /^Moved to:\s*(.+)$/m.exec(diff);
++  return match ? match[1].trim() : null;
++}
++function stripUnsupportedPatchMetadata(diff) {
++  return diff.split(/\r?\n/).filter((line) => !line.startsWith("Moved to: ")).join("\n");
++}
+ async function createPatchContent(change) {
+   if (change.kind.type === "add" && !isUnifiedDiff(change.diff)) {
+     return {
+@@ -17482,17 +17529,25 @@
+   if (oldContent === null) {
+     return null;
+   }
+-  const newContent = applyPatch(oldContent, change.diff);
++  const moveTargetPath = extractMoveTargetPathFromDiff(change.diff);
++  const patchDiff = stripUnsupportedPatchMetadata(change.diff);
++  let newContent;
++  try {
++    newContent = applyPatch(oldContent, patchDiff);
++  } catch {
++    return null;
++  }
+   if (newContent === false) {
+     return null;
+   }
+   return {
+     type: "diff",
+     oldText: change.kind.type === "add" ? null : oldContent,
+     newText: newContent,
+-    path: change.path,
++    path: moveTargetPath ?? change.path,
+     _meta: {
+-      kind: change.kind.type
++      kind: change.kind.type,
++      ...(moveTargetPath ? { moveTargetPath } : {})
+     }
+   };
+ }
 @@ -17522,6 +17565,37 @@
    } catch {
      return null;

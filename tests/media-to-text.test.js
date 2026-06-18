@@ -180,8 +180,8 @@ describe("media-to-text", () => {
         assert.equal(content[0].type, "text");
         assert.equal(content[0].text, "What is this?");
         assert.equal(content[1].type, "text");
-        assert.ok(content[1].text.includes("A photo of a sunset over mountains."));
-        assert.ok(content[1].text.includes("[Image description:"));
+        assert.equal(content[1].text, "Image description:\nA photo of a sunset over mountains.");
+        assert.equal(content[1].text.includes("[Image description:"), false);
       });
     });
 
@@ -239,7 +239,10 @@ describe("media-to-text", () => {
           db,
         );
 
-        assert.ok(result.messages[0].message_data.content[1].text.includes("[Audio description:"));
+        const translatedAudio = result.messages[0].message_data.content[1];
+        assert.equal(translatedAudio.type, "text");
+        assert.equal(translatedAudio.text, "Audio transcript:\nThe speaker asks what time it is.");
+        assert.equal(translatedAudio.text.includes("[Audio description:"), false);
 
         const translationRequest = mockServer.getRequests()[requestsBefore];
         const requestText = JSON.stringify(translationRequest.messages);
@@ -502,10 +505,8 @@ describe("media-to-text", () => {
         assert.equal(content.length, 2);
         assert.equal(content[0].text, "check this video");
         assert.equal(content[1].type, "text");
-        assert.ok(
-          content[1].text.includes("A short video showing a person waving"),
-          `Should contain translation, got: ${content[1].text}`,
-        );
+        assert.equal(content[1].text, "Video description:\nA short video showing a person waving");
+        assert.equal(content[1].text.includes("[Video description:"), false);
         assert.deepEqual(result.skippedTypes, new Set());
       });
     });
@@ -1142,8 +1143,8 @@ describe("media-to-text", () => {
         assert.equal(quoteBlock.content[0].type, "text");
         assert.equal(quoteBlock.content[0].text, "Edit tool-display.js");
         assert.equal(quoteBlock.content[1].type, "text");
-        assert.ok(quoteBlock.content[1].text.includes("A screenshot of code showing echo commands."));
-        assert.ok(quoteBlock.content[1].text.includes("[Image description:"));
+        assert.equal(quoteBlock.content[1].text, "Image description:\nA screenshot of code showing echo commands.");
+        assert.equal(quoteBlock.content[1].text.includes("[Image description:"), false);
 
         // The text after the quote should be untouched
         assert.equal(translated.message_data.content[1].type, "text");
