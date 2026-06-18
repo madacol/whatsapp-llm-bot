@@ -1,6 +1,6 @@
 import path from "node:path";
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../agent-io-defaults.js";
-import { reasoningInspectState, textUpdate } from "../outbound-events.js";
+import { reasoningInspectState, textUpdate } from "../message-handle-events.js";
 import { createAgentRunOutputPort } from "../agent-run-output-port.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";

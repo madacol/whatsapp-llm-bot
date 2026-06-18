@@ -24,7 +24,8 @@ function createContext() {
  * @returns {string}
  */
 function getReplyText(event) {
-  assert.equal(event.kind, "content");
+  assert.equal(event.kind, "app_message");
+  assert.equal(event.role, "tool_result");
   return typeof event.content === "string" ? event.content : JSON.stringify(event.content);
 }
 

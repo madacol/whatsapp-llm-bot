@@ -438,11 +438,19 @@ describe("WhatsAppWorkspacePresenter", () => {
     assert.deepEqual(sentEvents, [
       {
         chatId: "workspace-chat",
-        event: contentEvent("plain", [{ type: "text", text: "Workspace: payments" }]),
+        event: {
+          kind: "app_message",
+          role: "plain",
+          content: [{ type: "text", text: "Workspace: payments" }],
+        },
       },
       {
         chatId: "workspace-chat",
-        event: contentEvent("plain", [{ type: "text", text: "Prompt: investigate duplicate charges" }]),
+        event: {
+          kind: "app_message",
+          role: "plain",
+          content: [{ type: "text", text: "Prompt: investigate duplicate charges" }],
+        },
       },
     ]);
   });

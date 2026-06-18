@@ -1,4 +1,4 @@
-import { contentEvent } from "./outbound-events.js";
+import { appMessageEvent } from "./outbound-events.js";
 import { createOutboundEventSink } from "./outbound-event-sink.js";
 
 /**
@@ -9,11 +9,11 @@ import { createOutboundEventSink } from "./outbound-event-sink.js";
 export function createAppOutputPort(context) {
   const sink = createOutboundEventSink(context);
   return {
-    replyWithToolResult: (content) => sink.reply(contentEvent("tool-result", content)),
-    replyWithError: (message) => sink.reply(contentEvent("error", message)),
-    replyWithPlain: (content, options = {}) => sink.reply(contentEvent("plain", content, options)),
-    sendPlain: (content) => sink.send(contentEvent("plain", content)),
-    sendMemory: (content) => sink.send(contentEvent("memory", content)),
+    replyWithToolResult: (content) => sink.reply(appMessageEvent("tool_result", content)),
+    replyWithError: (message) => sink.reply(appMessageEvent("error", message)),
+    replyWithPlain: (content, options = {}) => sink.reply(appMessageEvent("plain", content, options)),
+    sendPlain: (content) => sink.send(appMessageEvent("plain", content)),
+    sendMemory: (content) => sink.send(appMessageEvent("memory", content)),
     replyWithFileChange: (change) => sink.reply({ kind: "file_change", ...change }),
   };
 }

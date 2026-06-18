@@ -20,7 +20,7 @@ export {
 };
 
 /**
- * @param {ContentEvent} event
+ * @param {ContentEvent | AssistantOutputEvent} event
  * @returns {string}
  */
 function extractStreamText(event) {
@@ -40,9 +40,9 @@ function extractStreamText(event) {
 }
 
 /**
- * @param {ContentEvent} event
+ * @param {ContentEvent | AssistantOutputEvent} event
  * @param {string} text
- * @returns {ContentEvent}
+ * @returns {ContentEvent | AssistantOutputEvent}
  */
 function withStreamText(event, text) {
   const { stream: _stream, ...rest } = event;
@@ -63,8 +63,8 @@ function streamKey(chatId, streamId) {
 
 /**
  * @param {string} chatId
- * @param {ContentEvent} event
- * @returns {ContentEvent | undefined}
+ * @param {ContentEvent | AssistantOutputEvent} event
+ * @returns {ContentEvent | AssistantOutputEvent | undefined}
  */
 function bufferStreamEvent(chatId, event) {
   if (!event.stream) {
@@ -132,7 +132,10 @@ async function buildWhatsAppSendOptions(chatId, event, store) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, options, reactionRuntime, store }) {
-  if (event.kind === "content" && event.stream) {
+  if (
+    (event.kind === "content" || event.kind === "assistant_output")
+    && event.stream
+  ) {
     const bufferedEvent = bufferStreamEvent(chatId, event);
     if (!bufferedEvent) {
       return undefined;

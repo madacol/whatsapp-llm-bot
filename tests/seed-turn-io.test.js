@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { contentEvent, runtimeEvent, textUpdate } from "../outbound-events.js";
+import { contentEvent, runtimeEvent } from "../outbound-events.js";
+import { textUpdate } from "../message-handle-events.js";
 import { createSeedTurnIo } from "../conversation/seed-turn-io.js";
 
 /**

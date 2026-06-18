@@ -62,8 +62,7 @@ describe("createAgentRunOutputPort", () => {
       {
         via: "reply",
         event: {
-          kind: "content",
-          source: "llm",
+          kind: "assistant_output",
           cwd: "/repo",
           content: [{ type: "markdown", text: "Done" }],
         },
@@ -85,5 +84,23 @@ describe("createAgentRunOutputPort", () => {
 
     assert.equal("replyWithToolResult" in agentOutput, false);
     assert.equal("replyWithPlain" in agentOutput, false);
+  });
+
+  it("emits semantic agent tool result events instead of generic content", async () => {
+    const { context, sent } = createSubject();
+    const agentOutput = createAgentRunOutputPort(context, { cwd: "/repo" });
+
+    await agentOutput.sendToolResult("command output");
+
+    assert.deepEqual(sent, [
+      {
+        via: "send",
+        event: {
+          kind: "agent_tool_result",
+          cwd: "/repo",
+          content: "command output",
+        },
+      },
+    ]);
   });
 });

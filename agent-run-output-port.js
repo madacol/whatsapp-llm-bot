@@ -1,5 +1,7 @@
 import {
-  contentEvent,
+  agentToolResultEvent,
+  appMessageEvent,
+  assistantOutputEvent,
   planEvent,
   runtimeEvent,
   subagentMessageEvent,
@@ -33,15 +35,15 @@ export function createAgentRunOutputPort(context, defaults = {}) {
       ...(options.displaySummary !== undefined && { displaySummary: options.displaySummary }),
       ...(options.context !== undefined && { context: options.context }),
     })),
-    replyWithAssistantOutput: (content, options = {}) => sink.reply(contentEvent("llm", content, {
+    replyWithAssistantOutput: (content, options = {}) => sink.reply(assistantOutputEvent(content, {
       ...withDefaultCwd(options),
       ...(options.stream !== undefined && { stream: options.stream }),
     })),
-    replyWithThinking: () => sink.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }])),
+    replyWithThinking: () => sink.reply(assistantOutputEvent([{ type: "text", text: "Thinking..." }])),
     replyWithSubagentMessage: (input) => sink.reply(subagentMessageEvent(input)),
-    sendToolResult: (content, options) => sink.send(contentEvent("tool-result", content, withDefaultCwd(options))),
-    sendError: (message) => sink.send(contentEvent("error", message)),
-    replyWithError: (message) => sink.reply(contentEvent("error", message)),
+    sendToolResult: (content, options) => sink.send(agentToolResultEvent(content, withDefaultCwd(options))),
+    sendError: (message) => sink.send(appMessageEvent("error", message)),
+    replyWithError: (message) => sink.reply(appMessageEvent("error", message)),
     replyWithPlan: (presentation) => sink.reply(planEvent(presentation)),
     sendUsage: (cost, tokens) => sink.send(usageEvent(cost, tokens)),
   };

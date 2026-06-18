@@ -40,13 +40,13 @@ describe("createAppOutputPort", () => {
 
     assert.deepEqual(replies, [
       {
-        kind: "content",
-        source: "tool-result",
+        kind: "app_message",
+        role: "tool_result",
         content: "Command completed.",
       },
       {
-        kind: "content",
-        source: "error",
+        kind: "app_message",
+        role: "error",
         content: "Command failed.",
       },
     ]);

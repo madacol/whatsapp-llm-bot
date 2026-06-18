@@ -484,7 +484,7 @@ describe("createConversationRunner prompt formatting", () => {
       content: [{ type: "text", text: "hello" }],
       io: {
         reply: async (event) => {
-          if (event.kind === "content") {
+          if (event.kind === "content" || event.kind === "assistant_output") {
             replies.push(event.content);
           }
           return undefined;
@@ -1140,15 +1140,15 @@ describe("createConversationRunner prompt formatting", () => {
       }],
     });
     secondTurn.context.io.reply = async (event) => {
-      assert.equal(event.kind, "content");
-      assert.equal(event.source, "plain");
+      assert.equal(event.kind, "app_message");
+      assert.equal(event.role, "plain");
       const content = event.content;
       assert.equal(typeof content, "string");
-      secondTurn.responses.push({ type: "reply", text: content, source: event.source });
+      secondTurn.responses.push({ type: "reply", text: content, source: "plain" });
       return {
         update: async (update) => {
           assert.equal(update.kind, "text");
-          secondTurn.responses.push({ type: "edit", text: update.text, source: event.source });
+          secondTurn.responses.push({ type: "edit", text: update.text, source: "plain" });
         },
         setInspect: (inspect) => {
           if (inspect) inspectStates.push(inspect);
