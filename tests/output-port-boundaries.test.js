@@ -19,6 +19,10 @@ const guardedFiles = [
   "workspace-command-router.js",
 ];
 
+const contentEventAllowedFiles = new Set([
+  "outbound-events.js",
+]);
+
 describe("output port boundaries", () => {
   it("keeps app and agent-run producers off raw outbound event constructors", () => {
     const violations = [];
@@ -32,5 +36,29 @@ describe("output port boundaries", () => {
     }
 
     assert.deepEqual(violations, []);
+  });
+
+  it("keeps legacy content event construction quarantined", () => {
+    const output = readFileSync(join(repoRoot, "outbound-events.js"), "utf8");
+    assert.match(output, /export function contentEvent/);
+
+    const result = [];
+    for (const file of [
+      "agent-run-output-port.js",
+      "app-output-port.js",
+      "commands/restart-command.js",
+      "conversation/build-agent-io-hooks.js",
+      "http-api-transport.js",
+      "http-api-transport-ledger.js",
+      "whatsapp/outbound/send-content.js",
+      "whatsapp/workspace-presenter.js",
+    ]) {
+      const source = readFileSync(join(repoRoot, file), "utf8");
+      if (/\bcontentEvent\s*\(/.test(source) && !contentEventAllowedFiles.has(file)) {
+        result.push(file);
+      }
+    }
+
+    assert.deepEqual(result, []);
   });
 });

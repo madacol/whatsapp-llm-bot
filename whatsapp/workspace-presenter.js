@@ -6,6 +6,7 @@ import { buildToolPresentation } from "./tool-presentation-model.js";
 import { renderToolActivityContent, renderToolPresentationContent } from "./tool-presenter.js";
 import { createAppOutputPort } from "../app-output-port.js";
 import { formatUsageEventText } from "../usage-formatting.js";
+import { appMessageRoleToSource } from "./outbound/event-rendering.js";
 import {
   buildWorkspaceSurfaceName,
   createWhatsAppWorkspaceTopology,
@@ -69,25 +70,6 @@ function stringifySubagentMessage(event) {
     : "*Sub-agent*";
   const detail = event.agentRole ? `_${event.agentRole}_` : "";
   return [`🧩 ${title}`, detail, event.text].filter(Boolean).join("\n");
-}
-
-/**
- * @param {AppMessageEvent["role"]} role
- * @returns {MessageSource}
- */
-function appMessageRoleToSource(role) {
-  switch (role) {
-    case "tool_result":
-      return "tool-result";
-    case "error":
-      return "error";
-    case "memory":
-      return "memory";
-    case "plain":
-      return "plain";
-    default:
-      return "plain";
-  }
 }
 
 /**

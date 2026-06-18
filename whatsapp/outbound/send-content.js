@@ -25,6 +25,11 @@ import {
   renderFileChangeContent,
   splitSnapshotDiffText,
 } from "./file-change-content.js";
+import {
+  renderAgentToolResultEvent,
+  renderAppMessageEvent,
+  renderAssistantOutputEvent,
+} from "./event-rendering.js";
 export { renderFileChangeContent } from "./file-change-content.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */
@@ -789,25 +794,6 @@ function getGuardianReviewPrefixEmoji(event) {
     return "👎";
   }
   return null;
-}
-
-/**
- * @param {AppMessageEvent["role"]} role
- * @returns {MessageSource}
- */
-function appMessageRoleToSource(role) {
-  switch (role) {
-    case "tool_result":
-      return "tool-result";
-    case "error":
-      return "error";
-    case "memory":
-      return "memory";
-    case "plain":
-      return "plain";
-    default:
-      return "plain";
-  }
 }
 
 /**
@@ -2784,22 +2770,11 @@ function renderOutboundEvent(event) {
         ...(event.cwd !== undefined && { cwd: event.cwd }),
       };
     case "app_message":
-      return {
-        source: appMessageRoleToSource(event.role),
-        content: event.content,
-      };
+      return renderAppMessageEvent(event);
     case "assistant_output":
-      return {
-        source: "llm",
-        content: event.content,
-        ...(event.cwd !== undefined && { cwd: event.cwd }),
-      };
+      return renderAssistantOutputEvent(event);
     case "agent_tool_result":
-      return {
-        source: "tool-result",
-        content: event.content,
-        ...(event.cwd !== undefined && { cwd: event.cwd }),
-      };
+      return renderAgentToolResultEvent(event);
     case "tool_call": {
       const presentation = buildToolPresentationFromToolCallEvent(event);
       return presentation
