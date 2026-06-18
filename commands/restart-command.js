@@ -1,7 +1,7 @@
 import config from "../config.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
 import { listActiveHarnessSessions, waitForAllHarnesses } from "#harnesses";
-import { textUpdate } from "../outbound-events.js";
+import { textUpdate } from "../message-handle-events.js";
 import { defaultRestartGate } from "../restart-gate.js";
 import { scheduleRestart } from "../restart/restart-scheduler.js";
 

@@ -775,7 +775,10 @@ function extractOutboundContentText(content) {
  * @returns {"👍" | "👎" | null}
  */
 function getGuardianReviewPrefixEmoji(event) {
-  if (event.kind !== "content" || event.source !== "llm") {
+  if (
+    (event.kind !== "content" || event.source !== "llm")
+    && event.kind !== "assistant_output"
+  ) {
     return null;
   }
   const text = extractOutboundContentText(event.content).trim();
@@ -786,6 +789,25 @@ function getGuardianReviewPrefixEmoji(event) {
     return "👎";
   }
   return null;
+}
+
+/**
+ * @param {AppMessageEvent["role"]} role
+ * @returns {MessageSource}
+ */
+function appMessageRoleToSource(role) {
+  switch (role) {
+    case "tool_result":
+      return "tool-result";
+    case "error":
+      return "error";
+    case "memory":
+      return "memory";
+    case "plain":
+      return "plain";
+    default:
+      return "plain";
+  }
 }
 
 /**
@@ -2534,6 +2556,24 @@ function formatPinnedStatusPresentation(event, state) {
         summary: "thinking",
       };
     }
+    case "assistant_output": {
+      if (!Array.isArray(event.content)) {
+        return null;
+      }
+      const text = event.content
+        .map((block) => block.type === "text" || block.type === "markdown" ? block.text : "")
+        .join("\n")
+        .trim();
+      if (text !== "Thinking...") {
+        return null;
+      }
+      return {
+        key: "thinking",
+        icon: "💭",
+        provider: "LLM",
+        summary: "thinking",
+      };
+    }
     case "plan":
       return {
         key: "plan",
@@ -2740,6 +2780,23 @@ function renderOutboundEvent(event) {
     case "content":
       return {
         source: event.source,
+        content: event.content,
+        ...(event.cwd !== undefined && { cwd: event.cwd }),
+      };
+    case "app_message":
+      return {
+        source: appMessageRoleToSource(event.role),
+        content: event.content,
+      };
+    case "assistant_output":
+      return {
+        source: "llm",
+        content: event.content,
+        ...(event.cwd !== undefined && { cwd: event.cwd }),
+      };
+    case "agent_tool_result":
+      return {
+        source: "tool-result",
         content: event.content,
         ...(event.cwd !== undefined && { cwd: event.cwd }),
       };

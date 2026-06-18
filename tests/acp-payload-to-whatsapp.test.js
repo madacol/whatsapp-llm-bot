@@ -422,7 +422,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ]);
     assert.deepEqual(trace.outboundEvents.map((entry) => [entry.via, entry.event.kind]), [
       ["send", "runtime_event"],
-      ["reply", "content"],
+      ["reply", "assistant_output"],
       ["reply", "plan"],
       ["send", "runtime_event"],
       ["send", "runtime_event"],

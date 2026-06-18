@@ -1,4 +1,4 @@
-import { textUpdate } from "./outbound-events.js";
+import { textUpdate } from "./message-handle-events.js";
 
 export const FAILURE_MARKER = "❌";
 

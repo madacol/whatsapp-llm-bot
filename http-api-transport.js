@@ -582,8 +582,8 @@ export async function createHttpApiTransport(options = {}) {
         throw new Error("HTTP API transport has not been started");
       }
       appendEvent(chatId, {
-        kind: "content",
-        source: "plain",
+        kind: "app_message",
+        role: "plain",
         content: text,
       }, ledger.getActiveTurnId(chatId));
     },

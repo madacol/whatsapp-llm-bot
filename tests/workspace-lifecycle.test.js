@@ -430,14 +430,18 @@ describe("workspace lifecycle", () => {
     const workspaceBootstrapEvent = transportState.sentEvents.find((entry) => entry.chatId === workspaceSurface.workspace_chat_id);
     assert.deepEqual(workspaceBootstrapEvent, {
       chatId: workspaceSurface.workspace_chat_id,
-      event: contentEvent("plain", [{ type: "text", text: [
-        "Workspace: payments",
-        "Base: master",
-        "Branch: payments",
-        "Status: ready",
-        "Last test: not run",
-        "Last commit: none",
-      ].join("\n") }]),
+      event: {
+        kind: "app_message",
+        role: "plain",
+        content: [{ type: "text", text: [
+          "Workspace: payments",
+          "Base: master",
+          "Branch: payments",
+          "Status: ready",
+          "Last test: not run",
+          "Last commit: none",
+        ].join("\n") }],
+      },
     });
     assert.deepEqual(transportState.sentTexts, []);
     const enabledChat = await store.getChat(workspaceSurface.workspace_chat_id);
@@ -526,27 +530,35 @@ describe("workspace lifecycle", () => {
     const workspaceEvents = transportState.sentEvents
       .filter((entry) => entry.chatId === workspaceSurface.workspace_chat_id)
       .map((entry) => entry.event);
-    assert.deepEqual(workspaceEvents[0], contentEvent("plain", [{ type: "text", text: [
-      "Workspace: multi word branch",
-      "Base: master",
-      "Branch: multi-word-branch",
-      "Status: ready",
-      "Last test: not run",
-      "Last commit: none",
-    ].join("\n") }]));
-    assert.deepEqual(workspaceEvents[1], contentEvent("plain", [{ type: "text", text: "Prompt: investigate duplicate charges" }]));
+    assert.deepEqual(workspaceEvents[0], {
+      kind: "app_message",
+      role: "plain",
+      content: [{ type: "text", text: [
+        "Workspace: multi word branch",
+        "Base: master",
+        "Branch: multi-word-branch",
+        "Status: ready",
+        "Last test: not run",
+        "Last commit: none",
+      ].join("\n") }],
+    });
+    assert.deepEqual(workspaceEvents[1], {
+      kind: "app_message",
+      role: "plain",
+      content: [{ type: "text", text: "Prompt: investigate duplicate charges" }],
+    });
     assert.equal(transportState.sentTexts.length, 0);
     assert.equal(capturedHarnessTurns.length, 1);
     assert.equal(capturedHarnessTurns[0].input, "investigate duplicate charges");
     assert.equal(capturedHarnessTurns[0].runConfig?.workdir, workspace.worktree_path);
     const seededReply = workspaceEvents.find((event) => (
-      event.kind === "content"
+      event.kind === "assistant_output"
       && Array.isArray(event.content)
       && event.content.some((block) => block.type === "markdown" && block.text === "Seed received.")
     ));
-    assert.ok(seededReply, "expected seeded workspace reply to use semantic content events");
-    if (!seededReply || seededReply.kind !== "content") {
-      assert.fail("expected seeded workspace reply to use semantic content events");
+    assert.ok(seededReply, "expected seeded workspace reply to use assistant output events");
+    if (!seededReply || seededReply.kind !== "assistant_output") {
+      assert.fail("expected seeded workspace reply to use assistant output events");
     }
     assert.deepEqual(seededReply.content, [{ type: "markdown", text: "Seed received." }]);
     const workspaceMessages = await store.getMessages(workspaceSurface.workspace_chat_id, new Date(0));

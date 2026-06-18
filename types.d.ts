@@ -258,6 +258,29 @@ type ContentEvent = {
   };
 };
 
+type AppMessageEvent = {
+  kind: "app_message";
+  role: "plain" | "tool_result" | "error" | "memory";
+  content: SendContent;
+  replyToTriggeringMessage?: boolean;
+};
+
+type AssistantOutputEvent = {
+  kind: "assistant_output";
+  content: SendContent;
+  cwd?: string | null;
+  stream?: {
+    id: string;
+    status: "partial" | "final";
+  };
+};
+
+type AgentToolResultEvent = {
+  kind: "agent_tool_result";
+  content: SendContent;
+  cwd?: string | null;
+};
+
 type ToolCallEvent = {
   kind: "tool_call";
   toolCall: LlmChatResponse["toolCalls"][0];
@@ -355,6 +378,9 @@ type UsageTokens = {
 
 type OutboundEvent =
   | ContentEvent
+  | AppMessageEvent
+  | AssistantOutputEvent
+  | AgentToolResultEvent
   | ToolCallEvent
   | ToolActivityEvent
   | CompactToolActivityEvent
@@ -398,7 +424,7 @@ type AgentRunOutputPort = {
     content: SendContent,
     options?: {
       cwd?: string | null;
-      stream?: ContentEvent["stream"];
+      stream?: AssistantOutputEvent["stream"];
     },
   ) => Promise<MessageHandle | undefined>;
   replyWithThinking: () => Promise<MessageHandle | undefined>;

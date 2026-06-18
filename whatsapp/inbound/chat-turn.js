@@ -417,7 +417,10 @@ export function createTurnIo({
    * @returns {{ quoted?: BaileysMessage } | undefined}
    */
   function resolveReplyOptions(event) {
-    if (event.kind === "content" && event.replyToTriggeringMessage) {
+    if (
+      (event.kind === "content" || event.kind === "app_message")
+      && event.replyToTriggeringMessage
+    ) {
       return { quoted: message };
     }
     return undefined;

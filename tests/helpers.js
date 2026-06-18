@@ -96,6 +96,32 @@ export function createChatTurn(overrides = {}) {
         source = event.source;
         content = event.content;
         break;
+      case "app_message":
+        switch (event.role) {
+          case "tool_result":
+            source = "tool-result";
+            break;
+          case "error":
+            source = "error";
+            break;
+          case "memory":
+            source = "memory";
+            break;
+          case "plain":
+          default:
+            source = "plain";
+            break;
+        }
+        content = event.content;
+        break;
+      case "assistant_output":
+        source = "llm";
+        content = event.content;
+        break;
+      case "agent_tool_result":
+        source = "tool-result";
+        content = event.content;
+        break;
       case "tool_call":
         source = "tool-call";
         const presentation = buildToolPresentation(

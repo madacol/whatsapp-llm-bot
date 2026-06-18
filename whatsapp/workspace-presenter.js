@@ -72,6 +72,25 @@ function stringifySubagentMessage(event) {
 }
 
 /**
+ * @param {AppMessageEvent["role"]} role
+ * @returns {MessageSource}
+ */
+function appMessageRoleToSource(role) {
+  switch (role) {
+    case "tool_result":
+      return "tool-result";
+    case "error":
+      return "error";
+    case "memory":
+      return "memory";
+    case "plain":
+      return "plain";
+    default:
+      return "plain";
+  }
+}
+
+/**
  * Best-effort textual fallback when a transport does not support semantic
  * workspace events directly.
  * @param {OutboundEvent} event
@@ -83,6 +102,20 @@ function stringifyEvent(event) {
       const text = stringifyContent(event.content);
       const prefix = SOURCE_PREFIX[event.source];
       return prefix && text ? `${prefix} ${text}` : text;
+    }
+    case "app_message": {
+      const source = appMessageRoleToSource(event.role);
+      const text = stringifyContent(event.content);
+      const prefix = SOURCE_PREFIX[source];
+      return prefix && text ? `${prefix} ${text}` : text;
+    }
+    case "assistant_output": {
+      const text = stringifyContent(event.content);
+      return text ? `${SOURCE_PREFIX.llm} ${text}` : text;
+    }
+    case "agent_tool_result": {
+      const text = stringifyContent(event.content);
+      return text ? `${SOURCE_PREFIX["tool-result"]} ${text}` : text;
     }
     case "tool_call": {
       const args = parseToolArgs(event.toolCall.arguments);

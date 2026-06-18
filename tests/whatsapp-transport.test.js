@@ -14,7 +14,8 @@ import {
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
-import { contentEvent, runtimeEvent, textUpdate } from "../outbound-events.js";
+import { contentEvent, runtimeEvent } from "../outbound-events.js";
+import { textUpdate } from "../message-handle-events.js";
 import { createRestartCommandHandler } from "../commands/restart-command.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
 import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";

@@ -20,6 +20,48 @@ export function contentEvent(source, content, options = {}) {
 }
 
 /**
+ * @param {AppMessageEvent["role"]} role
+ * @param {SendContent} content
+ * @param {{ replyToTriggeringMessage?: boolean }} [options]
+ * @returns {AppMessageEvent}
+ */
+export function appMessageEvent(role, content, options = {}) {
+  return {
+    kind: "app_message",
+    role,
+    content,
+    ...(options.replyToTriggeringMessage !== undefined && { replyToTriggeringMessage: options.replyToTriggeringMessage }),
+  };
+}
+
+/**
+ * @param {SendContent} content
+ * @param {{ cwd?: string | null, stream?: AssistantOutputEvent["stream"] }} [options]
+ * @returns {AssistantOutputEvent}
+ */
+export function assistantOutputEvent(content, options = {}) {
+  return {
+    kind: "assistant_output",
+    content,
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+    ...(options.stream !== undefined && { stream: options.stream }),
+  };
+}
+
+/**
+ * @param {SendContent} content
+ * @param {{ cwd?: string | null }} [options]
+ * @returns {AgentToolResultEvent}
+ */
+export function agentToolResultEvent(content, options = {}) {
+  return {
+    kind: "agent_tool_result",
+    content,
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+  };
+}
+
+/**
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
  * @param {{ cwd?: string | null, displaySummary?: string, context?: ToolCallEvent["context"] }} [options]
  * @returns {ToolCallEvent}
@@ -91,56 +133,4 @@ export function runtimeEvent(event, options = {}) {
     event,
     ...(options.cwd !== undefined && { cwd: options.cwd }),
   };
-}
-
-/**
- * @param {ToolPresentation} presentation
- * @returns {MessageHandleUpdate}
- */
-export function toolCallUpdate(presentation) {
-  return { kind: "tool_call", presentation };
-}
-
-/**
- * @param {ToolFlowState} state
- * @returns {MessageHandleUpdate}
- */
-export function toolFlowUpdate(state) {
-  return { kind: "tool_flow", state };
-}
-
-/**
- * @param {string} text
- * @returns {MessageHandleUpdate}
- */
-export function textUpdate(text) {
-  return { kind: "text", text };
-}
-
-/**
- * @param {ToolPresentation} presentation
- * @param {string | undefined} [output]
- * @returns {MessageInspectState}
- */
-export function toolInspectState(presentation, output) {
-  return output === undefined
-    ? { kind: "tool", presentation }
-    : { kind: "tool", presentation, output };
-}
-
-/**
- * @param {ToolFlowState} state
- * @returns {MessageInspectState}
- */
-export function toolFlowInspectState(state) {
-  return { kind: "tool_flow", state };
-}
-
-/**
- * @param {string} summary
- * @param {string} text
- * @returns {MessageInspectState}
- */
-export function reasoningInspectState(summary, text) {
-  return { kind: "reasoning", summary, text };
 }

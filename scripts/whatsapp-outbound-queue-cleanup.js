@@ -63,12 +63,12 @@ function textFromContent(value) {
  * @returns {boolean}
  */
 function isTransientStatusEvent(event) {
-  if (!isRecord(event) || event.kind !== "content") {
+  if (!isRecord(event) || (event.kind !== "content" && event.kind !== "app_message")) {
     return false;
   }
-  const source = event.source;
+  const source = event.kind === "app_message" ? event.role : event.source;
   const text = textFromContent(event.content).trim();
-  return source === "plain" && (
+  return (source === "plain") && (
     /^codex session ready$/i.test(text)
     || /^codex turn completed$/i.test(text)
     || /^acp assistant item started$/i.test(text)

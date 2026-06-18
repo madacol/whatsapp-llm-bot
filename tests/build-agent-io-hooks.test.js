@@ -317,11 +317,11 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(sent.map((entry) => entry.event.kind), [
       "runtime_event",
       "runtime_event",
-      "content",
+      "assistant_output",
     ]);
     assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "command.started");
     assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.completed");
-    assert.equal(sent[2]?.event.kind === "content" ? sent[2].event.source : "", "llm");
+    assert.equal(sent[2]?.event.kind, "assistant_output");
   });
 
   it("sends one thinking placeholder and makes it inspectable", async () => {
@@ -338,9 +338,9 @@ describe("buildAgentIoHooks", () => {
 
     assert.equal(subject.sent.length, 1);
     assert.equal(subject.sent[0].kind, "reply");
-    assert.equal(subject.sent[0].event.kind, "content");
-    if (subject.sent[0].event.kind !== "content") {
-      assert.fail("Expected content event");
+    assert.equal(subject.sent[0].event.kind, "assistant_output");
+    if (subject.sent[0].event.kind !== "assistant_output") {
+      assert.fail("Expected assistant_output event");
     }
     assert.deepEqual(subject.sent[0].event.content, [{ type: "text", text: "Thinking..." }]);
     assert.deepEqual(subject.reasoningUpdates, [{ kind: "text", text: "Thought" }]);
@@ -684,7 +684,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(sent.map((entry) => entry.event.kind), [
       "runtime_event",
       "runtime_event",
-      "content",
+      "assistant_output",
       "runtime_event",
       "runtime_event",
       "runtime_event",

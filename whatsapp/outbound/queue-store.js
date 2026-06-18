@@ -52,6 +52,17 @@ function isMessageSource(value) {
 
 /**
  * @param {unknown} value
+ * @returns {value is AppMessageEvent["role"]}
+ */
+function isAppMessageRole(value) {
+  return value === "plain"
+    || value === "tool_result"
+    || value === "error"
+    || value === "memory";
+}
+
+/**
+ * @param {unknown} value
  * @returns {value is ToolContentBlock}
  */
 function isToolContentBlock(value) {
@@ -156,6 +167,24 @@ function isOutboundEvent(value) {
             && (value.stream.status === "partial" || value.stream.status === "final")
           )
         );
+    case "app_message":
+      return isAppMessageRole(value.role)
+        && isSendContent(value.content)
+        && (value.replyToTriggeringMessage === undefined || typeof value.replyToTriggeringMessage === "boolean");
+    case "assistant_output":
+      return isSendContent(value.content)
+        && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string")
+        && (
+          value.stream === undefined
+          || (
+            isRecord(value.stream)
+            && typeof value.stream.id === "string"
+            && (value.stream.status === "partial" || value.stream.status === "final")
+          )
+        );
+    case "agent_tool_result":
+      return isSendContent(value.content)
+        && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string");
     case "tool_call":
       return isRecord(value.presentation);
     case "tool_activity":
