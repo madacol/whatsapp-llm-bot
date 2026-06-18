@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { contentEvent } from "../outbound-events.js";
+import { assistantOutputEvent } from "../outbound-events.js";
 import { createWhatsAppWorkspacePresenter } from "../whatsapp/workspace-presenter.js";
 
 /**
@@ -384,17 +384,17 @@ describe("WhatsAppWorkspacePresenter", () => {
 
     const returned = await presenter.sendWorkspaceEvent({
       workspaceId: "ws-1",
-      event: contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
+      event: assistantOutputEvent([{ type: "text", text: "Thinking..." }]),
     });
 
     assert.equal(returned, handle);
     assert.deepEqual(sentEvents, [{
       chatId: "workspace-chat",
-      event: contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
+      event: assistantOutputEvent([{ type: "text", text: "Thinking..." }]),
     }]);
   });
 
-  it("delivers bootstrap and seed prompt text through semantic content events using workspace identity", async () => {
+  it("delivers bootstrap and seed prompt text through semantic assistant output using workspace identity", async () => {
     /** @type {Array<{ chatId: string, text: string }>} */
     const sentTexts = [];
     /** @type {Array<{ chatId: string, event: OutboundEvent }>} */

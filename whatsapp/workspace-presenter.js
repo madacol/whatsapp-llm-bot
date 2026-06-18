@@ -80,11 +80,6 @@ function stringifySubagentMessage(event) {
  */
 function stringifyEvent(event) {
   switch (event.kind) {
-    case "content": {
-      const text = stringifyContent(event.content);
-      const prefix = SOURCE_PREFIX[event.source];
-      return prefix && text ? `${prefix} ${text}` : text;
-    }
     case "app_message": {
       const source = appMessageRoleToSource(event.role);
       const text = stringifyContent(event.content);

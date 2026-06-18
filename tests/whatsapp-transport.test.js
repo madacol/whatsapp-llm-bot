@@ -14,7 +14,7 @@ import {
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
-import { contentEvent, runtimeEvent } from "../outbound-events.js";
+import { agentToolResultEvent, appMessageEvent, assistantOutputEvent, runtimeEvent } from "../outbound-events.js";
 import { textUpdate } from "../message-handle-events.js";
 import { createRestartCommandHandler } from "../commands/restart-command.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
@@ -154,21 +154,21 @@ describe("WhatsApp transport community creation", () => {
     await sendOrQueueWhatsAppEvent({
       getSocket: () => socket,
       chatId,
-      event: contentEvent("llm", [{ type: "markdown", text: "Hel" }], {
+      event: assistantOutputEvent([{ type: "markdown", text: "Hel" }], {
         stream: { id: "assistant-1", status: "partial" },
       }),
     });
     await sendOrQueueWhatsAppEvent({
       getSocket: () => socket,
       chatId,
-      event: contentEvent("llm", [{ type: "markdown", text: "lo" }], {
+      event: assistantOutputEvent([{ type: "markdown", text: "lo" }], {
         stream: { id: "assistant-1", status: "partial" },
       }),
     });
     await sendOrQueueWhatsAppEvent({
       getSocket: () => socket,
       chatId,
-      event: contentEvent("llm", [{ type: "markdown", text: " wor" }], {
+      event: assistantOutputEvent([{ type: "markdown", text: " wor" }], {
         stream: { id: "assistant-1", status: "partial" },
       }),
     });
@@ -177,7 +177,7 @@ describe("WhatsApp transport community creation", () => {
     await sendOrQueueWhatsAppEvent({
       getSocket: () => socket,
       chatId,
-      event: contentEvent("llm", [{ type: "markdown", text: "Hello world" }], {
+      event: assistantOutputEvent([{ type: "markdown", text: "Hello world" }], {
         stream: { id: "assistant-1", status: "final" },
       }),
     });
@@ -283,8 +283,7 @@ describe("WhatsApp transport community creation", () => {
 
     await transport.start(async () => {});
     const queuedHandle = await transport.sendEvent?.(chatId, {
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "queued on disconnect",
     });
 
@@ -355,7 +354,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     await transport.start(async () => {});
-    const queuedHandle = await transport.sendEvent?.(chatId, contentEvent("llm", "queued before edit"));
+    const queuedHandle = await transport.sendEvent?.(chatId, assistantOutputEvent("queued before edit"));
     assert.equal(queuedHandle?.deliveryStatus, "queued");
 
     const updatePromise = queuedHandle?.update(textUpdate("queued after edit"));
@@ -436,8 +435,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     await transport.sendEvent?.(chatId, {
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "queued after 1006",
     });
 
@@ -517,7 +515,7 @@ describe("WhatsApp transport community creation", () => {
       const sendPromise = sendOrQueueWhatsAppEvent({
         getSocket: () => liveSocket,
         chatId,
-        event: contentEvent("llm", "send after quick reconnect"),
+        event: assistantOutputEvent("send after quick reconnect"),
         store: testStore,
       });
 
@@ -559,7 +557,7 @@ describe("WhatsApp transport community creation", () => {
     const handle = await sendOrQueueWhatsAppEvent({
       getSocket: () => null,
       chatId,
-      event: contentEvent("plain", "Transcribing audio...", { replyToTriggeringMessage: true }),
+      event: appMessageEvent("plain", "Transcribing audio...", { replyToTriggeringMessage: true }),
       options: { quoted },
       store: testStore,
     });
@@ -618,7 +616,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     await transport.start(async () => {});
-    await transport.sendEvent?.(chatId, contentEvent("llm", "queued during reconnect"));
+    await transport.sendEvent?.(chatId, assistantOutputEvent("queued during reconnect"));
     assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
 
     if (!processEvents) {
@@ -709,7 +707,7 @@ describe("WhatsApp transport community creation", () => {
       chatId,
       payloadJson: {
         kind: "event",
-        event: contentEvent("llm", "queued while rate limited"),
+        event: assistantOutputEvent("queued while rate limited"),
       },
     });
 
@@ -787,14 +785,14 @@ describe("WhatsApp transport community creation", () => {
       chatId,
       payloadJson: {
         kind: "event",
-        event: contentEvent("llm", "old blocked answer"),
+        event: assistantOutputEvent("old blocked answer"),
       },
     });
     await testStore.enqueueWhatsAppOutboundQueueEntry({
       chatId,
       payloadJson: {
         kind: "event",
-        event: contentEvent("tool-result", "Restart signal sent."),
+        event: agentToolResultEvent("Restart signal sent."),
       },
     });
 
@@ -1100,8 +1098,7 @@ describe("WhatsApp transport community creation", () => {
 
     await transport.start(async () => {});
     const queuedHandle = await transport.sendEvent?.(chatId, {
-      kind: "content",
-      source: "llm",
+      kind: "assistant_output",
       content: "queued before open hook",
     });
     queuedAckId = queuedHandle?.queueId;
@@ -1240,7 +1237,7 @@ describe("WhatsApp transport community creation", () => {
       chatId,
       payloadJson: {
         kind: "event",
-        event: contentEvent("llm", "queued unrelated output"),
+        event: assistantOutputEvent("queued unrelated output"),
       },
     });
 
@@ -1324,7 +1321,7 @@ describe("WhatsApp transport community creation", () => {
       chatId,
       payloadJson: {
         kind: "event",
-        event: contentEvent("llm", "queued while initial sync is buffering"),
+        event: assistantOutputEvent("queued while initial sync is buffering"),
       },
     });
 
@@ -1436,7 +1433,7 @@ describe("WhatsApp transport community creation", () => {
 
       const restartingHandle = await firstTransport.sendEvent?.(
         chatId,
-        contentEvent("llm", "Restarting..."),
+        assistantOutputEvent("Restarting..."),
       );
       assert.equal(typeof restartingHandle?.transportHandleId, "string");
 
@@ -1561,7 +1558,7 @@ describe("WhatsApp transport community creation", () => {
 
     await transport.start(async (turn) => {
       try {
-        await turn.io.reply(contentEvent("llm", "queued while opening"));
+        await turn.io.reply(assistantOutputEvent("queued while opening"));
       } finally {
         resolveReplyHandled();
       }

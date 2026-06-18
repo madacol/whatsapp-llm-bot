@@ -19,19 +19,6 @@ const guardedFiles = [
   "workspace-command-router.js",
 ];
 
-const contentEventAllowedFiles = new Set([
-  "outbound-events.js",
-]);
-
-const legacyContentEventCompatibilityFiles = new Set([
-  "outbound-events.js",
-  "types.d.ts",
-  "http-api-transport-ledger.js",
-  "whatsapp/outbound/persistent-queue.js",
-  "whatsapp/outbound/queue-store.js",
-  "whatsapp/outbound/send-content.js",
-]);
-
 /**
  * @param {string} dir
  * @returns {string[]}
@@ -74,9 +61,8 @@ describe("output port boundaries", () => {
     assert.deepEqual(violations, []);
   });
 
-  it("keeps legacy content event construction quarantined", () => {
+  it("removes legacy content event construction", () => {
     const output = readFileSync(join(repoRoot, "outbound-events.js"), "utf8");
-    assert.match(output, /export function contentEvent/);
 
     const result = [];
     for (const file of [
@@ -90,28 +76,27 @@ describe("output port boundaries", () => {
       "whatsapp/workspace-presenter.js",
     ]) {
       const source = readFileSync(join(repoRoot, file), "utf8");
-      if (/\bcontentEvent\s*\(/.test(source) && !contentEventAllowedFiles.has(file)) {
+      if (/\bcontentEvent\s*\(/.test(source)) {
         result.push(file);
       }
     }
 
+    assert.doesNotMatch(output, /export function contentEvent/);
     assert.deepEqual(result, []);
   });
 
-  it("marks ContentEvent as legacy compatibility", () => {
+  it("removes ContentEvent from the canonical output model", () => {
     const types = readFileSync(join(repoRoot, "types.d.ts"), "utf8");
 
-    assert.match(types, /@deprecated[^\n]*legacy compatibility[^\n]*ContentEvent[\s\S]*type ContentEvent = \{/);
+    assert.doesNotMatch(types, /\btype ContentEvent\s*=/);
+    assert.doesNotMatch(types, /\|\s*ContentEvent\b/);
   });
 
-  it("accepts legacy content events only in compatibility infrastructure", () => {
+  it("rejects legacy content events in production code", () => {
     const violations = [];
 
     for (const file of listProjectFiles(repoRoot)) {
       if (file.startsWith("tests/")) {
-        continue;
-      }
-      if (legacyContentEventCompatibilityFiles.has(file)) {
         continue;
       }
       const source = readFileSync(join(repoRoot, file), "utf8");
