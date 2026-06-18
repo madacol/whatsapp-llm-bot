@@ -55,9 +55,9 @@ const MEDIA_TO_TEXT_PROMPTS = {
 };
 
 /** @type {Record<string, string>} */
-const DESCRIPTION_LABELS = {
+const MEDIA_TEXT_HEADINGS = {
   image: "Image description",
-  audio: "Audio description",
+  audio: "Audio transcript",
   video: "Video description",
 };
 
@@ -127,6 +127,17 @@ function hasUnsupportedContent(messages, supportedModalities) {
  */
 export function resolveMediaModel(contentType, mediaToTextModels) {
   return mediaToTextModels[contentType] || mediaToTextModels.general || config[`${contentType}_to_text_model`] || config.media_to_text_model || "";
+}
+
+/**
+ * Format generated media text for provider input without bracketed pseudo-content.
+ * @param {"image" | "audio" | "video"} contentType
+ * @param {string} translation
+ * @returns {string}
+ */
+export function formatMediaTranslationText(contentType, translation) {
+  const heading = MEDIA_TEXT_HEADINGS[contentType] || `${contentType} description`;
+  return `${heading}:\n${translation}`;
 }
 
 /**
@@ -223,10 +234,9 @@ async function translateMediaBlock(block, contentType, modelId, llmClient, db, c
     contextMessages,
     currentText,
   });
-  const label = DESCRIPTION_LABELS[contentType] || `${contentType} description`;
   return /** @type {TextContentBlock} */ ({
     type: "text",
-    text: `[${label}: ${translation}]`,
+    text: formatMediaTranslationText(contentType, translation),
   });
 }
 

@@ -226,6 +226,51 @@ function notifyCreateThenDeleteAddRewriteFixture(threadId, cwd) {
 }
 
 /**
+ * @param {unknown} threadId
+ * @param {string} cwd
+ */
+function notifyRenamePatchFixture(threadId, cwd) {
+  const oldPath = `${cwd}/rename-source.md`;
+  const newPath = `${cwd}/rename-target.md`;
+  const diff = [
+    "diff --git a/rename-source.md b/rename-target.md",
+    "index 3bd1f0e..34e9a43 100644",
+    "--- a/rename-source.md",
+    "+++ b/rename-target.md",
+    "@@ -1 +1 @@",
+    "-Original rename source",
+    "+Renamed target content",
+    `Moved to: ${newPath}`,
+    "",
+  ].join("\n");
+  const item = {
+    id: "rename-patch-1",
+    type: "fileChange",
+    changes: [{
+      path: oldPath,
+      kind: { type: "update" },
+      diff,
+    }],
+    status: "completed",
+  };
+
+  notify("item/started", {
+    threadId,
+    turnId: "fake-turn-1",
+    item: { ...item, status: "inProgress" },
+  });
+  notify("item/completed", {
+    threadId,
+    turnId: "fake-turn-1",
+    item,
+  });
+  notify("turn/completed", {
+    threadId,
+    turn: { id: "fake-turn-1", status: "completed" },
+  });
+}
+
+/**
  * @param {unknown} parsed
  */
 async function handleMessage(parsed) {
@@ -466,6 +511,9 @@ async function handleMessage(parsed) {
       } else if (firstTextInput(params.input) === "create then delete add rewrite fixture") {
         const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
         notifyCreateThenDeleteAddRewriteFixture(params.threadId, cwd);
+      } else if (firstTextInput(params.input) === "rename patch fixture") {
+        const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
+        notifyRenamePatchFixture(params.threadId, cwd);
       }
       notify("thread/tokenUsage/updated", {
         threadId: params.threadId,
