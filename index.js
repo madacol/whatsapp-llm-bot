@@ -19,6 +19,7 @@ import { createConversationRunner } from "./conversation/create-conversation-run
 import { deliverPendingRestartAck } from "./restart/restart-ack-delivery.js";
 import { createRestartAckStore } from "./restart/restart-ack-store.js";
 import { createRestartCommandHandler } from "./commands/restart-command.js";
+import { createGracefulShutdownHandler } from "./shutdown-lifecycle.js";
 
 const log = createLogger("index");
 const SHUTDOWN_FORCE_EXIT_MS = 10_000;
@@ -172,14 +173,10 @@ if (!process.env.TESTING) {
   const stopReminders = startReminderDaemon(transport.sendText);
   const stopModelsCache = startModelsCacheDaemon();
 
-  async function cleanup() {
+  async function cleanupResources() {
     try {
       stopReminders();
       stopModelsCache();
-      const waitedOn = await waitForAllHarnesses();
-      if (waitedOn.length > 0) {
-        log.info(`Shutdown waited on ${waitedOn.length} chat(s): ${waitedOn.join(", ")}`);
-      }
       await stopHtmlServer();
       await apiTransport?.stop();
       await transport.stop();
@@ -189,28 +186,12 @@ if (!process.env.TESTING) {
     }
   }
 
-  let shutdownStarted = false;
-  /**
-   * @param {"SIGINT" | "SIGTERM"} signal
-   * @returns {Promise<void>}
-   */
-  async function shutdown(signal) {
-    if (shutdownStarted) {
-      return;
-    }
-    shutdownStarted = true;
-    const exitCode = signal === "SIGINT" ? 130 : 0;
-    const forceExitTimer = setTimeout(() => {
-      log.error(`${signal} cleanup timed out after ${SHUTDOWN_FORCE_EXIT_MS}ms; exiting anyway.`);
-      process.exit(exitCode);
-    }, SHUTDOWN_FORCE_EXIT_MS);
-    forceExitTimer.unref();
-
-    log.info(`${signal} received, cleaning up...`);
-    await cleanup();
-    clearTimeout(forceExitTimer);
-    process.exit(exitCode);
-  }
+  const shutdown = createGracefulShutdownHandler({
+    waitForActiveTurns: waitForAllHarnesses,
+    cleanupResources,
+    log,
+    forceCleanupTimeoutMs: SHUTDOWN_FORCE_EXIT_MS,
+  });
 
   process.on("SIGINT", () => { void shutdown("SIGINT"); });
   process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
@@ -225,7 +206,7 @@ if (!process.env.TESTING) {
       return;
     }
     log.error("Uncaught Exception:", error);
-    await cleanup();
+    await cleanupResources();
     process.exit(1);
   });
   process.on("unhandledRejection", (reason) => {
