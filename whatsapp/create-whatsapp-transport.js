@@ -14,7 +14,9 @@ import {
   sendOrQueueWhatsAppEvent,
   sendOrQueueWhatsAppText,
 } from "./outbound/persistent-queue.js";
+import { listQueuedWhatsAppOutbound } from "./outbound/queue-store.js";
 import { editWhatsAppMessageByHandle } from "./outbound/send-content.js";
+import { getOutboundQueueReplayDelayMs } from "../whatsapp-outbound-queue-config.js";
 
 const log = createLogger("whatsapp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -721,6 +723,8 @@ export async function createWhatsAppTransport(options = {}) {
   let hasOpenConnection = false;
   /** @type {Promise<void> | null} */
   let flushQueuedPromise = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let queuedOutboundRetryTimer = null;
   /** @type {Map<string, MessageHandle | undefined>} */
   const recentlyDeliveredQueuedHandles = new Map();
 
@@ -731,6 +735,10 @@ export async function createWhatsAppTransport(options = {}) {
   function clearRuntimeState() {
     currentSocket = null;
     hasOpenConnection = false;
+    if (queuedOutboundRetryTimer) {
+      clearTimeout(queuedOutboundRetryTimer);
+      queuedOutboundRetryTimer = null;
+    }
     confirmRuntime.clear();
     selectRuntime.clear();
     reactionRuntime.clear();
@@ -764,6 +772,39 @@ export async function createWhatsAppTransport(options = {}) {
     });
 
     return flushQueuedPromise;
+  }
+
+  /**
+   * Queue replay normally runs on `connection.open`. Baileys can also throw a
+   * recoverable send error while the socket still appears open; schedule a
+   * same-connection replay so that durable rows do not wait for a future open.
+   * @returns {void}
+   */
+  function scheduleQueuedOutboundRetry() {
+    if (!hasOpenConnection || queuedOutboundRetryTimer) {
+      return;
+    }
+
+    const delayMs = Math.max(25, getOutboundQueueReplayDelayMs());
+    queuedOutboundRetryTimer = setTimeout(() => {
+      queuedOutboundRetryTimer = null;
+      const sock = currentSocket;
+      if (!sock || !hasOpenConnection) {
+        return;
+      }
+      void (async () => {
+        if (!await waitForEventBufferToDrain(sock)) {
+          return;
+        }
+        await flushQueuedOutbound();
+        const remaining = outboundStore ? await listQueuedWhatsAppOutbound(outboundStore) : [];
+        if (remaining.length > 0 && currentSocket === sock && hasOpenConnection) {
+          scheduleQueuedOutboundRetry();
+        }
+      })().catch((error) => {
+        log.error("Error retrying queued WhatsApp outbound work:", error);
+      });
+    }, delayMs);
   }
 
   /**
@@ -1020,13 +1061,17 @@ export async function createWhatsAppTransport(options = {}) {
       if (!started) {
         throw new Error("WhatsApp transport has not been started");
       }
-      return sendOrQueueWhatsAppEvent({
+      const handle = await sendOrQueueWhatsAppEvent({
         getSocket: getOpenSocket,
         chatId,
         event,
         reactionRuntime,
         ...(outboundStore ? { store: outboundStore } : {}),
       });
+      if (handle?.deliveryStatus === "queued") {
+        scheduleQueuedOutboundRetry();
+      }
+      return handle;
     },
 
     async createGroup(subject, participants) {
