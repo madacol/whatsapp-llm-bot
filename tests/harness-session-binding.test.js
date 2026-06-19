@@ -67,8 +67,21 @@ function createService(options = {}) {
     getMessages: async () => [],
     llmClient: {},
     resolveHarnessInstanceForChat: options.resolveHarnessInstanceForChat ?? (async () => null),
+    ...(options.log ? { log: options.log } : {}),
   });
   return { service, directory, saved };
+}
+
+function createLogSink() {
+  /** @type {Array<{ message: string, data: Record<string, unknown> }>} */
+  const entries = [];
+  return {
+    entries,
+    log: {
+      info: (message, data) => entries.push({ message, data: data ?? {} }),
+      warn: () => {},
+    },
+  };
 }
 
 describe("createHarnessSessionBindingService", () => {
@@ -143,6 +156,45 @@ describe("createHarnessSessionBindingService", () => {
     });
 
     assert.equal(started[0].resumeCursor, null);
+  });
+
+  it("logs whether a turn attempted and accepted runtime session reattachment", async () => {
+    const { adapter } = createAdapterFixture({ resumeCursor: "stored-cursor" });
+    const { entries, log } = createLogSink();
+    const { service } = createService({ log });
+
+    await service.beginTurn({
+      chatId: "chat-reattach",
+      chatInfo: {
+        harness_session_kind: "codex",
+        harness_session_id: "stored-cursor",
+      },
+      harnessName: "codex",
+      harnessInstance: {
+        instanceId: "work",
+        adapter,
+      },
+      runConfig: { workdir: "/repo" },
+      turnId: "turn-reattach-1",
+    });
+
+    const adapterStarted = entries.find((entry) => entry.message === "Agent runtime adapter session started.");
+    assert.ok(adapterStarted);
+    assert.deepEqual({
+      chatId: adapterStarted.data.chatId,
+      turnId: adapterStarted.data.turnId,
+      inputResumeCursor: adapterStarted.data.inputResumeCursor,
+      adapterResumeCursor: adapterStarted.data.adapterResumeCursor,
+      reattachAttempted: adapterStarted.data.reattachAttempted,
+      reattachAccepted: adapterStarted.data.reattachAccepted,
+    }, {
+      chatId: "chat-reattach",
+      turnId: "turn-reattach-1",
+      inputResumeCursor: "stored-cursor",
+      adapterResumeCursor: "stored-cursor",
+      reattachAttempted: true,
+      reattachAccepted: true,
+    });
   });
 
   it("clears runtime and durable session state through one seam", async () => {

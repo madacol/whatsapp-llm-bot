@@ -4,6 +4,7 @@ import {
   readAcpAgentDefinitionsFromEnv,
 } from "./acp-agents.js";
 import config from "../config.js";
+import { getHarnessSessionDirectory } from "./session-directory.js";
 
 /**
  * @typedef {{
@@ -706,17 +707,24 @@ export async function waitForAllHarnesses() {
 
 /**
  * List active harness sessions without waiting for them to finish.
- * @returns {Array<{ chatId: string, label: string }>}
+ * @returns {import("../restart/restart-ack-store.js").RestartInterruptedTurn[]}
  */
 export function listActiveHarnessSessions() {
+  const directory = getHarnessSessionDirectory();
   return [...instances.values()]
     .flatMap((instance) => {
       if (typeof instance.harness.listActiveSessions !== "function") {
         return [];
       }
-      return instance.harness.listActiveSessions().map((chatId) => ({
-        chatId,
-        label: instance.displayName ?? instance.name,
-      }));
+      return instance.harness.listActiveSessions().map((chatId) => {
+        const binding = directory.getBinding(chatId);
+        return {
+          chatId,
+          label: instance.displayName ?? instance.name,
+          ...(binding?.activeTurnId ? { activeTurnId: binding.activeTurnId } : {}),
+          ...(binding?.resumeCursor ? { resumeCursor: binding.resumeCursor } : {}),
+          ...(binding?.status ? { status: binding.status } : {}),
+        };
+      });
     });
 }

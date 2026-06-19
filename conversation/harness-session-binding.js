@@ -1,4 +1,7 @@
 import { generateSessionTitle } from "./session-title.js";
+import { createLogger } from "../logger.js";
+
+const defaultLog = createLogger("conversation:session-binding");
 
 /**
  * @typedef {{
@@ -35,7 +38,7 @@ import { generateSessionTitle } from "./session-title.js";
  *   llmClient: LlmClient,
  *   resolveHarnessInstanceForChat: (chatInfo: import("../store.js").ChatRow | undefined) => Promise<ReturnType<typeof import("#harnesses").resolveHarnessInstance> | null>,
  *   generateTitle?: typeof generateSessionTitle,
- *   log?: Pick<Console, "warn">,
+ *   log?: Pick<Console, "info" | "warn">,
  * }} HarnessSessionBindingServiceDeps
  */
 
@@ -91,7 +94,7 @@ function getDurableResumeCursor(chatInfo, harnessName) {
  */
 export function createHarnessSessionBindingService(deps) {
   const titleGenerator = deps.generateTitle ?? generateSessionTitle;
-  const log = deps.log ?? console;
+  const log = deps.log ?? defaultLog;
 
   /**
    * @param {string} chatId
@@ -175,11 +178,30 @@ export function createHarnessSessionBindingService(deps) {
       turnId,
     }) {
       let currentResumeCursor = getDurableResumeCursor(chatInfo, harnessName);
+      log.info("Agent runtime session binding begin.", {
+        chatId,
+        harnessName,
+        instanceId: harnessInstance?.instanceId ?? null,
+        turnId,
+        hasDurableResumeCursor: !!currentResumeCursor,
+        durableResumeCursor: currentResumeCursor ?? null,
+      });
       if (harnessInstance?.adapter) {
         const startedSession = await harnessInstance.adapter.startSession({
           chatId,
           runConfig,
           resumeCursor: currentResumeCursor,
+        });
+        log.info("Agent runtime adapter session started.", {
+          chatId,
+          harnessName,
+          instanceId: harnessInstance.instanceId,
+          turnId,
+          inputResumeCursor: currentResumeCursor ?? null,
+          adapterResumeCursor: startedSession.resumeCursor ?? null,
+          reattachAttempted: !!currentResumeCursor,
+          reattachAccepted: !!currentResumeCursor && (startedSession.resumeCursor ?? null) === currentResumeCursor,
+          status: startedSession.status,
         });
         currentResumeCursor = startedSession.resumeCursor ?? currentResumeCursor;
       }
@@ -203,6 +225,15 @@ export function createHarnessSessionBindingService(deps) {
           status,
           resumeCursor,
         );
+        log.info("Agent runtime session binding status updated.", {
+          chatId,
+          harnessName,
+          instanceId: harnessInstance?.instanceId ?? null,
+          turnId,
+          status,
+          activeTurnId: status === "running" ? turnId : null,
+          resumeCursor: getResumeCursor(),
+        });
       };
 
       const saveHarnessSessionAndBinding = async (
@@ -226,11 +257,23 @@ export function createHarnessSessionBindingService(deps) {
             .listSessions()
             .find((session) => session.chatId === chatId);
           if (activeSession?.resumeCursor) {
+            log.info("Agent runtime adapter session synced to durable cursor.", {
+              chatId,
+              sessionKind,
+              activeStatus: activeSession.status,
+              resumeCursor: activeSession.resumeCursor,
+            });
             await saveHarnessSessionAndBinding(chatId, {
               id: activeSession.resumeCursor,
               kind: sessionKind,
             });
           } else if (currentResumeCursor && activeSession && ["stopped", "error"].includes(activeSession.status)) {
+            log.info("Agent runtime adapter session cleared durable cursor.", {
+              chatId,
+              sessionKind,
+              activeStatus: activeSession.status,
+              previousResumeCursor: currentResumeCursor,
+            });
             await saveHarnessSessionAndBinding(chatId, null);
           }
         },
