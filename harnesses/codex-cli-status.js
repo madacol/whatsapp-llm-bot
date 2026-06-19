@@ -1,10 +1,15 @@
 import { spawn } from "node:child_process";
 
-const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_INITIAL_INPUT_DELAY_MS = 3_000;
+export const CODEX_CLI_STATUS_DEFAULT_TIMEOUT_MS = 45_000;
+export const CODEX_CLI_STATUS_READY_FALLBACK_MS = 10_000;
+export const CODEX_CLI_STATUS_COMMAND_INPUT = "\u0015/status\r";
+export const CODEX_CLI_STATUS_SKIP_UPDATE_INPUT = "2\r";
+export const CODEX_CLI_STATUS_DEFAULT_PROMPT_INPUT = "\r";
+const DEFAULT_INITIAL_INPUT_DELAY_MS = CODEX_CLI_STATUS_READY_FALLBACK_MS;
 const FALLBACK_ENTER_DELAY_MS = 1_000;
 const STATUS_PTY_COLUMNS = 100;
 const STATUS_PTY_ROWS = 30;
+const MAX_FAILURE_OUTPUT_CHARS = 2_000;
 
 /**
  * @typedef {{
@@ -60,6 +65,81 @@ export function stripTerminalControl(output) {
 }
 
 /**
+ * @param {string} output
+ * @returns {string[]}
+ */
+function getPlainTerminalLines(output) {
+  return stripTerminalControl(output)
+    .replace(/\r(?!\n)/g, "\n")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
+ * @param {string[]} lines
+ * @param {(line: string) => boolean} predicate
+ * @returns {number}
+ */
+function findLastLineIndex(lines, predicate) {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (predicate(lines[index] ?? "")) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Detect when the interactive Codex terminal has rendered its input prompt.
+ * The prompt marker alone is not enough; terminal output can contain that
+ * glyph in older content. Require the Codex shell header and a trailing prompt
+ * line so `/status` is sent only after the UI is actually ready.
+ * @param {string} output
+ * @returns {boolean}
+ */
+export function isCodexCliReadyForInput(output) {
+  const lines = getPlainTerminalLines(output);
+  const codexHeaderIndex = findLastLineIndex(lines, (line) => line.includes("OpenAI Codex"));
+  if (codexHeaderIndex === -1) {
+    return false;
+  }
+  const tail = lines.slice(codexHeaderIndex + 1);
+  const promptIndex = findLastLineIndex(tail, (line) => /^›(?:\s|$)/.test(line));
+  if (promptIndex === -1) {
+    return false;
+  }
+  const afterPrompt = tail.slice(promptIndex + 1);
+  return !afterPrompt.some((line) => /^(?:[•◦]\s*)?(?:Loading|Booting)\b/i.test(line));
+}
+
+/**
+ * Detect Codex startup prompts that block the input shell before `/status` can
+ * be sent. The caller should answer with Enter only, which chooses the safe
+ * default for repair prompts and continues past update notices.
+ * @param {string} output
+ * @returns {boolean}
+ */
+export function isCodexCliStartupPromptWaiting(output) {
+  return getCodexCliStartupPromptResponse(output) !== null;
+}
+
+/**
+ * @param {string} output
+ * @returns {string | null}
+ */
+export function getCodexCliStartupPromptResponse(output) {
+  const plain = getPlainTerminalLines(output).join("\n");
+  if (/Update available!/i.test(plain) && /Press enter to continue/i.test(plain)) {
+    return CODEX_CLI_STATUS_SKIP_UPDATE_INPUT;
+  }
+  if (/Repair Codex local data now\?\s*\[y\/N\]:/i.test(plain)) {
+    return CODEX_CLI_STATUS_DEFAULT_PROMPT_INPUT;
+  }
+  return null;
+}
+
+/**
  * @param {string} line
  * @returns {string | null}
  */
@@ -102,6 +182,32 @@ function panelLooksLikeStatus(lines, startIndex, endIndex) {
     && /(?:Account|Session):/i.test(panel)
     && /(?:5h limit|Weekly limit):/i.test(panel)
     && weeklyLimitCount >= (panel.includes("GPT-5.3-Codex-Spark limit:") ? 2 : 1);
+}
+
+/**
+ * @param {string[]} lines
+ * @param {number} startIndex
+ * @param {number} endIndex
+ * @returns {boolean}
+ */
+function panelLooksLikePotentialStatus(lines, startIndex, endIndex) {
+  const panel = lines.slice(startIndex, endIndex).join("\n");
+  return /(?:Session|Usage|limit):/i.test(panel);
+}
+
+/**
+ * @param {string} output
+ * @returns {string}
+ */
+export function summarizeCodexStatusFailureOutput(output) {
+  const plain = getPlainTerminalLines(output).join("\n").trim();
+  if (!plain) {
+    return "";
+  }
+  const clipped = plain.length > MAX_FAILURE_OUTPUT_CHARS
+    ? `...${plain.slice(-MAX_FAILURE_OUTPUT_CHARS)}`
+    : plain;
+  return `\n\nLast Codex CLI output:\n${clipped}`;
 }
 
 /**
@@ -225,6 +331,9 @@ export function extractCodexStatusPanel(output) {
     if (panelLooksLikeStatus(boxLines, start, end)) {
       return boxLines.slice(start, end).join("\n").trim();
     }
+    if (panelLooksLikePotentialStatus(boxLines, start, end)) {
+      return boxLines.slice(start, end).join("\n").trim();
+    }
   }
 
   throw new Error("Codex CLI /status output did not contain a status panel.");
@@ -267,7 +376,7 @@ export async function readCodexCliStatus(options = {}) {
     ...(options.workdir ? ["-C", options.workdir] : []),
     ...(options.args ?? []),
   ];
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? CODEX_CLI_STATUS_DEFAULT_TIMEOUT_MS;
   const initialInputDelayMs = options.initialInputDelayMs ?? DEFAULT_INITIAL_INPUT_DELAY_MS;
   const commandLine = `stty cols ${STATUS_PTY_COLUMNS} rows ${STATUS_PTY_ROWS}; exec ${buildCommandLine(command, args)}`;
   const child = spawn("script", ["-qfec", commandLine, "/dev/null"], {
@@ -279,6 +388,7 @@ export async function readCodexCliStatus(options = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let sentStatus = false;
+    let answeredStartupPrompt = false;
     let buffer = "";
     /** @type {NodeJS.Timeout | null} */
     let inputTimer = null;
@@ -329,7 +439,7 @@ export async function readCodexCliStatus(options = {}) {
         return;
       }
       sentStatus = true;
-      child.stdin.write("/status\n");
+      child.stdin.write(CODEX_CLI_STATUS_COMMAND_INPUT);
       fallbackEnterTimer = setTimeout(() => {
         if (!settled && child.stdin.writable) {
           child.stdin.write("\r");
@@ -342,8 +452,15 @@ export async function readCodexCliStatus(options = {}) {
      */
     function onData(chunk) {
       buffer += chunk.toString();
-      const plain = stripTerminalControl(buffer);
-      if (!sentStatus && /›/.test(plain)) {
+      const startupPromptResponse = getCodexCliStartupPromptResponse(buffer);
+      if (!sentStatus && !answeredStartupPrompt && startupPromptResponse !== null) {
+        answeredStartupPrompt = true;
+        if (child.stdin.writable) {
+          child.stdin.write(startupPromptResponse);
+        }
+        return;
+      }
+      if (!sentStatus && isCodexCliReadyForInput(buffer)) {
         sendStatus();
       }
       if (!sentStatus) {
@@ -372,7 +489,7 @@ export async function readCodexCliStatus(options = {}) {
       if (settled) {
         return;
       }
-      fail(new Error(`Codex CLI /status exited before rendering status (code ${code ?? "null"}, signal ${signal ?? "null"}).`));
+      fail(new Error(`Codex CLI /status exited before rendering status (code ${code ?? "null"}, signal ${signal ?? "null"}).${summarizeCodexStatusFailureOutput(buffer)}`));
     }
 
     child.stdout.on("data", onData);
@@ -381,7 +498,9 @@ export async function readCodexCliStatus(options = {}) {
     child.on("exit", onExit);
     inputTimer = setTimeout(sendStatus, initialInputDelayMs);
     timeoutTimer = setTimeout(() => {
-      fail(new Error("Timed out waiting for Codex CLI /status output."));
+      fail(new Error(sentStatus
+        ? `Timed out waiting for Codex CLI /status output.${summarizeCodexStatusFailureOutput(buffer)}`
+        : `Timed out waiting for Codex CLI to become ready for /status input.${summarizeCodexStatusFailureOutput(buffer)}`));
     }, timeoutMs);
   });
 }

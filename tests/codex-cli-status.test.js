@@ -1,8 +1,92 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { extractCodexStatusPanel, formatCodexStatusForReply, parseCodexStatusPanel } from "../harnesses/codex-cli-status.js";
+import {
+  CODEX_CLI_STATUS_COMMAND_INPUT,
+  CODEX_CLI_STATUS_DEFAULT_PROMPT_INPUT,
+  CODEX_CLI_STATUS_DEFAULT_TIMEOUT_MS,
+  CODEX_CLI_STATUS_READY_FALLBACK_MS,
+  CODEX_CLI_STATUS_SKIP_UPDATE_INPUT,
+  extractCodexStatusPanel,
+  formatCodexStatusForReply,
+  getCodexCliStartupPromptResponse,
+  isCodexCliReadyForInput,
+  isCodexCliStartupPromptWaiting,
+  parseCodexStatusPanel,
+  summarizeCodexStatusFailureOutput,
+} from "../harnesses/codex-cli-status.js";
 
 describe("Codex CLI status output", () => {
+  it("uses a generous default timeout for fresh interactive Codex startup", () => {
+    assert.equal(CODEX_CLI_STATUS_DEFAULT_TIMEOUT_MS, 45_000);
+    assert.equal(CODEX_CLI_STATUS_READY_FALLBACK_MS, 10_000);
+  });
+
+  it("clears existing prompt text before submitting the status command", () => {
+    assert.equal(CODEX_CLI_STATUS_COMMAND_INPUT, "\u0015/status\r");
+  });
+
+  it("detects readiness only after the Codex input prompt is trailing", () => {
+    assert.equal(isCodexCliReadyForInput([
+      "\u001b[2m╭────────────────────────────╮\u001b[m",
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.139.0) │\u001b[m",
+      "\u001b[2m│ Model: \u001b[22mgpt-5.5\u001b[2m │\u001b[m",
+      "\u001b[2m╰────────────────────────────╯\u001b[m",
+    ].join("\n")), false);
+
+    assert.equal(isCodexCliReadyForInput([
+      "\u001b[2m╭────────────────────────────╮\u001b[m",
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.139.0) │\u001b[m",
+      "\u001b[2m╰────────────────────────────╯\u001b[m",
+      "\u001b[1m›\u001b[22m ",
+    ].join("\n")), true);
+  });
+
+  it("accepts the ready prompt when Codex renders footer text after it", () => {
+    assert.equal(isCodexCliReadyForInput([
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.139.0) │\u001b[m",
+      "\u001b[1m›\u001b[22m Summarize recent commits",
+      "gpt-5.5 high · ~/whatsapp-llm-bot",
+    ].join("\n")), true);
+  });
+
+  it("ignores stale prompt glyphs that are not the current input line", () => {
+    assert.equal(isCodexCliReadyForInput([
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.139.0) │\u001b[m",
+      "\u001b[1m›\u001b[22m old prompt line",
+      "\u001b[2mLoading session...\u001b[m",
+    ].join("\n")), false);
+
+    assert.equal(isCodexCliReadyForInput([
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.139.0) │\u001b[m",
+      "\u001b[1m›\u001b[22m Implement {feature}",
+      "\u001b[2m• Booting MCP server: codex_apps (0s...)\u001b[m",
+    ].join("\n")), false);
+  });
+
+  it("detects startup prompts that must be dismissed before /status", () => {
+    const updatePrompt = [
+      "✨ Update available!",
+      "1. Update now (runs `npm install -g @openai/codex`)",
+      "Press enter to continue",
+    ].join("\n");
+    assert.equal(isCodexCliStartupPromptWaiting(updatePrompt), true);
+    assert.equal(getCodexCliStartupPromptResponse(updatePrompt), CODEX_CLI_STATUS_SKIP_UPDATE_INPUT);
+
+    const repairPrompt = [
+      "Codex couldn't start because its local database appears to be damaged.",
+      "Repair Codex local data now? [y/N]:",
+    ].join("\n");
+    assert.equal(isCodexCliStartupPromptWaiting(repairPrompt), true);
+    assert.equal(getCodexCliStartupPromptResponse(repairPrompt), CODEX_CLI_STATUS_DEFAULT_PROMPT_INPUT);
+
+    const normalPrompt = [
+      ">_ OpenAI Codex (v0.139.0)",
+      "›",
+    ].join("\n");
+    assert.equal(isCodexCliStartupPromptWaiting(normalPrompt), false);
+    assert.equal(getCodexCliStartupPromptResponse(normalPrompt), null);
+  });
+
   it("extracts the rendered /status panel from ANSI terminal output", () => {
     const output = [
       "\u001b[?2026h",
@@ -26,6 +110,63 @@ describe("Codex CLI status output", () => {
       "5h limit: [████░] 85% left (resets 21:09)",
       "Weekly limit: [██░░] 15% left",
     ].join("\n"));
+  });
+
+  it("falls back to the latest Codex panel when strict status fields changed", () => {
+    const output = [
+      "\u001b[2m╭────────────────────────────╮\u001b[m",
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.140.0) │\u001b[m",
+      "\u001b[2m│ Usage: \u001b[22mtemporarily unavailable\u001b[2m │\u001b[m",
+      "\u001b[2m│ Account: \u001b[22muser@example.com\u001b[2m │\u001b[m",
+      "\u001b[2m╰────────────────────────────╯\u001b[m",
+    ].join("\n");
+
+    assert.equal(extractCodexStatusPanel(output), [
+      ">_ OpenAI Codex (v0.140.0)",
+      "Usage: temporarily unavailable",
+      "Account: user@example.com",
+    ].join("\n"));
+  });
+
+  it("does not treat the startup Codex panel as status output", () => {
+    const output = [
+      "\u001b[2m╭────────────────────────────────────────────╮\u001b[m",
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.139.0)                 │\u001b[m",
+      "\u001b[2m│                                            │\u001b[m",
+      "\u001b[2m│ model:     \u001b[22mgpt-5.5 high\u001b[2m   \u001b[22m/model\u001b[2m to change │\u001b[m",
+      "\u001b[2m│ directory: \u001b[22m~/whatsapp-llm-bot\u001b[2m              │\u001b[m",
+      "\u001b[2m╰────────────────────────────────────────────╯\u001b[m",
+      "\u001b[1m›\u001b[22m ",
+    ].join("\n");
+
+    assert.throws(() => extractCodexStatusPanel(output), /did not contain a status panel/);
+  });
+
+  it("does not return a partially rendered status panel with account only", () => {
+    const output = [
+      "\u001b[2m╭────────────────────────────╮\u001b[m",
+      "\u001b[2m│ >_ \u001b[22m\u001b[1mOpenAI Codex\u001b[22m\u001b[2m (v0.141.0) │\u001b[m",
+      "\u001b[2m│ Model: \u001b[22mgpt-5.5\u001b[2m │\u001b[m",
+      "\u001b[2m│ Account: \u001b[22muser@example.com\u001b[2m │\u001b[m",
+    ].join("\n");
+
+    assert.throws(() => extractCodexStatusPanel(output), /did not contain a status panel/);
+  });
+
+  it("summarizes cleaned terminal output for failures", () => {
+    assert.equal(
+      summarizeCodexStatusFailureOutput([
+        "\u001b[31mCodex couldn't start\u001b[m",
+        "Cause: attempt to write a readonly database",
+      ].join("\n")),
+      [
+        "",
+        "",
+        "Last Codex CLI output:",
+        "Codex couldn't start",
+        "Cause: attempt to write a readonly database",
+      ].join("\n"),
+    );
   });
 
   it("parses status fields and formats them like the old /status summary", () => {
