@@ -1,3 +1,7 @@
+import { createLogger } from "./logger.js";
+
+const log = createLogger("restart");
+
 /**
  * @typedef {{
  *   isWaiting: () => boolean,
@@ -25,18 +29,27 @@ export function createRestartGate() {
     },
     beginWaiting() {
       waiting = true;
+      log.info("Restart gate entered waiting state.");
     },
     queueTurn(turn) {
       queuedTurns.push(turn);
+      log.info("Queued incoming turn while restart is waiting.", {
+        chatId: turn.chatId,
+        queuedTurnCount: queuedTurns.length,
+      });
     },
     drainQueuedTurns() {
       const turns = [...queuedTurns];
       queuedTurns.length = 0;
+      log.info("Drained turns queued while restart was waiting.", {
+        queuedTurnCount: turns.length,
+      });
       return turns;
     },
     reset() {
       waiting = false;
       queuedTurns.length = 0;
+      log.info("Restart gate reset.");
     },
   };
 }

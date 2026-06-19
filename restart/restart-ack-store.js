@@ -7,9 +7,13 @@ const DEFAULT_RESTART_ACK_PATH = ".state/restart-ack.json";
  * @typedef {{
  *   chatId: string,
  *   label?: string,
+ *   activeTurnId?: string,
+ *   resumeCursor?: string,
+ *   status?: string,
  * }} RestartInterruptedTurn
  *
  * @typedef {{
+ *   restartId?: string,
  *   chatId: string,
  *   requestedAt: string,
  *   transportHandleId?: string,
@@ -53,6 +57,9 @@ function parseInterruptedTurns(value) {
     return [{
       chatId: entry.chatId,
       ...(typeof entry.label === "string" && entry.label.length > 0 ? { label: entry.label } : {}),
+      ...(typeof entry.activeTurnId === "string" && entry.activeTurnId.length > 0 ? { activeTurnId: entry.activeTurnId } : {}),
+      ...(typeof entry.resumeCursor === "string" && entry.resumeCursor.length > 0 ? { resumeCursor: entry.resumeCursor } : {}),
+      ...(typeof entry.status === "string" && entry.status.length > 0 ? { status: entry.status } : {}),
     }];
   });
   return turns.length > 0 ? turns : undefined;
@@ -66,7 +73,10 @@ function parseRestartAckRecord(value) {
   if (!isRecord(value)) {
     return null;
   }
-  const { chatId, requestedAt, oldPid, transportHandleId, keyId, isImage, queueId, interruptedTurns } = value;
+  const { restartId, chatId, requestedAt, oldPid, transportHandleId, keyId, isImage, queueId, interruptedTurns } = value;
+  if (restartId !== undefined && typeof restartId !== "string") {
+    return null;
+  }
   if (typeof chatId !== "string" || chatId.length === 0) {
     return null;
   }
@@ -90,6 +100,7 @@ function parseRestartAckRecord(value) {
   }
   const parsedInterruptedTurns = parseInterruptedTurns(interruptedTurns);
   return {
+    ...(restartId ? { restartId } : {}),
     chatId,
     requestedAt,
     oldPid,

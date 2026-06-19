@@ -6,6 +6,18 @@ import path from "node:path";
 import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
 
+function createLogSink() {
+  /** @type {Array<{ level: string, message: string, data: Record<string, unknown> }>} */
+  const entries = [];
+  return {
+    entries,
+    log: {
+      info: (message, data) => entries.push({ level: "info", message, data: data ?? {} }),
+      warn: (message, data) => entries.push({ level: "warn", message, data: data ?? {} }),
+    },
+  };
+}
+
 describe("restart acknowledgement delivery", () => {
   it("edits the persisted restart acknowledgement message after startup", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
@@ -230,6 +242,55 @@ describe("restart acknowledgement delivery", () => {
         chatId: "active-chat@g.us",
         text: "Previous codex turn was interrupted by restart before it completed. No final result was produced.",
       }]);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("logs post-start acknowledgement delivery with the persisted restart id", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    const { entries, log } = createLogSink();
+
+    try {
+      await store.save({
+        restartId: "restart-delivery-1",
+        chatId: "restart-chat@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        transportHandleId: "restart-handle-1",
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        log,
+        editMessage: async () => {},
+        sendText: async () => {},
+      });
+
+      assert.deepEqual(entries.map((entry) => ({
+        message: entry.message,
+        restartId: entry.data.restartId,
+        chatId: entry.data.chatId,
+      })), [
+        {
+          message: "Pending restart acknowledgement found.",
+          restartId: "restart-delivery-1",
+          chatId: "restart-chat@g.us",
+        },
+        {
+          message: "Restart acknowledgement edited.",
+          restartId: "restart-delivery-1",
+          chatId: "restart-chat@g.us",
+        },
+        {
+          message: "Restart acknowledgement marker cleared.",
+          restartId: "restart-delivery-1",
+          chatId: "restart-chat@g.us",
+        },
+      ]);
       assert.equal(await store.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });
