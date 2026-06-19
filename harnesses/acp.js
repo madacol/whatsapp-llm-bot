@@ -186,6 +186,19 @@ function installActiveAcpRunControls(active, input) {
 }
 
 /**
+ * @returns {{ promise: Promise<void>, resolve: () => void }}
+ */
+function createActiveRunCompletion() {
+  /** @type {() => void} */
+  let resolve = () => {};
+  /** @type {Promise<void>} */
+  const promise = new Promise((innerResolve) => {
+    resolve = () => innerResolve(undefined);
+  });
+  return { promise, resolve };
+}
+
+/**
  * @param {{
  *   name?: string,
  *   label?: string,
@@ -193,6 +206,7 @@ function installActiveAcpRunControls(active, input) {
  *   config?: Record<string, unknown>,
  *   defaultCommand?: string,
  *   readCodexStatus?: () => Promise<string>,
+ *   startRun?: typeof startAcpRun,
  * }} [options]
  * @returns {AgentHarness}
  */
@@ -202,7 +216,8 @@ export function createAcpHarness(options = {}) {
   const sessionKind = options.sessionKind ?? "native";
   const config = options.config ?? {};
   const commandSpec = resolveAcpCommand(config, options.defaultCommand);
-  /** @type {Map<string, { abortController: AbortController, steer?: (text: string) => Promise<boolean>, setMode?: (mode: string) => Promise<boolean>, pendingRequests?: Map<string, (value: string | null) => void>, pendingUserInputs?: Map<string, (value: unknown) => void> }>} */
+  const startRun = options.startRun ?? startAcpRun;
+  /** @type {Map<string, { abortController: AbortController, completed: Promise<void>, steer?: (text: string) => Promise<boolean>, setMode?: (mode: string) => Promise<boolean>, pendingRequests?: Map<string, (value: string | null) => void>, pendingUserInputs?: Map<string, (value: unknown) => void> }>} */
   const activeRuns = new Map();
   const commandHandler = createGenericAcpCommandHandler({
     harnessName: name,
@@ -216,6 +231,12 @@ export function createAcpHarness(options = {}) {
   return {
     getName: () => name,
     getCapabilities: () => ACP_HARNESS_CAPABILITIES,
+    listActiveSessions: () => [...activeRuns.keys()].filter((chatId) => chatId !== "__legacy__"),
+    async waitForIdle() {
+      const entries = [...activeRuns.entries()].filter(([chatId]) => chatId !== "__legacy__");
+      await Promise.all(entries.map(([, active]) => active.completed.catch(() => {})));
+      return entries.map(([chatId]) => chatId);
+    },
     async run({ messages, hooks, runConfig }) {
       const prompt = buildPrompt(messages);
       if (!prompt) {
@@ -226,9 +247,15 @@ export function createAcpHarness(options = {}) {
         };
       }
       const abortController = new AbortController();
-      activeRuns.set("__legacy__", { abortController, pendingRequests: new Map(), pendingUserInputs: new Map() });
+      const completion = createActiveRunCompletion();
+      activeRuns.set("__legacy__", {
+        abortController,
+        completed: completion.promise,
+        pendingRequests: new Map(),
+        pendingUserInputs: new Map(),
+      });
       try {
-        const completed = await startAcpRun({
+        const completed = await startRun({
           ...commandSpec,
           prompt,
           attachments: getLatestUserAttachments(messages),
@@ -249,6 +276,7 @@ export function createAcpHarness(options = {}) {
         return completed.result;
       } finally {
         activeRuns.delete("__legacy__");
+        completion.resolve();
       }
     },
     handleCommand: commandHandler,
@@ -328,7 +356,13 @@ export function createAcpHarness(options = {}) {
             turn: { id: turnId, chatId: turn.chatId, status: "started" },
           });
           const abortController = new AbortController();
-          activeRuns.set(turn.chatId, { abortController, pendingRequests: new Map(), pendingUserInputs: new Map() });
+          const completion = createActiveRunCompletion();
+          activeRuns.set(turn.chatId, {
+            abortController,
+            completed: completion.promise,
+            pendingRequests: new Map(),
+            pendingUserInputs: new Map(),
+          });
           try {
             log.info("ACP startAcpRun starting", {
               name,
@@ -337,7 +371,7 @@ export function createAcpHarness(options = {}) {
               turnId,
               sessionId,
             });
-            const completed = await startAcpRun({
+            const completed = await startRun({
               ...commandSpec,
               prompt,
               attachments: turn.attachments ?? getLatestUserAttachments(turn.messages ?? []),
@@ -386,6 +420,7 @@ export function createAcpHarness(options = {}) {
             return completed.result;
           } finally {
             activeRuns.delete(turn.chatId);
+            completion.resolve();
           }
         },
         async interruptTurn({ chatId }) {

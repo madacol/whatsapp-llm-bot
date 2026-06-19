@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -10,6 +11,22 @@ import { createAcpHarness } from "../harnesses/acp.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
+
+/**
+ * @template T
+ * @returns {{ promise: Promise<T>, resolve: (value: T) => void, reject: (error: Error) => void }}
+ */
+function createDeferred() {
+  /** @type {(value: T) => void} */
+  let resolve = () => {};
+  /** @type {(error: Error) => void} */
+  let reject = () => {};
+  const promise = new Promise((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}
 
 describe("ACP harness", () => {
   it("runs an ACP stdio agent and emits canonical runtime events", async () => {
@@ -50,6 +67,62 @@ describe("ACP harness", () => {
     } finally {
       unsubscribe?.();
     }
+  });
+
+  it("exposes active ACP adapter turns to graceful restart waiters", async () => {
+    const runStarted = createDeferred();
+    const runCanFinish = createDeferred();
+    const harness = createAcpHarness({
+      name: "codex",
+      label: "Codex",
+      config: {
+        command: "fake-acp",
+      },
+      startRun: async () => {
+        runStarted.resolve(undefined);
+        await runCanFinish.promise;
+        return {
+          sessionId: "fake-session-1",
+          capabilities: {},
+          result: {
+            response: [{ type: "text", text: "done" }],
+            messages: [],
+            usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+          },
+        };
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "codex",
+      instanceId: "test",
+      continuationKey: "codex:test",
+    });
+    assert.ok(adapter);
+    assert.equal(typeof harness.listActiveSessions, "function");
+    assert.equal(typeof harness.waitForIdle, "function");
+
+    await adapter.startSession({ chatId: "restart-active-chat" });
+    const turnPromise = adapter.sendTurn({
+      chatId: "restart-active-chat",
+      input: "hold run open",
+      messages: [{ role: "user", content: [{ type: "text", text: "hold run open" }] }],
+    });
+
+    await runStarted.promise;
+    assert.deepEqual(harness.listActiveSessions?.(), ["restart-active-chat"]);
+
+    let idleResolved = false;
+    const idlePromise = harness.waitForIdle?.().then((chatIds) => {
+      idleResolved = true;
+      return chatIds;
+    });
+    await delay(20);
+    assert.equal(idleResolved, false);
+
+    runCanFinish.resolve(undefined);
+    await turnPromise;
+    assert.deepEqual(await idlePromise, ["restart-active-chat"]);
+    assert.deepEqual(harness.listActiveSessions?.(), []);
   });
 
   it("forks provider sessions through the ACP session/fork RFD", async () => {
