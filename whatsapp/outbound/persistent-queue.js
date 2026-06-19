@@ -207,26 +207,26 @@ async function queueEventAfterDebouncedRetry({ getSocket, chatId, event, options
  *   text: string,
  *   store?: import("../../store.js").Store,
  * }} input
- * @returns {Promise<void>}
+ * @returns {Promise<"sent" | "queued">}
  */
 export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }) {
   const sock = getSocket();
   if (!sock) {
-    await queueTextAfterDebouncedRetry({ getSocket, chatId, text, store });
-    return;
+    return queueTextAfterDebouncedRetry({ getSocket, chatId, text, store });
   }
 
   try {
     await sock.sendMessage(chatId, makeTextMessage(text));
+    return "sent";
   } catch (error) {
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
     if (isRateLimitedWhatsAppSendError(error)) {
       await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
-      return;
+      return "queued";
     }
-    await queueTextAfterDebouncedRetry({ getSocket, chatId, text, store });
+    return queueTextAfterDebouncedRetry({ getSocket, chatId, text, store });
   }
 }
 
@@ -237,7 +237,7 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }
  *   text: string,
  *   store?: import("../../store.js").Store,
  * }} input
- * @returns {Promise<void>}
+ * @returns {Promise<"sent" | "queued">}
  */
 async function queueTextAfterDebouncedRetry({ getSocket, chatId, text, store }) {
   await wait(getOutboundQueuePersistDelayMs());
@@ -245,7 +245,7 @@ async function queueTextAfterDebouncedRetry({ getSocket, chatId, text, store }) 
   if (sock) {
     try {
       await sock.sendMessage(chatId, makeTextMessage(text));
-      return;
+      return "sent";
     } catch (error) {
       if (!isRecoverableWhatsAppSendError(error)) {
         throw error;
@@ -253,4 +253,5 @@ async function queueTextAfterDebouncedRetry({ getSocket, chatId, text, store }) 
     }
   }
   await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
+  return "queued";
 }

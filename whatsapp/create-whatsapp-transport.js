@@ -841,12 +841,15 @@ export async function createWhatsAppTransport(options = {}) {
     if (!started) {
       throw new Error("WhatsApp transport has not been started");
     }
-    await sendOrQueueWhatsAppText({
+    const deliveryStatus = await sendOrQueueWhatsAppText({
       getSocket: getOpenSocket,
       chatId,
       text,
       ...(outboundStore ? { store: outboundStore } : {}),
     });
+    if (deliveryStatus === "queued") {
+      scheduleQueuedOutboundRetry();
+    }
   }
 
   /**
