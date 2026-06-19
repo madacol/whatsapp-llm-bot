@@ -385,6 +385,74 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
+  it("retries queued text sends after a recoverable send failure on an open socket", async () => {
+    if (!testDb) {
+      throw new Error("Expected test DB to be initialized");
+    }
+
+    const chatId = `queued-open-text-retry-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    let failSends = false;
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        if (failSends) {
+          throw new Error("Connection Closed");
+        }
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      ...(testStore ? { outboundStore: testStore } : {}),
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    failSends = true;
+    await transport.sendText(chatId, "queued text after open failure");
+
+    assert.equal(sentMessages.length, 0);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+
+    failSends = false;
+    await delay(150);
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: makeTextMessage("queued text after open failure"),
+    }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
   it("applies queued handle updates to the sent message after reconnect", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");
