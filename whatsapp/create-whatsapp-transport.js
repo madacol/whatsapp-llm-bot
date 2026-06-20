@@ -26,6 +26,8 @@ const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-up
 const WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-reactions.jsonl");
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
 const WHATSAPP_TURN_COALESCE_DELAY_MS = 250;
+const WHATSAPP_INGRESS_SOURCE_UPSERT = "messages.upsert";
+const WHATSAPP_INGRESS_SOURCE_REACTION = "messages.reaction";
 
 /**
  * @typedef {{
@@ -139,6 +141,71 @@ function getAlbumExpectedMediaCount(message) {
   const expectedVideos = Number(albumMessage.expectedVideoCount ?? 0);
   const expectedTotal = expectedImages + expectedVideos;
   return expectedTotal > 0 ? expectedTotal : null;
+}
+
+/**
+ * @param {BaileysMessage} message
+ * @returns {string}
+ */
+function getMessageChatId(message) {
+  return message.key.remoteJid || "unknown-chat";
+}
+
+/**
+ * @param {BaileysMessage} message
+ * @returns {string}
+ */
+function createUpsertIngressKey(message) {
+  const chatId = getMessageChatId(message);
+  const messageId = message.key.id || String(message.messageTimestamp ?? "missing-id");
+  const participant = message.key.participant || "";
+  const direction = message.key.fromMe ? "from-me" : "from-user";
+  return `${WHATSAPP_INGRESS_SOURCE_UPSERT}:${chatId}:${messageId}:${participant}:${direction}`;
+}
+
+/**
+ * @param {unknown} event
+ * @param {number} index
+ * @returns {{ chatId: string, ingressKey: string }}
+ */
+function createReactionIngressIdentity(event, index) {
+  if (isRecord(event) && isRecord(event.key)) {
+    const key = event.key;
+    const chatId = typeof key.remoteJid === "string" ? key.remoteJid : "unknown-chat";
+    const messageId = typeof key.id === "string" ? key.id : `missing-id-${index}`;
+    const participant = typeof key.participant === "string" ? key.participant : "";
+    const emoji = isRecord(event.reaction) && typeof event.reaction.text === "string" ? event.reaction.text : "";
+    return {
+      chatId,
+      ingressKey: `${WHATSAPP_INGRESS_SOURCE_REACTION}:${chatId}:${messageId}:${participant}:${emoji}:${index}`,
+    };
+  }
+  return {
+    chatId: "unknown-chat",
+    ingressKey: `${WHATSAPP_INGRESS_SOURCE_REACTION}:unknown:${index}:${Date.now()}`,
+  };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { kind: "messages.upsert", message: BaileysMessage } | { kind: "messages.reaction", reactions: unknown[] }}
+ */
+function isWhatsAppIngressPayload(value) {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    return false;
+  }
+  if (value.kind === WHATSAPP_INGRESS_SOURCE_UPSERT) {
+    return isRecord(value.message);
+  }
+  return value.kind === WHATSAPP_INGRESS_SOURCE_REACTION && Array.isArray(value.reactions);
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatIngressError(error) {
+  return error instanceof Error ? error.stack || error.message : String(error);
 }
 
 /**
@@ -297,13 +364,14 @@ function getTurnCoalesceKey(message) {
  *   handleMessages: (messages: BaileysMessage[]) => Promise<void>,
  * }} input
  * @returns {{
- *   handle: (message: BaileysMessage) => void,
+ *   handle: (message: BaileysMessage) => Promise<void>,
  *   flushAll: () => Promise<void>,
  * }}
  */
 export function createWhatsAppTurnCoalescer({ flushDelayMs = WHATSAPP_TURN_COALESCE_DELAY_MS, handleMessages }) {
   /** @type {Map<string, {
    *   messages: BaileysMessage[],
+   *   waiters: Array<{ resolve: () => void, reject: (error: unknown) => void }>,
    *   timer: ReturnType<typeof setTimeout> | null,
    *   flushing: Promise<void> | null,
    * }>} */
@@ -317,6 +385,7 @@ export function createWhatsAppTurnCoalescer({ flushDelayMs = WHATSAPP_TURN_COALE
     if (!batch) {
       batch = {
         messages: [],
+        waiters: [],
         timer: null,
         flushing: null,
       };
@@ -345,12 +414,25 @@ export function createWhatsAppTurnCoalescer({ flushDelayMs = WHATSAPP_TURN_COALE
     pendingTurns.delete(chatKey);
 
     const messages = [...batch.messages];
+    const waiters = [...batch.waiters];
     batch.messages.length = 0;
+    batch.waiters.length = 0;
     if (messages.length === 0) {
       return;
     }
 
-    batch.flushing = handleMessages(messages);
+    batch.flushing = handleMessages(messages)
+      .then(() => {
+        for (const waiter of waiters) {
+          waiter.resolve();
+        }
+      })
+      .catch((error) => {
+        for (const waiter of waiters) {
+          waiter.reject(error);
+        }
+        throw error;
+      });
     await batch.flushing;
   }
 
@@ -378,7 +460,14 @@ export function createWhatsAppTurnCoalescer({ flushDelayMs = WHATSAPP_TURN_COALE
       const chatKey = getTurnCoalesceKey(message);
       const batch = ensureBatch(chatKey);
       batch.messages.push(message);
+      const accepted = new Promise((resolve, reject) => {
+        batch.waiters.push({
+          resolve: () => resolve(undefined),
+          reject,
+        });
+      });
       scheduleFlush(chatKey);
+      return accepted;
     },
     flushAll: async () => {
       await Promise.all([...pendingTurns.keys()].map((chatKey) => flushBatch(chatKey)));
@@ -727,6 +816,9 @@ export async function createWhatsAppTransport(options = {}) {
   let queuedOutboundRetryTimer = null;
   /** @type {Map<string, MessageHandle | undefined>} */
   const recentlyDeliveredQueuedHandles = new Map();
+  /** @type {Set<number>} */
+  const ingressRowsInFlight = new Set();
+  let ingressDrainScheduled = false;
 
   /**
    * Clear all transport-owned runtime state and timers.
@@ -974,6 +1066,122 @@ export async function createWhatsAppTransport(options = {}) {
       },
     });
 
+    /**
+     * @param {BaileysMessage} message
+     * @param {{ waitForBufferedTurnAcceptance?: boolean }} [options]
+     * @returns {Promise<"done" | "ignored">}
+     */
+    async function processIncomingUpsertMessage(message, options = {}) {
+      const waitForBufferedTurnAcceptance = options.waitForBufferedTurnAcceptance ?? true;
+      if (message.key.fromMe) {
+        return "ignored";
+      }
+
+      const incomingEvent = classifyIncomingMessageEvent(message);
+      switch (incomingEvent.kind) {
+        case "ignore":
+          return "ignored";
+        case "reaction":
+          reactionRuntime.handleReactions(incomingEvent.reactions);
+          return "done";
+        case "poll_update": {
+          const pollVoteEvent = await selectRuntime.resolvePollVoteMessage(incomingEvent.message, sock)
+            ?? await confirmRuntime.resolvePollVoteMessage(incomingEvent.message, sock);
+          if (pollVoteEvent) {
+            if (!selectRuntime.handlePollVote(pollVoteEvent)) {
+              confirmRuntime.handlePollVote(pollVoteEvent);
+            }
+          }
+          return "done";
+        }
+        case "turn":
+          if (await albumCoordinator.handle(incomingEvent.message)) {
+            return "done";
+          }
+          {
+            const accepted = turnCoalescer.handle(incomingEvent.message);
+            if (waitForBufferedTurnAcceptance) {
+              await accepted;
+            }
+          }
+          return "done";
+        default:
+          return "ignored";
+      }
+    }
+
+    /**
+     * @param {unknown[]} reactions
+     * @returns {"done" | "ignored"}
+     */
+    function processIncomingReactionEvents(reactions) {
+      const normalized = normalizeReactionEvents(/** @type {Parameters<typeof normalizeReactionEvents>[0]} */ (reactions));
+      if (normalized.length === 0) {
+        return "ignored";
+      }
+      reactionRuntime.handleReactions(normalized);
+      return "done";
+    }
+
+    /**
+     * @param {import("../store.js").WhatsAppIngressJournalRow} row
+     * @returns {Promise<void>}
+     */
+    async function processIngressJournalRow(row) {
+      if (!outboundStore) {
+        return;
+      }
+      await outboundStore.markWhatsAppIngressJournalRouting(row.id);
+      try {
+        const payload = row.payload_json;
+        if (!isWhatsAppIngressPayload(payload)) {
+          await outboundStore.markWhatsAppIngressJournalDeadLetter(row.id, "Unsupported WhatsApp ingress payload.");
+          return;
+        }
+
+        const result = payload.kind === WHATSAPP_INGRESS_SOURCE_UPSERT
+          ? await processIncomingUpsertMessage(payload.message)
+          : processIncomingReactionEvents(payload.reactions);
+        if (result === "ignored") {
+          await outboundStore.markWhatsAppIngressJournalIgnored(row.id);
+        } else {
+          await outboundStore.markWhatsAppIngressJournalDone(row.id);
+        }
+      } catch (error) {
+        log.error("Error processing WhatsApp ingress journal row:", error);
+        await outboundStore.markWhatsAppIngressJournalFailed(row.id, formatIngressError(error));
+      }
+    }
+
+    /**
+     * @returns {void}
+     */
+    function scheduleIngressJournalDrain() {
+      if (!outboundStore || ingressDrainScheduled) {
+        return;
+      }
+      ingressDrainScheduled = true;
+      setTimeout(() => {
+        ingressDrainScheduled = false;
+        void (async () => {
+          const rows = await outboundStore.listDispatchableWhatsAppIngressJournalEntries();
+          for (const row of rows) {
+            if (ingressRowsInFlight.has(row.id)) {
+              continue;
+            }
+            ingressRowsInFlight.add(row.id);
+            void processIngressJournalRow(row).finally(() => {
+              ingressRowsInFlight.delete(row.id);
+            });
+          }
+        })().catch((error) => {
+          log.error("Error draining WhatsApp ingress journal:", error);
+        });
+      }, 0);
+    }
+
+    scheduleIngressJournalDrain();
+
     sock.ev.process(async (events) => {
       if (connectionSupervisor.isStopped()) {
         return;
@@ -999,44 +1207,42 @@ export async function createWhatsAppTransport(options = {}) {
       if (events["messages.upsert"]) {
         const { messages } = events["messages.upsert"];
         for (const message of messages) {
-          if (message.key.fromMe) continue;
           appendWhatsAppUpsertDiagnostic(message);
-
-          const incomingEvent = classifyIncomingMessageEvent(message);
-          switch (incomingEvent.kind) {
-            case "ignore":
-              continue;
-            case "reaction":
-              reactionRuntime.handleReactions(incomingEvent.reactions);
-              continue;
-            case "poll_update":
-              try {
-                const pollVoteEvent = await selectRuntime.resolvePollVoteMessage(incomingEvent.message, sock)
-                  ?? await confirmRuntime.resolvePollVoteMessage(incomingEvent.message, sock);
-                if (pollVoteEvent) {
-                  if (!selectRuntime.handlePollVote(pollVoteEvent)) {
-                    confirmRuntime.handlePollVote(pollVoteEvent);
-                  }
-                }
-              } catch (error) {
-                log.error("Error processing poll vote from upsert:", error);
-              }
-              continue;
-            case "turn":
-              if (await albumCoordinator.handle(incomingEvent.message)) {
-                continue;
-              }
-              turnCoalescer.handle(incomingEvent.message);
-              continue;
-            default:
-              continue;
+          if (outboundStore) {
+            await outboundStore.enqueueWhatsAppIngressJournalEntry({
+              ingressKey: createUpsertIngressKey(message),
+              sourceEventType: WHATSAPP_INGRESS_SOURCE_UPSERT,
+              chatId: getMessageChatId(message),
+              payloadJson: { kind: WHATSAPP_INGRESS_SOURCE_UPSERT, message },
+            });
+            continue;
+          }
+          try {
+            await processIncomingUpsertMessage(message, { waitForBufferedTurnAcceptance: false });
+          } catch (error) {
+            log.error("Error processing WhatsApp upsert:", error);
           }
         }
+        scheduleIngressJournalDrain();
       }
 
       if (events["messages.reaction"]) {
-        const normalized = normalizeReactionEvents(events["messages.reaction"]);
-        reactionRuntime.handleReactions(normalized);
+        if (outboundStore) {
+          let index = 0;
+          for (const reaction of events["messages.reaction"]) {
+            const identity = createReactionIngressIdentity(reaction, index);
+            await outboundStore.enqueueWhatsAppIngressJournalEntry({
+              ingressKey: identity.ingressKey,
+              sourceEventType: WHATSAPP_INGRESS_SOURCE_REACTION,
+              chatId: identity.chatId,
+              payloadJson: { kind: WHATSAPP_INGRESS_SOURCE_REACTION, reactions: [reaction] },
+            });
+            index += 1;
+          }
+          scheduleIngressJournalDrain();
+        } else {
+          processIncomingReactionEvents(events["messages.reaction"]);
+        }
       }
     });
   }

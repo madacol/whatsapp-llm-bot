@@ -241,6 +241,104 @@ describe("WhatsApp transport community creation", () => {
     );
   });
 
+  it("replays an inbound message after the app handler fails before acknowledgement", async () => {
+    if (!testStore) {
+      throw new Error("Expected test store to be initialized");
+    }
+
+    const chatId = `inbound-retry-${Date.now()}@g.us`;
+    /** @type {Array<ChatTurn>} */
+    const deliveredTurns = [];
+    let attempts = 0;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let firstProcessEvents = null;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let secondProcessEvents = null;
+
+    const firstSocket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
+      ev: {
+        process(handler) {
+          firstProcessEvents = handler;
+        },
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+    const firstTransport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(firstSocket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: testStore,
+    });
+
+    await firstTransport.start(async () => {
+      attempts += 1;
+      throw new Error("simulated app handler failure");
+    });
+    if (!firstProcessEvents) {
+      throw new Error("Expected first connection event processor to be registered");
+    }
+    await firstProcessEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          createWAMessage({ chatId, text: "retry me", senderId: "retry-user" }),
+        ],
+      },
+    });
+    await delay(25);
+    await firstTransport.stop();
+
+    assert.equal(attempts, 1);
+
+    const secondSocket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
+      ev: {
+        process(handler) {
+          secondProcessEvents = handler;
+        },
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+    const secondTransport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(secondSocket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: testStore,
+    });
+
+    await secondTransport.start(async (turn) => {
+      attempts += 1;
+      deliveredTurns.push(turn);
+    });
+    if (!secondProcessEvents) {
+      throw new Error("Expected second connection event processor to be registered");
+    }
+    await waitForTransportBackgroundWork();
+    await delay(25);
+
+    assert.equal(attempts, 2);
+    assert.equal(deliveredTurns.length, 1);
+    assert.deepEqual(
+      deliveredTurns[0].content.filter((block) => block.type === "text").map((block) => block.text),
+      ["retry me"],
+    );
+  });
+
   it("replays queued outbound events when the connection opens again", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");
