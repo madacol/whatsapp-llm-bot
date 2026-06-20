@@ -92,6 +92,32 @@ export async function waitForPidExit(pid, options = {}) {
   return false;
 }
 
+/**
+ * Create an explicit startup dependency for inbound message routing.
+ * WhatsApp can receive and journal inbound events while this promise is
+ * pending; routing starts only after markReady() resolves it.
+ * @returns {{ ready: Promise<void>, markReady: () => void }}
+ */
+export function createStartupRecoveryCoordinator() {
+  /** @type {() => void} */
+  let resolveReady = () => {};
+  /** @type {Promise<void>} */
+  const ready = new Promise((resolve) => {
+    resolveReady = () => resolve();
+  });
+  let resolved = false;
+  return {
+    ready,
+    markReady() {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolveReady();
+    },
+  };
+}
+
 // ── Default initialization (production) ──
 
 // Register optional harnesses
@@ -125,8 +151,10 @@ if (!process.env.TESTING) {
   const store = await initStore();
   const llmClient = createLlmClient();
   const restartAckStore = createRestartAckStore();
+  const startupRecovery = createStartupRecoveryCoordinator();
   const transport = await createWhatsAppTransport({
     outboundStore: store,
+    inboundDispatchReady: startupRecovery.ready,
     onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage, phase }) => {
       await deliverPendingRestartAck({ store: restartAckStore, editMessage, sendText, recoverQueuedMessage, phase });
     },
@@ -146,6 +174,7 @@ if (!process.env.TESTING) {
   });
 
   await startHtmlServer(config.html_server_port);
+  startupRecovery.markReady();
 
   await transport.start(handleMessage).catch(async (error) => {
     log.error("Initialization error:", error);

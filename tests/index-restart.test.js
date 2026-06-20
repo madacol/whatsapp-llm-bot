@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { waitForPidExit } from "../index.js";
+import { createStartupRecoveryCoordinator, waitForPidExit } from "../index.js";
 
 describe("index restart process wait", () => {
   it("sleeps between liveness probes instead of busy-waiting", async () => {
@@ -28,5 +28,26 @@ describe("index restart process wait", () => {
     assert.equal(exited, true);
     assert.deepEqual(sleeps, [250, 250]);
     assert.equal(probes, 3);
+  });
+});
+
+describe("startup recovery coordinator", () => {
+  it("resolves inbound routing readiness only when marked ready", async () => {
+    const coordinator = createStartupRecoveryCoordinator();
+    let ready = false;
+    void coordinator.ready.then(() => {
+      ready = true;
+    });
+
+    await Promise.resolve();
+    assert.equal(ready, false);
+
+    coordinator.markReady();
+    await coordinator.ready;
+    assert.equal(ready, true);
+
+    coordinator.markReady();
+    await coordinator.ready;
+    assert.equal(ready, true);
   });
 });
