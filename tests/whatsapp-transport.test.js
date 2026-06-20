@@ -339,6 +339,76 @@ describe("WhatsApp transport community creation", () => {
     );
   });
 
+  it("journals inbound messages while dispatch waits for startup recovery readiness", async () => {
+    if (!testStore) {
+      throw new Error("Expected test store to be initialized");
+    }
+
+    const chatId = `inbound-ready-gate-${Date.now()}@g.us`;
+    /** @type {(() => void) | null} */
+    let markReady = null;
+    const dispatchReady = new Promise((resolve) => {
+      markReady = () => resolve(undefined);
+    });
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<ChatTurn>} */
+    const deliveredTurns = [];
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      inboundDispatchReady: dispatchReady,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: testStore,
+    });
+
+    await transport.start(async (turn) => {
+      deliveredTurns.push(turn);
+    });
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          createWAMessage({ chatId, text: "wait until ready", senderId: "ready-user" }),
+        ],
+      },
+    });
+    await delay(25);
+
+    assert.equal(deliveredTurns.length, 0);
+
+    markReady?.();
+    await delay(25);
+
+    assert.equal(deliveredTurns.length, 1);
+    assert.deepEqual(
+      deliveredTurns[0].content.filter((block) => block.type === "text").map((block) => block.text),
+      ["wait until ready"],
+    );
+  });
+
   it("replays queued outbound events when the connection opens again", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");

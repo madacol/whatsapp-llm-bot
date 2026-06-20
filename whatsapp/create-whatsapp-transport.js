@@ -783,6 +783,7 @@ function serializeTransportError(error) {
  *   createConnectionSupervisor?: typeof createWhatsAppConnectionSupervisor,
  *   outboundStore?: import("../store.js").Store,
  *   inboundCoalesceDelayMs?: number,
+ *   inboundDispatchReady?: Promise<void>,
  *   onConnectionOpen?: (transport: {
  *     editMessage: (input: { transportHandleId: string, text: string }) => Promise<void>,
  *     sendText: (chatId: string, text: string) => Promise<void>,
@@ -803,6 +804,17 @@ export async function createWhatsAppTransport(options = {}) {
   const reactionRuntime = createReactionRuntime({ observer: appendWhatsAppReactionDiagnostic });
   const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
   const outboundStore = options.outboundStore;
+  const inboundDispatchReady = options.inboundDispatchReady ?? Promise.resolve();
+  let isInboundDispatchReady = false;
+  void inboundDispatchReady.then(
+    () => {
+      isInboundDispatchReady = true;
+    },
+    (error) => {
+      isInboundDispatchReady = true;
+      log.error("WhatsApp inbound dispatch readiness failed; continuing ingress dispatch.", error);
+    },
+  );
 
   /** @type {(turn: ChatTurn) => Promise<void>} */
   let onTurn = async () => {};
@@ -1164,6 +1176,9 @@ export async function createWhatsAppTransport(options = {}) {
       setTimeout(() => {
         ingressDrainScheduled = false;
         void (async () => {
+          if (!isInboundDispatchReady) {
+            await inboundDispatchReady.catch(() => {});
+          }
           const rows = await outboundStore.listDispatchableWhatsAppIngressJournalEntries();
           for (const row of rows) {
             if (ingressRowsInFlight.has(row.id)) {
