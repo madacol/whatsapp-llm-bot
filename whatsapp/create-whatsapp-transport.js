@@ -6,6 +6,14 @@ import { getDefaultRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import { adaptIncomingMessages } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
+import { createWhatsAppIngressDispatcher } from "./inbound/ingress-dispatcher.js";
+import {
+  createReactionIngressIdentity,
+  createUpsertIngressKey,
+  getMessageChatId,
+  WHATSAPP_INGRESS_SOURCE_REACTION,
+  WHATSAPP_INGRESS_SOURCE_UPSERT,
+} from "./inbound/ingress-journal.js";
 import { createConfirmRuntime } from "./runtime/confirm-runtime.js";
 import { createReactionRuntime } from "./runtime/reaction-runtime.js";
 import { createSelectRuntime } from "./runtime/select-runtime.js";
@@ -26,8 +34,6 @@ const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-up
 const WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-reactions.jsonl");
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
 const WHATSAPP_TURN_COALESCE_DELAY_MS = 250;
-const WHATSAPP_INGRESS_SOURCE_UPSERT = "messages.upsert";
-const WHATSAPP_INGRESS_SOURCE_REACTION = "messages.reaction";
 
 /**
  * @typedef {{
@@ -141,71 +147,6 @@ function getAlbumExpectedMediaCount(message) {
   const expectedVideos = Number(albumMessage.expectedVideoCount ?? 0);
   const expectedTotal = expectedImages + expectedVideos;
   return expectedTotal > 0 ? expectedTotal : null;
-}
-
-/**
- * @param {BaileysMessage} message
- * @returns {string}
- */
-function getMessageChatId(message) {
-  return message.key.remoteJid || "unknown-chat";
-}
-
-/**
- * @param {BaileysMessage} message
- * @returns {string}
- */
-function createUpsertIngressKey(message) {
-  const chatId = getMessageChatId(message);
-  const messageId = message.key.id || String(message.messageTimestamp ?? "missing-id");
-  const participant = message.key.participant || "";
-  const direction = message.key.fromMe ? "from-me" : "from-user";
-  return `${WHATSAPP_INGRESS_SOURCE_UPSERT}:${chatId}:${messageId}:${participant}:${direction}`;
-}
-
-/**
- * @param {unknown} event
- * @param {number} index
- * @returns {{ chatId: string, ingressKey: string }}
- */
-function createReactionIngressIdentity(event, index) {
-  if (isRecord(event) && isRecord(event.key)) {
-    const key = event.key;
-    const chatId = typeof key.remoteJid === "string" ? key.remoteJid : "unknown-chat";
-    const messageId = typeof key.id === "string" ? key.id : `missing-id-${index}`;
-    const participant = typeof key.participant === "string" ? key.participant : "";
-    const emoji = isRecord(event.reaction) && typeof event.reaction.text === "string" ? event.reaction.text : "";
-    return {
-      chatId,
-      ingressKey: `${WHATSAPP_INGRESS_SOURCE_REACTION}:${chatId}:${messageId}:${participant}:${emoji}:${index}`,
-    };
-  }
-  return {
-    chatId: "unknown-chat",
-    ingressKey: `${WHATSAPP_INGRESS_SOURCE_REACTION}:unknown:${index}:${Date.now()}`,
-  };
-}
-
-/**
- * @param {unknown} value
- * @returns {value is { kind: "messages.upsert", message: BaileysMessage } | { kind: "messages.reaction", reactions: unknown[] }}
- */
-function isWhatsAppIngressPayload(value) {
-  if (!isRecord(value) || typeof value.kind !== "string") {
-    return false;
-  }
-  if (value.kind === WHATSAPP_INGRESS_SOURCE_UPSERT) {
-    return isRecord(value.message);
-  }
-  return value.kind === WHATSAPP_INGRESS_SOURCE_REACTION && Array.isArray(value.reactions);
-}
-
-/**
- * @param {unknown} error
- * @returns {string}
- */
-function formatIngressError(error) {
-  return error instanceof Error ? error.stack || error.message : String(error);
 }
 
 /**
@@ -804,17 +745,6 @@ export async function createWhatsAppTransport(options = {}) {
   const reactionRuntime = createReactionRuntime({ observer: appendWhatsAppReactionDiagnostic });
   const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
   const outboundStore = options.outboundStore;
-  const inboundDispatchReady = options.inboundDispatchReady ?? Promise.resolve();
-  let isInboundDispatchReady = false;
-  void inboundDispatchReady.then(
-    () => {
-      isInboundDispatchReady = true;
-    },
-    (error) => {
-      isInboundDispatchReady = true;
-      log.error("WhatsApp inbound dispatch readiness failed; continuing ingress dispatch.", error);
-    },
-  );
 
   /** @type {(turn: ChatTurn) => Promise<void>} */
   let onTurn = async () => {};
@@ -828,9 +758,6 @@ export async function createWhatsAppTransport(options = {}) {
   let queuedOutboundRetryTimer = null;
   /** @type {Map<string, MessageHandle | undefined>} */
   const recentlyDeliveredQueuedHandles = new Map();
-  /** @type {Set<number>} */
-  const ingressRowsInFlight = new Set();
-  let ingressDrainScheduled = false;
 
   /**
    * Clear all transport-owned runtime state and timers.
@@ -1135,67 +1062,17 @@ export async function createWhatsAppTransport(options = {}) {
       return "done";
     }
 
-    /**
-     * @param {import("../store.js").WhatsAppIngressJournalRow} row
-     * @returns {Promise<void>}
-     */
-    async function processIngressJournalRow(row) {
-      if (!outboundStore) {
-        return;
-      }
-      await outboundStore.markWhatsAppIngressJournalRouting(row.id);
-      try {
-        const payload = row.payload_json;
-        if (!isWhatsAppIngressPayload(payload)) {
-          await outboundStore.markWhatsAppIngressJournalDeadLetter(row.id, "Unsupported WhatsApp ingress payload.");
-          return;
-        }
+    const ingressDispatcher = outboundStore
+      ? createWhatsAppIngressDispatcher({
+          store: outboundStore,
+          inboundDispatchReady: options.inboundDispatchReady,
+          processUpsertMessage: processIncomingUpsertMessage,
+          processReactionEvents: processIncomingReactionEvents,
+          log,
+        })
+      : null;
 
-        const result = payload.kind === WHATSAPP_INGRESS_SOURCE_UPSERT
-          ? await processIncomingUpsertMessage(payload.message)
-          : processIncomingReactionEvents(payload.reactions);
-        if (result === "ignored") {
-          await outboundStore.markWhatsAppIngressJournalIgnored(row.id);
-        } else {
-          await outboundStore.markWhatsAppIngressJournalDone(row.id);
-        }
-      } catch (error) {
-        log.error("Error processing WhatsApp ingress journal row:", error);
-        await outboundStore.markWhatsAppIngressJournalFailed(row.id, formatIngressError(error));
-      }
-    }
-
-    /**
-     * @returns {void}
-     */
-    function scheduleIngressJournalDrain() {
-      if (!outboundStore || ingressDrainScheduled) {
-        return;
-      }
-      ingressDrainScheduled = true;
-      setTimeout(() => {
-        ingressDrainScheduled = false;
-        void (async () => {
-          if (!isInboundDispatchReady) {
-            await inboundDispatchReady.catch(() => {});
-          }
-          const rows = await outboundStore.listDispatchableWhatsAppIngressJournalEntries();
-          for (const row of rows) {
-            if (ingressRowsInFlight.has(row.id)) {
-              continue;
-            }
-            ingressRowsInFlight.add(row.id);
-            void processIngressJournalRow(row).finally(() => {
-              ingressRowsInFlight.delete(row.id);
-            });
-          }
-        })().catch((error) => {
-          log.error("Error draining WhatsApp ingress journal:", error);
-        });
-      }, 0);
-    }
-
-    scheduleIngressJournalDrain();
+    ingressDispatcher?.scheduleDrain();
 
     sock.ev.process(async (events) => {
       if (connectionSupervisor.isStopped()) {
@@ -1238,11 +1115,14 @@ export async function createWhatsAppTransport(options = {}) {
             log.error("Error processing WhatsApp upsert:", error);
           }
         }
-        scheduleIngressJournalDrain();
+        ingressDispatcher?.scheduleDrain();
       }
 
       if (events["messages.reaction"]) {
         if (outboundStore) {
+          if (!ingressDispatcher) {
+            throw new Error("WhatsApp ingress dispatcher is unavailable.");
+          }
           let index = 0;
           for (const reaction of events["messages.reaction"]) {
             const identity = createReactionIngressIdentity(reaction, index);
@@ -1254,7 +1134,7 @@ export async function createWhatsAppTransport(options = {}) {
             });
             index += 1;
           }
-          scheduleIngressJournalDrain();
+          ingressDispatcher.scheduleDrain();
         } else {
           processIncomingReactionEvents(events["messages.reaction"]);
         }
