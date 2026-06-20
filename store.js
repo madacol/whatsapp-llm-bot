@@ -75,6 +75,19 @@ const log = createLogger("store");
  *   created_at: string;
  *   expires_at: string;
  * }} WhatsAppEditHandleRow
+ *
+ * @typedef {{
+ *   id: number;
+ *   ingress_key: string;
+ *   source_event_type: string;
+ *   chat_id: string;
+ *   payload_json: unknown;
+ *   state: "received" | "routing" | "done" | "ignored" | "dead_letter";
+ *   attempt_count: number;
+ *   last_error: string | null;
+ *   created_at: string;
+ *   updated_at: string;
+ * }} WhatsAppIngressJournalRow
  */
 
 /**
@@ -167,6 +180,18 @@ export async function getChatOrThrow(_db, chatId) {
  *   }) => Promise<WhatsAppEditHandleRow>;
  *   getWhatsAppEditHandle: (id: string) => Promise<WhatsAppEditHandleRow | null>;
  *   deleteExpiredWhatsAppEditHandles: (now: string) => Promise<void>;
+ *   enqueueWhatsAppIngressJournalEntry: (input: {
+ *     ingressKey: string,
+ *     sourceEventType: string,
+ *     chatId: string,
+ *     payloadJson: unknown,
+ *   }) => Promise<WhatsAppIngressJournalRow>;
+ *   listDispatchableWhatsAppIngressJournalEntries: () => Promise<WhatsAppIngressJournalRow[]>;
+ *   markWhatsAppIngressJournalRouting: (id: number) => Promise<void>;
+ *   markWhatsAppIngressJournalDone: (id: number) => Promise<void>;
+ *   markWhatsAppIngressJournalIgnored: (id: number) => Promise<void>;
+ *   markWhatsAppIngressJournalFailed: (id: number, reason: string) => Promise<void>;
+ *   markWhatsAppIngressJournalDeadLetter: (id: number, reason: string) => Promise<void>;
  *   archiveWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>;
  *   setWorkspaceStatus: (workspaceId: string, status: WorkspaceStatus, options?: { conflictedFiles?: string[] }) => Promise<WorkspaceRow | null>;
  *   updateWorkspaceLastTestStatus: (workspaceId: string, lastTestStatus: WorkspaceRow["last_test_status"]) => Promise<WorkspaceRow | null>;

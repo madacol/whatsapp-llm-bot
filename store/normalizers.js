@@ -48,6 +48,18 @@ function isWhatsAppEditMessageKind(value) {
 
 /**
  * @param {unknown} value
+ * @returns {value is import("../store.js").WhatsAppIngressJournalRow["state"]}
+ */
+function isWhatsAppIngressJournalState(value) {
+  return value === "received"
+    || value === "routing"
+    || value === "done"
+    || value === "ignored"
+    || value === "dead_letter";
+}
+
+/**
+ * @param {unknown} value
  * @returns {value is HarnessSessionRef["kind"]}
  */
 function isHarnessSessionKind(value) {
@@ -217,6 +229,47 @@ export function normalizeWhatsAppEditHandleRow(raw) {
     message_kind: raw.message_kind,
     created_at: createdAt,
     expires_at: expiresAt,
+  };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {import("../store.js").WhatsAppIngressJournalRow | null}
+ */
+export function normalizeWhatsAppIngressJournalRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+
+  const id = normalizeIntegerId(raw.id);
+  const attemptCount = normalizeIntegerId(raw.attempt_count);
+  const createdAt = normalizeTimestampValue(raw.created_at);
+  const updatedAt = normalizeTimestampValue(raw.updated_at);
+  if (
+    id === null
+    || attemptCount === null
+    || typeof raw.ingress_key !== "string"
+    || typeof raw.source_event_type !== "string"
+    || typeof raw.chat_id !== "string"
+    || !isWhatsAppIngressJournalState(raw.state)
+    || (raw.last_error !== null && typeof raw.last_error !== "string")
+    || !createdAt
+    || !updatedAt
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    ingress_key: raw.ingress_key,
+    source_event_type: raw.source_event_type,
+    chat_id: raw.chat_id,
+    payload_json: raw.payload_json,
+    state: raw.state,
+    attempt_count: attemptCount,
+    last_error: raw.last_error,
+    created_at: createdAt,
+    updated_at: updatedAt,
   };
 }
 

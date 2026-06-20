@@ -1,5 +1,6 @@
 import {
   normalizeWhatsAppEditHandleRow,
+  normalizeWhatsAppIngressJournalRow,
   normalizeWhatsAppOutboundQueueRow,
   normalizeWhatsAppWorkspacePresentationRow,
 } from "../normalizers.js";
@@ -48,6 +49,18 @@ import {
  *   }) => Promise<import("../../store.js").WhatsAppEditHandleRow>;
  *   getWhatsAppEditHandle: (id: string) => Promise<import("../../store.js").WhatsAppEditHandleRow | null>;
  *   deleteExpiredWhatsAppEditHandles: (now: string) => Promise<void>;
+ *   enqueueWhatsAppIngressJournalEntry: (input: {
+ *     ingressKey: string,
+ *     sourceEventType: string,
+ *     chatId: string,
+ *     payloadJson: unknown,
+ *   }) => Promise<import("../../store.js").WhatsAppIngressJournalRow>;
+ *   listDispatchableWhatsAppIngressJournalEntries: () => Promise<import("../../store.js").WhatsAppIngressJournalRow[]>;
+ *   markWhatsAppIngressJournalRouting: (id: number) => Promise<void>;
+ *   markWhatsAppIngressJournalDone: (id: number) => Promise<void>;
+ *   markWhatsAppIngressJournalIgnored: (id: number) => Promise<void>;
+ *   markWhatsAppIngressJournalFailed: (id: number, reason: string) => Promise<void>;
+ *   markWhatsAppIngressJournalDeadLetter: (id: number, reason: string) => Promise<void>;
  * }}
  */
 export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensureChatExists }) {
@@ -274,6 +287,140 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
     async deleteExpiredWhatsAppEditHandles(now) {
       await db.sql`DELETE FROM whatsapp_edit_handles WHERE expires_at <= ${now}`;
     },
+
+    /**
+     * @param {{
+     *   ingressKey: string,
+     *   sourceEventType: string,
+     *   chatId: string,
+     *   payloadJson: unknown,
+     * }} input
+     * @returns {Promise<import("../../store.js").WhatsAppIngressJournalRow>}
+     */
+    async enqueueWhatsAppIngressJournalEntry({ ingressKey, sourceEventType, chatId, payloadJson }) {
+      await ensureChatExists(chatId);
+      const { rows: [inserted] } = await db.sql`
+        INSERT INTO whatsapp_ingress_journal (
+          ingress_key,
+          source_event_type,
+          chat_id,
+          payload_json
+        )
+        VALUES (
+          ${ingressKey},
+          ${sourceEventType},
+          ${chatId},
+          ${payloadJson}
+        )
+        ON CONFLICT (ingress_key) DO NOTHING
+        RETURNING *
+      `;
+      const row = normalizeWhatsAppIngressJournalRow(inserted);
+      if (row) {
+        return row;
+      }
+
+      const { rows: [existing] } = await db.sql`
+        SELECT *
+        FROM whatsapp_ingress_journal
+        WHERE ingress_key = ${ingressKey}
+        LIMIT 1
+      `;
+      const existingRow = normalizeWhatsAppIngressJournalRow(existing);
+      if (!existingRow) {
+        throw new Error(`Failed to normalize WhatsApp ingress journal row ${ingressKey}.`);
+      }
+      return existingRow;
+    },
+
+    /**
+     * @returns {Promise<import("../../store.js").WhatsAppIngressJournalRow[]>}
+     */
+    async listDispatchableWhatsAppIngressJournalEntries() {
+      const { rows } = await db.sql`
+        SELECT *
+        FROM whatsapp_ingress_journal
+        WHERE state IN ('received', 'routing')
+        ORDER BY id ASC
+      `;
+      return rows
+        .map(normalizeWhatsAppIngressJournalRow)
+        .filter(/** @returns {row is import("../../store.js").WhatsAppIngressJournalRow} */ (row) => row !== null);
+    },
+
+    /**
+     * @param {number} id
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalRouting(id) {
+      await db.sql`
+        UPDATE whatsapp_ingress_journal
+        SET state = 'routing',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+          AND state IN ('received', 'routing')
+      `;
+    },
+
+    /**
+     * @param {number} id
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalDone(id) {
+      await db.sql`
+        UPDATE whatsapp_ingress_journal
+        SET state = 'done',
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+      `;
+    },
+
+    /**
+     * @param {number} id
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalIgnored(id) {
+      await db.sql`
+        UPDATE whatsapp_ingress_journal
+        SET state = 'ignored',
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+      `;
+    },
+
+    /**
+     * @param {number} id
+     * @param {string} reason
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalFailed(id, reason) {
+      await db.sql`
+        UPDATE whatsapp_ingress_journal
+        SET state = 'received',
+            attempt_count = attempt_count + 1,
+            last_error = ${reason},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+      `;
+    },
+
+    /**
+     * @param {number} id
+     * @param {string} reason
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalDeadLetter(id, reason) {
+      await db.sql`
+        UPDATE whatsapp_ingress_journal
+        SET state = 'dead_letter',
+            attempt_count = attempt_count + 1,
+            last_error = ${reason},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+      `;
+    },
   };
 }
 
@@ -293,6 +440,13 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
  *   | "saveWhatsAppEditHandle"
  *   | "getWhatsAppEditHandle"
  *   | "deleteExpiredWhatsAppEditHandles"
+ *   | "enqueueWhatsAppIngressJournalEntry"
+ *   | "listDispatchableWhatsAppIngressJournalEntries"
+ *   | "markWhatsAppIngressJournalRouting"
+ *   | "markWhatsAppIngressJournalDone"
+ *   | "markWhatsAppIngressJournalIgnored"
+ *   | "markWhatsAppIngressJournalFailed"
+ *   | "markWhatsAppIngressJournalDeadLetter"
  * >}
  */
 export function createWhatsAppStore(internals, db) {
@@ -420,6 +574,68 @@ export function createWhatsAppStore(internals, db) {
      */
     async deleteExpiredWhatsAppEditHandles(now) {
       await internals.deleteExpiredWhatsAppEditHandles(now);
+    },
+
+    /**
+     * @param {{
+     *   ingressKey: string,
+     *   sourceEventType: string,
+     *   chatId: string,
+     *   payloadJson: unknown,
+     * }} input
+     * @returns {Promise<import("../../store.js").WhatsAppIngressJournalRow>}
+     */
+    async enqueueWhatsAppIngressJournalEntry(input) {
+      return internals.enqueueWhatsAppIngressJournalEntry(input);
+    },
+
+    /**
+     * @returns {Promise<import("../../store.js").WhatsAppIngressJournalRow[]>}
+     */
+    async listDispatchableWhatsAppIngressJournalEntries() {
+      return internals.listDispatchableWhatsAppIngressJournalEntries();
+    },
+
+    /**
+     * @param {number} id
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalRouting(id) {
+      await internals.markWhatsAppIngressJournalRouting(id);
+    },
+
+    /**
+     * @param {number} id
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalDone(id) {
+      await internals.markWhatsAppIngressJournalDone(id);
+    },
+
+    /**
+     * @param {number} id
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalIgnored(id) {
+      await internals.markWhatsAppIngressJournalIgnored(id);
+    },
+
+    /**
+     * @param {number} id
+     * @param {string} reason
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalFailed(id, reason) {
+      await internals.markWhatsAppIngressJournalFailed(id, reason);
+    },
+
+    /**
+     * @param {number} id
+     * @param {string} reason
+     * @returns {Promise<void>}
+     */
+    async markWhatsAppIngressJournalDeadLetter(id, reason) {
+      await internals.markWhatsAppIngressJournalDeadLetter(id, reason);
     },
   };
 }
