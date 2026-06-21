@@ -32,6 +32,14 @@ If a needed diagnostic does not have a runtime toggle:
 - Log structured records with timestamps and enough identifiers to correlate the event.
 - Add focused tests for default-off, enabled, disabled, and runtime-change behavior.
 
+Fixture capture logs:
+
+- Treat fixture captures as raw diagnostic material for debugging and later manual test-fixture promotion.
+- Keep fixture capture default-off, runtime-bounded, and scoped to explicit seams.
+- If large raw values are capped, write a `fixtureCapture.meta` record in the capture file before event records.
+- The meta record must clearly define the truncation marker, currently `__fixtureCaptureTruncated`, and state that capped values are replaced by metadata plus a preview.
+- Capped values should be obvious objects, not strings that look complete. Include type, original size, hash, and preview fields where available.
+
 Rules:
 
 - Keep context small; read recent logs, not whole files.
