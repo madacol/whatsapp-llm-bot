@@ -1457,33 +1457,107 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(phases, ["reply-start", "reply-done", "after-response"]);
   });
 
-  it("queues incoming messages without processing while restart is waiting", async () => {
+  it("keeps routing live input into an active turn while restart is waiting", async () => {
+    const chatId = "conv-restart-waiting-live-input";
+    const harnessName = "adapter-restart-waiting-live-input";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {},
+    }));
+
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
-    /** @type {ChatTurn[]} */
-    const queuedTurns = [];
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const phases = [];
+    /** @type {string[]} */
+    const injectedTexts = [];
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: ({ instanceId, continuationKey }) => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: true,
+            supportsLiveInput: true,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                return {
+                  chatId: input.chatId,
+                  harnessName,
+                  instanceId,
+                  continuationKey,
+                  status: "ready",
+                  resumeCursor: input.resumeCursor ?? null,
+                };
+              },
+              async sendTurn() {
+                phases.push("send");
+                await releaseFirstRun.promise;
+                return {
+                  response: [{ type: "text", text: "ok" }],
+                  messages: [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async (_chatId, text) => {
+                phases.push("inject");
+                injectedTexts.push(text);
+                return true;
+              },
+              stopSession: async () => false,
+              listSessions: () => [],
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents: () => () => {},
+            };
+          },
+        },
+      }),
+    });
+
     const runner = createConversationRunner({
       store,
       llmClient: /** @type {LlmClient} */ ({}),
-      restartGate: {
-        isWaiting: () => true,
-        beginWaiting: () => {},
-        queueTurn: (turn) => {
-          queuedTurns.push(turn);
-        },
-        drainQueuedTurns: () => [],
-        reset: () => {},
-      },
     });
 
-    const turn = createChatTurn({
-      chatId: "conv-restart-waiting",
-      content: [{ type: "text", text: "run something new" }],
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
     });
-    await runner.handleMessage(turn.context);
+    const firstHandled = runner.handleMessage(firstTurn.context);
+    await waitUntil(() => phases.includes("send"));
 
-    assert.equal(queuedTurns.length, 1);
-    assert.equal(queuedTurns[0]?.chatId, "conv-restart-waiting");
-    assert.deepEqual(turn.responses, []);
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "this should inject while restart waits" }],
+    });
+    await runner.handleMessage(secondTurn.context);
+
+    assert.deepEqual(phases, ["send", "inject"]);
+    assert.deepEqual(injectedTexts, ["this should inject while restart waits"]);
+
+    releaseFirstRun.resolve();
+    await firstHandled;
   });
 
   it("stores raw group text, carries sender metadata, and omits the group-chat cue", async () => {

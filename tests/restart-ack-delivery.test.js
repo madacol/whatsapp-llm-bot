@@ -203,7 +203,7 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
-  it("reports active turns that were force-interrupted by restart", async () => {
+  it("reports interrupted turns from legacy restart acknowledgement records", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
