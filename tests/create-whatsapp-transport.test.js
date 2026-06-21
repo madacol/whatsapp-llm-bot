@@ -1,13 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import {
-  appendWhatsAppReactionDiagnostic,
-  appendWhatsAppUpsertDiagnostic,
   buildWhatsAppUpsertShapeDiagnostic,
+  captureWhatsAppReactionEvent,
+  captureWhatsAppReactionRuntimeEvent,
+  captureWhatsAppUpsertEvent,
   createWhatsAppAlbumCoordinator,
 } from "../whatsapp/create-whatsapp-transport.js";
 import {
@@ -82,23 +79,23 @@ describe("WhatsApp upsert shape diagnostics", () => {
     assert.equal(JSON.stringify(diagnostic).includes("media.example.test"), false);
   });
 
-  it("writes WhatsApp diagnostic files only when enabled in the runtime manager", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "whatsapp-diagnostics-"));
-    const diagnostics = createRuntimeDiagnosticsState({
-      configPath: path.join(tempDir, "logging.json"),
-      env: {},
-      legacyWhatsAppDiagnosticEnabled: false,
-      reloadIntervalMs: 0,
-    });
-    const upsertPath = path.join(tempDir, "upserts.jsonl");
-    const reactionPath = path.join(tempDir, "reactions.jsonl");
+  it("captures WhatsApp inbound and reaction seam payloads through fixture capture", () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const captured = [];
+    const fixtureCapture = {
+      capture(entry) {
+        captured.push(structuredClone(entry));
+      },
+      waitForIdle: async () => {},
+    };
     const message = /** @type {BaileysMessage} */ ({
       key: { remoteJid: "chat@g.us", fromMe: false, id: "msg-1" },
       message: { conversation: "hello" },
     });
 
-    appendWhatsAppUpsertDiagnostic(message, { diagnosticsState: diagnostics, targetPath: upsertPath });
-    appendWhatsAppReactionDiagnostic(
+    captureWhatsAppUpsertEvent({ type: "notify", messages: [message] }, { fixtureCapture });
+    captureWhatsAppReactionEvent([{ key: { id: "msg-1", remoteJid: "chat@g.us" }, reaction: { text: "👁" } }], { fixtureCapture });
+    captureWhatsAppReactionRuntimeEvent(
       {
         type: "reaction.received",
         messageId: "msg-1",
@@ -107,38 +104,18 @@ describe("WhatsApp upsert shape diagnostics", () => {
         senderId: "user@s.whatsapp.net",
         listenerCount: 1,
       },
-      { diagnosticsState: diagnostics, targetPath: reactionPath },
+      { fixtureCapture },
     );
-    assert.deepEqual((await fs.readdir(tempDir)).sort(), []);
 
-    await diagnostics.update({ whatsappUpsertLog: true });
-    appendWhatsAppUpsertDiagnostic(message, { diagnosticsState: diagnostics, targetPath: upsertPath });
-    appendWhatsAppReactionDiagnostic(
-      {
-        type: "reaction.received",
-        messageId: "msg-1",
-        remoteJid: "chat@g.us",
-        emoji: "👁",
-        senderId: "user@s.whatsapp.net",
-        listenerCount: 1,
-      },
-      { diagnosticsState: diagnostics, targetPath: reactionPath },
+    assert.deepEqual(
+      captured.map((entry) => [entry.seam, entry.direction, entry.event]),
+      [
+        ["whatsapp.inbound", "baileys_to_shell", "messages.upsert"],
+        ["whatsapp.reaction", "baileys_to_shell", "messages.reaction"],
+        ["whatsapp.reaction", "runtime", "reaction.received"],
+      ],
     );
-    assert.deepEqual((await fs.readdir(tempDir)).sort(), ["logging.json", "upserts.jsonl"]);
-
-    await diagnostics.update({ whatsappReactionLog: true });
-    appendWhatsAppReactionDiagnostic(
-      {
-        type: "reaction.received",
-        messageId: "msg-1",
-        remoteJid: "chat@g.us",
-        emoji: "👁",
-        senderId: "user@s.whatsapp.net",
-        listenerCount: 1,
-      },
-      { diagnosticsState: diagnostics, targetPath: reactionPath },
-    );
-    assert.deepEqual((await fs.readdir(tempDir)).sort(), ["logging.json", "reactions.jsonl", "upserts.jsonl"]);
+    assert.deepEqual(/** @type {{ payload?: { messages?: unknown[] } }} */ (captured[0]).payload?.messages, [message]);
   });
 });
 

@@ -1,10 +1,7 @@
 import { generateMessageIDV2, generateWAMessage, generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 import { randomBytes } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createLogger } from "../../logger.js";
-import { getDefaultRuntimeDiagnosticsState } from "../../diagnostics-config.js";
+import { getDefaultFixtureCapture } from "../../diagnostics/capture.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presenter.js";
 import { buildToolPresentation, shortenPath } from "../tool-presentation-model.js";
@@ -41,9 +38,6 @@ const DEFAULT_WHATSAPP_EDIT_DEBOUNCE_MS = 1000;
 const TURN_STATUS_PIN_SECONDS = 86400;
 const INSPECT_REACTION_EMOJI = "👁";
 const log = createLogger("whatsapp:outbound");
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "../..");
-const WHATSAPP_OUTBOUND_DIAGNOSTIC_DEFAULT_PATH = path.join(REPO_ROOT, "logs", "whatsapp-outbound.jsonl");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
 /** @type {Map<string, {
@@ -122,51 +116,6 @@ function isRecord(value) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined | null} key
- * @returns {Record<string, unknown> | null}
- */
-function summarizeDiagnosticMessageKey(key) {
-  if (!key) {
-    return null;
-  }
-  return {
-    id: key.id ?? null,
-    remoteJid: key.remoteJid ?? null,
-    fromMe: key.fromMe ?? null,
-    participant: key.participant ?? null,
-  };
-}
-
-/**
- * @param {unknown} value
- * @returns {number | null}
- */
-function diagnosticByteLength(value) {
-  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
-    return value.byteLength;
-  }
-  return null;
-}
-
-/**
- * @param {Record<string, unknown> | undefined} options
- * @returns {Record<string, unknown> | null}
- */
-function summarizeOutboundOptions(options) {
-  if (!options) {
-    return null;
-  }
-  const quoted = isRecord(options.quoted) ? options.quoted : null;
-  const quotedKey = isRecord(quoted?.key)
-    ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (quoted.key)
-    : undefined;
-  return {
-    hasQuoted: !!quoted,
-    quotedKey: summarizeDiagnosticMessageKey(quotedKey),
-  };
-}
-
-/**
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @returns {string[]}
  */
@@ -188,100 +137,6 @@ function isReactionFromSelf(senderId, sock) {
 }
 
 /**
- * @param {any} msg
- * @returns {Record<string, unknown>}
- */
-export function buildWhatsAppOutboundMessageDiagnostic(msg) {
-  if (typeof msg.text === "string") {
-    return {
-      kind: msg.edit ? "text_edit" : "text",
-      text: msg.text,
-      textLength: msg.text.length,
-      edit: summarizeDiagnosticMessageKey(
-        isRecord(msg.edit) ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.edit) : undefined,
-      ),
-    };
-  }
-  if (isRecord(msg.react)) {
-    return {
-      kind: "reaction",
-      emoji: typeof msg.react.text === "string" ? msg.react.text : null,
-      targetKey: summarizeDiagnosticMessageKey(
-        isRecord(msg.react.key) ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.react.key) : undefined,
-      ),
-    };
-  }
-  if (isRecord(msg.pin)) {
-    return {
-      kind: "pin",
-      targetKey: summarizeDiagnosticMessageKey(
-        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.pin),
-      ),
-      type: msg.type ?? null,
-      time: msg.time ?? null,
-    };
-  }
-  if (isRecord(msg.delete)) {
-    return {
-      kind: "delete",
-      targetKey: summarizeDiagnosticMessageKey(
-        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.delete),
-      ),
-    };
-  }
-  if (msg.image) {
-    return {
-      kind: "image",
-      caption: typeof msg.caption === "string" ? msg.caption : null,
-      mediaBytes: diagnosticByteLength(msg.image),
-    };
-  }
-  if (msg.video) {
-    return {
-      kind: "video",
-      caption: typeof msg.caption === "string" ? msg.caption : null,
-      mimetype: typeof msg.mimetype === "string" ? msg.mimetype : null,
-      mediaBytes: diagnosticByteLength(msg.video),
-    };
-  }
-  if (msg.audio) {
-    return {
-      kind: "audio",
-      mimetype: typeof msg.mimetype === "string" ? msg.mimetype : null,
-      mediaBytes: diagnosticByteLength(msg.audio),
-    };
-  }
-  if (msg.document) {
-    return {
-      kind: "document",
-      caption: typeof msg.caption === "string" ? msg.caption : null,
-      mimetype: typeof msg.mimetype === "string" ? msg.mimetype : null,
-      fileName: typeof msg.fileName === "string" ? msg.fileName : null,
-      mediaBytes: diagnosticByteLength(msg.document),
-    };
-  }
-  if (isRecord(msg.protocolMessage)) {
-    const protocolMessage = msg.protocolMessage;
-    const editedMessage = isRecord(protocolMessage.editedMessage) ? protocolMessage.editedMessage : null;
-    const editedImageMessage = isRecord(editedMessage?.imageMessage) ? editedMessage.imageMessage : null;
-    return {
-      kind: "protocol",
-      protocolType: protocolMessage.type ?? null,
-      key: summarizeDiagnosticMessageKey(
-        isRecord(protocolMessage.key)
-          ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (protocolMessage.key)
-          : undefined,
-      ),
-      editedImageCaption: typeof editedImageMessage?.caption === "string" ? editedImageMessage.caption : null,
-    };
-  }
-  return {
-    kind: "unknown",
-    messageKeys: Object.keys(msg),
-  };
-}
-
-/**
  * @param {{
  *   transport: "sendMessage" | "relayMessage" | "messageHandle";
  *   phase: "attempt" | "sent" | "failed" | "queued" | "replaced" | "flushing" | "immediate" | "attached" | "handled" | "ignored";
@@ -293,29 +148,21 @@ export function buildWhatsAppOutboundMessageDiagnostic(msg) {
  *   trace?: Record<string, unknown>;
  * }} event
  * @param {{
- *   diagnosticsState?: import("../../diagnostics-config.js").RuntimeDiagnosticsState,
- *   targetPath?: string,
+ *   fixtureCapture?: import("../../diagnostics/capture.js").FixtureCapture | null,
  * }} [options]
  * @returns {void}
  */
 export function appendWhatsAppOutboundDiagnostic(event, options = {}) {
-  const diagnosticsState = options.diagnosticsState ?? getDefaultRuntimeDiagnosticsState();
-  if (!diagnosticsState.isWhatsAppOutboundLogEnabled()) {
+  const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
+  if (!fixtureCapture) {
     return;
   }
-  const targetPath = options.targetPath ?? WHATSAPP_OUTBOUND_DIAGNOSTIC_DEFAULT_PATH;
-  mkdirSync(path.dirname(targetPath), { recursive: true });
-  appendFileSync(targetPath, `${JSON.stringify({
-    observedAt: new Date().toISOString(),
-    transport: event.transport,
-    phase: event.phase,
-    chatId: event.chatId,
-    message: buildWhatsAppOutboundMessageDiagnostic(event.message),
-    resultKey: summarizeDiagnosticMessageKey(event.resultKey),
-    options: summarizeOutboundOptions(event.options),
-    ...(event.trace ? { trace: event.trace } : {}),
-    ...(event.error ? { error: event.error } : {}),
-  })}\n`);
+  fixtureCapture.capture({
+    seam: "whatsapp.outbound",
+    direction: "shell_to_baileys",
+    event: `${event.transport}.${event.phase}`,
+    payload: event,
+  });
 }
 
 /**

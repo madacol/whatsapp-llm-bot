@@ -1,11 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { createHarnessRuntimeEventDispatcher } from "../harnesses/harness-runtime-event-dispatcher.js";
 import { getHarnessRuntimeDiagnosticRaw, normalizeHarnessRuntimeEvent } from "../harnesses/harness-runtime-events.js";
-import { createNdjsonRawEventLogger } from "../harnesses/raw-event-log.js";
 
 describe("createHarnessRuntimeEventDispatcher", () => {
   it("adds stable runtime metadata without embedding diagnostic raw payloads", () => {
@@ -397,21 +393,22 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.equal(runtimeEvents[0]?.type === "tool.started" ? runtimeEvents[0].tool.id : undefined, "tool-1");
   });
 
-  it("keeps ACP terminal output updates in raw logs without emitting them as chat progress", async () => {
+  it("keeps ACP terminal output updates in fixture capture without emitting them as chat progress", async () => {
     /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
     const runtimeEvents = [];
     /** @type {Array<Record<string, unknown>>} */
-    const rawEntries = [];
+    const captureEntries = [];
     const dispatcher = createHarnessRuntimeEventDispatcher({
       provider: "acp",
       messages: [],
       emitRuntimeEvent: async (event) => {
         runtimeEvents.push(event);
       },
-      rawEventLogger: {
-        write: async (entry) => {
-          rawEntries.push(entry);
+      fixtureCapture: {
+        capture: (entry) => {
+          captureEntries.push(entry);
         },
+        waitForIdle: async () => {},
       },
     });
 
@@ -444,8 +441,9 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     });
 
     assert.deepEqual(runtimeEvents, []);
-    assert.equal(rawEntries.length, 1);
-    assert.equal(rawEntries[0]?.type, "tool.updated");
+    assert.equal(captureEntries.length, 1);
+    assert.equal(captureEntries[0]?.seam, "harness.raw-event");
+    assert.equal(captureEntries[0]?.event, "tool.updated");
   });
 
   it("forwards assistant stream chunks semantically and finalizes on item completion", async () => {
@@ -696,49 +694,43 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.deepEqual(toolResults, [[{ type: "text", text: "tool output" }]]);
   });
 
-  it("captures raw provider events as replayable ndjson without changing hook projection", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "raw-runtime-events-"));
-    const logPath = path.join(tempDir, "events.ndjson");
+  it("captures raw provider events through fixture capture without changing hook projection", async () => {
     /** @type {string[]} */
     const responses = [];
-    try {
-      const dispatcher = createHarnessRuntimeEventDispatcher({
-        provider: "codex",
-        messages: [],
-        rawEventLogger: createNdjsonRawEventLogger(logPath),
-        hooks: {
-          onLlmResponse: async (text) => {
-            responses.push(text);
-          },
+    /** @type {Array<Record<string, unknown>>} */
+    const captureEntries = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "codex",
+      messages: [],
+      fixtureCapture: {
+        capture: (entry) => {
+          captureEntries.push(structuredClone(entry));
         },
-      });
+        waitForIdle: async () => {},
+      },
+      hooks: {
+        onLlmResponse: async (text) => {
+          responses.push(text);
+        },
+      },
+    });
 
-      await dispatcher.handleEvent({
-        type: "assistant.completed",
-        provider: "codex",
-        text: "Done.",
-        contentType: "markdown",
-        diagnosticRaw: { msg: { type: "agent_message_delta", delta: "Done." } },
-      });
+    await dispatcher.handleEvent({
+      type: "assistant.completed",
+      provider: "codex",
+      text: "Done.",
+      contentType: "markdown",
+      diagnosticRaw: { msg: { type: "agent_message_delta", delta: "Done." } },
+    });
 
-      const logFiles = await fs.readdir(tempDir);
-      assert.equal(logFiles.length, 1);
-      assert.match(logFiles[0] ?? "", /^events\.\d{4}-\d{2}-\d{2}T\d{2}Z\.ndjson$/);
-      const lines = (await fs.readFile(path.join(tempDir, logFiles[0] ?? ""), "utf8")).trim().split("\n");
-      assert.equal(lines.length, 1);
-      const logged = JSON.parse(lines[0]);
-      assert.equal(logged.provider, "codex");
-      assert.equal(logged.type, "assistant.completed");
-      assert.match(logged.eventId, /^harness-event-/);
-      assert.equal(typeof logged.createdAt, "string");
-      assert.deepEqual(logged.raw, {
+    assert.equal(captureEntries.length, 1);
+    assert.equal(captureEntries[0].seam, "harness.raw-event");
+    assert.equal(captureEntries[0].event, "assistant.completed");
+    assert.deepEqual(/** @type {{ payload?: { raw?: unknown } }} */ (captureEntries[0]).payload?.raw, {
         source: "unknown",
         payload: { msg: { type: "agent_message_delta", delta: "Done." } },
-      });
-      assert.deepEqual(responses, ["Done."]);
-    } finally {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    }
+    });
+    assert.deepEqual(responses, ["Done."]);
   });
 
   it("accepts session, turn, request, user-input, and file-change runtime events", async () => {

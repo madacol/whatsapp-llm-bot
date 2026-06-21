@@ -7,24 +7,31 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname);
 const DEFAULT_RELOAD_INTERVAL_MS = 1_000;
 
-export const ACP_PROTOCOL_LOG_ENV = "MADABOT_ACP_PROTOCOL_LOG";
 export const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
-export const RAW_EVENT_LOG_ENV = "MADABOT_RAW_EVENT_LOG";
 export const DB_CACHE_LOG_ENV = "DB_DIAGNOSTICS";
 export const LOG_LEVEL_ENV = "LOG_LEVEL";
 export const RUNTIME_DIAGNOSTICS_CONFIG_PATH = path.join(REPO_ROOT, ".diagnostics", "logging.json");
-const LEGACY_WHATSAPP_DIAGNOSTIC_ENABLE_PATH = path.join(REPO_ROOT, "logs", "whatsapp-upsert-shape.enabled");
 const LOG_LEVEL_VALUES = new Set(["debug", "info", "warn", "error", "silent"]);
 
 /**
  * @typedef {{
- *   acpProtocolLog: boolean,
- *   acpStderrLog: boolean,
- *   rawEventLog: boolean,
- *   dbCacheLog: boolean,
- *   whatsappUpsertLog: boolean,
- *   whatsappReactionLog: boolean,
- *   whatsappOutboundLog: boolean,
+ *   enabledUntil?: string,
+ *   rotateMinutes?: number,
+ *   retentionHours?: number,
+ *   queueLimit?: number,
+ *   fullRawUntil?: string,
+ *   fieldPolicies?: Record<string, {
+ *     capBytes?: number,
+ *     fullRawUntil?: string,
+ *   }>,
+ * }} CaptureSeamConfig
+ *
+ * @typedef {{
+ *   seams: Record<string, CaptureSeamConfig>,
+ * }} CaptureConfig
+ *
+ * @typedef {{
+ *   capture: CaptureConfig,
  *   logLevel: "debug" | "info" | "warn" | "error" | "silent" | null,
  * }} RuntimeDiagnosticsConfig
  */
@@ -32,31 +39,19 @@ const LOG_LEVEL_VALUES = new Set(["debug", "info", "warn", "error", "silent"]);
 /**
  * @typedef {{
  *   getConfig: () => RuntimeDiagnosticsConfig,
- *   isAcpProtocolLogEnabled: () => boolean,
  *   isAcpStderrLogEnabled: () => boolean,
- *   isRawEventLogEnabled: () => boolean,
  *   isDbCacheLogEnabled: () => boolean,
- *   isWhatsAppUpsertLogEnabled: () => boolean,
- *   isWhatsAppReactionLogEnabled: () => boolean,
- *   isWhatsAppOutboundLogEnabled: () => boolean,
  *   update: (patch: Partial<RuntimeDiagnosticsConfig>) => Promise<RuntimeDiagnosticsConfig>,
  * }} RuntimeDiagnosticsState
  */
 
 /**
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
- * @param {boolean} legacyWhatsAppDiagnosticEnabled
  * @returns {RuntimeDiagnosticsConfig}
  */
-function readEnvDefaults(env, legacyWhatsAppDiagnosticEnabled) {
+function readEnvDefaults(env) {
   return {
-    acpProtocolLog: env[ACP_PROTOCOL_LOG_ENV] === "1",
-    acpStderrLog: env[ACP_STDERR_LOG_ENV] === "1",
-    rawEventLog: env[RAW_EVENT_LOG_ENV] === "1",
-    dbCacheLog: env[DB_CACHE_LOG_ENV] === "1",
-    whatsappUpsertLog: legacyWhatsAppDiagnosticEnabled,
-    whatsappReactionLog: legacyWhatsAppDiagnosticEnabled,
-    whatsappOutboundLog: false,
+    capture: { seams: {} },
     logLevel: normalizeLogLevel(env[LOG_LEVEL_ENV]),
   };
 }
@@ -82,15 +77,90 @@ function normalizeRuntimeDiagnosticsConfig(raw, fallback) {
     ? /** @type {Record<string, unknown>} */ (raw)
     : {};
   return {
-    acpProtocolLog: typeof record.acpProtocolLog === "boolean" ? record.acpProtocolLog : fallback.acpProtocolLog,
-    acpStderrLog: typeof record.acpStderrLog === "boolean" ? record.acpStderrLog : fallback.acpStderrLog,
-    rawEventLog: typeof record.rawEventLog === "boolean" ? record.rawEventLog : fallback.rawEventLog,
-    dbCacheLog: typeof record.dbCacheLog === "boolean" ? record.dbCacheLog : fallback.dbCacheLog,
-    whatsappUpsertLog: typeof record.whatsappUpsertLog === "boolean" ? record.whatsappUpsertLog : fallback.whatsappUpsertLog,
-    whatsappReactionLog: typeof record.whatsappReactionLog === "boolean" ? record.whatsappReactionLog : fallback.whatsappReactionLog,
-    whatsappOutboundLog: typeof record.whatsappOutboundLog === "boolean" ? record.whatsappOutboundLog : fallback.whatsappOutboundLog,
+    capture: normalizeCaptureConfig(record.capture, fallback.capture),
     logLevel: "logLevel" in record ? normalizeLogLevel(record.logLevel) : fallback.logLevel,
   };
+}
+
+/**
+ * @param {unknown} raw
+ * @param {CaptureConfig} fallback
+ * @returns {CaptureConfig}
+ */
+function normalizeCaptureConfig(raw, fallback) {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? /** @type {Record<string, unknown>} */ (raw)
+    : {};
+  const rawSeams = record.seams && typeof record.seams === "object" && !Array.isArray(record.seams)
+    ? /** @type {Record<string, unknown>} */ (record.seams)
+    : {};
+  /** @type {Record<string, CaptureSeamConfig>} */
+  const seams = { ...fallback.seams };
+  for (const [seam, value] of Object.entries(rawSeams)) {
+    seams[seam] = normalizeCaptureSeamConfig(value, fallback.seams[seam] ?? {});
+  }
+  return { seams };
+}
+
+/**
+ * @param {unknown} raw
+ * @param {CaptureSeamConfig} fallback
+ * @returns {CaptureSeamConfig}
+ */
+function normalizeCaptureSeamConfig(raw, fallback) {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? /** @type {Record<string, unknown>} */ (raw)
+    : {};
+  return {
+    ...(typeof record.enabledUntil === "string" ? { enabledUntil: record.enabledUntil } : pickString(fallback, "enabledUntil")),
+    ...(typeof record.rotateMinutes === "number" && Number.isFinite(record.rotateMinutes) && record.rotateMinutes > 0 ? { rotateMinutes: record.rotateMinutes } : pickNumber(fallback, "rotateMinutes")),
+    ...(typeof record.retentionHours === "number" && Number.isFinite(record.retentionHours) && record.retentionHours >= 0 ? { retentionHours: record.retentionHours } : pickNumber(fallback, "retentionHours")),
+    ...(typeof record.queueLimit === "number" && Number.isFinite(record.queueLimit) && record.queueLimit >= 0 ? { queueLimit: Math.floor(record.queueLimit) } : pickNumber(fallback, "queueLimit")),
+    ...(typeof record.fullRawUntil === "string" ? { fullRawUntil: record.fullRawUntil } : pickString(fallback, "fullRawUntil")),
+    fieldPolicies: normalizeFieldPolicies(record.fieldPolicies, fallback.fieldPolicies ?? {}),
+  };
+}
+
+/**
+ * @param {CaptureSeamConfig} value
+ * @param {"enabledUntil" | "fullRawUntil"} key
+ * @returns {Partial<CaptureSeamConfig>}
+ */
+function pickString(value, key) {
+  return typeof value[key] === "string" ? { [key]: value[key] } : {};
+}
+
+/**
+ * @param {CaptureSeamConfig} value
+ * @param {"rotateMinutes" | "retentionHours" | "queueLimit"} key
+ * @returns {Partial<CaptureSeamConfig>}
+ */
+function pickNumber(value, key) {
+  return typeof value[key] === "number" ? { [key]: value[key] } : {};
+}
+
+/**
+ * @param {unknown} raw
+ * @param {NonNullable<CaptureSeamConfig["fieldPolicies"]>} fallback
+ * @returns {NonNullable<CaptureSeamConfig["fieldPolicies"]>}
+ */
+function normalizeFieldPolicies(raw, fallback) {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? /** @type {Record<string, unknown>} */ (raw)
+    : {};
+  /** @type {NonNullable<CaptureSeamConfig["fieldPolicies"]>} */
+  const policies = { ...fallback };
+  for (const [group, value] of Object.entries(record)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    const policy = /** @type {Record<string, unknown>} */ (value);
+    policies[group] = {
+      ...(typeof policy.capBytes === "number" && Number.isFinite(policy.capBytes) && policy.capBytes >= 0 ? { capBytes: Math.floor(policy.capBytes) } : {}),
+      ...(typeof policy.fullRawUntil === "string" ? { fullRawUntil: policy.fullRawUntil } : {}),
+    };
+  }
+  return policies;
 }
 
 /**
@@ -106,7 +176,6 @@ function hasErrorCode(error, code) {
  * @param {{
  *   configPath?: string,
  *   env?: NodeJS.ProcessEnv | Record<string, string | undefined>,
- *   legacyWhatsAppDiagnosticEnabled?: boolean,
  *   reloadIntervalMs?: number,
  * }} [options]
  * @returns {RuntimeDiagnosticsState}
@@ -114,8 +183,6 @@ function hasErrorCode(error, code) {
 export function createRuntimeDiagnosticsState(options = {}) {
   const configPath = options.configPath ?? RUNTIME_DIAGNOSTICS_CONFIG_PATH;
   const env = options.env ?? process.env;
-  const getLegacyWhatsAppDiagnosticEnabled = () => options.legacyWhatsAppDiagnosticEnabled
-    ?? fs.existsSync(LEGACY_WHATSAPP_DIAGNOSTIC_ENABLE_PATH);
   const reloadIntervalMs = options.reloadIntervalMs ?? DEFAULT_RELOAD_INTERVAL_MS;
   /** @type {RuntimeDiagnosticsConfig | null} */
   let cachedConfig = null;
@@ -127,7 +194,7 @@ export function createRuntimeDiagnosticsState(options = {}) {
    */
   function readConfig() {
     const now = Date.now();
-    const fallback = readEnvDefaults(env, getLegacyWhatsAppDiagnosticEnabled());
+    const fallback = readEnvDefaults(env);
     let stat;
     try {
       stat = fs.statSync(configPath);
@@ -163,26 +230,11 @@ export function createRuntimeDiagnosticsState(options = {}) {
     getConfig() {
       return readConfig();
     },
-    isAcpProtocolLogEnabled() {
-      return readConfig().acpProtocolLog;
-    },
     isAcpStderrLogEnabled() {
-      return readConfig().acpStderrLog;
-    },
-    isRawEventLogEnabled() {
-      return readConfig().rawEventLog;
+      return env[ACP_STDERR_LOG_ENV] === "1";
     },
     isDbCacheLogEnabled() {
-      return readConfig().dbCacheLog;
-    },
-    isWhatsAppUpsertLogEnabled() {
-      return readConfig().whatsappUpsertLog;
-    },
-    isWhatsAppReactionLogEnabled() {
-      return readConfig().whatsappReactionLog;
-    },
-    isWhatsAppOutboundLogEnabled() {
-      return readConfig().whatsappOutboundLog;
+      return env[DB_CACHE_LOG_ENV] === "1";
     },
     async update(patch) {
       const current = readConfig();

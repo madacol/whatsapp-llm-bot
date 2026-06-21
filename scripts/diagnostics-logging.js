@@ -4,62 +4,57 @@ import {
   RUNTIME_DIAGNOSTICS_CONFIG_PATH,
 } from "../diagnostics-config.js";
 
-/** @typedef {Exclude<keyof import("../diagnostics-config.js").RuntimeDiagnosticsConfig, "logLevel">} BooleanDiagnosticKey */
-
-/** @type {Map<string, BooleanDiagnosticKey[]>} */
-const TARGETS = new Map([
-  ["acp", ["acpProtocolLog"]],
-  ["acp-protocol", ["acpProtocolLog"]],
-  ["protocol", ["acpProtocolLog"]],
-  ["stderr", ["acpStderrLog"]],
-  ["acp-stderr", ["acpStderrLog"]],
-  ["raw", ["rawEventLog"]],
-  ["raw-events", ["rawEventLog"]],
-  ["events", ["rawEventLog"]],
-  ["db", ["dbCacheLog"]],
-  ["db-cache", ["dbCacheLog"]],
-  ["whatsapp", ["whatsappUpsertLog", "whatsappReactionLog"]],
-  ["upsert", ["whatsappUpsertLog"]],
-  ["whatsapp-upsert", ["whatsappUpsertLog"]],
-  ["reaction", ["whatsappReactionLog"]],
-  ["reactions", ["whatsappReactionLog"]],
-  ["whatsapp-reactions", ["whatsappReactionLog"]],
-  ["all", ["acpProtocolLog", "acpStderrLog", "rawEventLog", "dbCacheLog", "whatsappUpsertLog", "whatsappReactionLog"]],
-]);
 const LOG_LEVELS = new Set(["debug", "info", "warn", "error", "silent"]);
-
-/**
- * @param {string | undefined} value
- * @returns {boolean | null}
- */
-function parseEnabled(value) {
-  switch ((value ?? "").trim().toLowerCase()) {
-    case "1":
-    case "on":
-    case "true":
-    case "enable":
-    case "enabled":
-      return true;
-    case "0":
-    case "off":
-    case "false":
-    case "disable":
-    case "disabled":
-      return false;
-    default:
-      return null;
-  }
-}
+const DEFAULT_CAPTURE_MINUTES = 5;
 
 /**
  * @returns {never}
  */
 function usage() {
-  console.error("Usage: node scripts/diagnostics-logging.js status | <acp|stderr|raw|db|whatsapp|all> <on|off> | level <debug|info|warn|error|silent|default>");
+  console.error([
+    "Usage:",
+    "  node scripts/diagnostics-logging.js status",
+    "  node scripts/diagnostics-logging.js level <debug|info|warn|error|silent|default>",
+    "  node scripts/diagnostics-logging.js capture status",
+    "  node scripts/diagnostics-logging.js capture <seam|all> off",
+    "  node scripts/diagnostics-logging.js capture <seam> on [--minutes N] [--rotate-minutes N] [--retention-hours N] [--queue-limit N]",
+    "  node scripts/diagnostics-logging.js capture <seam> full-raw [--minutes N]",
+  ].join("\n"));
   process.exit(2);
 }
 
-const [targetArg, enabledArg] = process.argv.slice(2);
+/**
+ * @param {string[]} args
+ * @param {string} name
+ * @param {number} fallback
+ * @returns {number}
+ */
+function numberOption(args, name, fallback) {
+  const index = args.indexOf(name);
+  if (index === -1) {
+    return fallback;
+  }
+  const value = Number(args[index + 1]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+/**
+ * @param {number} minutes
+ * @returns {string}
+ */
+function minutesFromNowIso(minutes) {
+  return new Date(Date.now() + minutes * 60_000).toISOString();
+}
+
+/**
+ * @param {import("../diagnostics-config.js").RuntimeDiagnosticsConfig} config
+ * @returns {import("../diagnostics-config.js").RuntimeDiagnosticsConfig}
+ */
+function cloneConfig(config) {
+  return JSON.parse(JSON.stringify(config));
+}
+
+const [targetArg, subArg, ...restArgs] = process.argv.slice(2);
 const state = getDefaultRuntimeDiagnosticsState();
 
 if (!targetArg || targetArg === "status") {
@@ -68,7 +63,7 @@ if (!targetArg || targetArg === "status") {
 }
 
 if (targetArg === "level" || targetArg === "log-level") {
-  const level = (enabledArg ?? "").trim().toLowerCase();
+  const level = (subArg ?? "").trim().toLowerCase();
   if (level !== "default" && !LOG_LEVELS.has(level)) {
     usage();
   }
@@ -79,17 +74,59 @@ if (targetArg === "level" || targetArg === "log-level") {
   process.exit(0);
 }
 
-const keys = TARGETS.get(targetArg);
-const enabled = parseEnabled(enabledArg);
-if (!keys || enabled === null) {
+if (targetArg !== "capture") {
   usage();
 }
 
-/** @type {Partial<import("../diagnostics-config.js").RuntimeDiagnosticsConfig>} */
-const patch = {};
-for (const key of keys) {
-  patch[key] = enabled;
+if (!subArg || subArg === "status") {
+  console.log(JSON.stringify({ configPath: RUNTIME_DIAGNOSTICS_CONFIG_PATH, capture: state.getConfig().capture }, null, 2));
+  process.exit(0);
 }
 
-const next = await state.update(patch);
+const seam = subArg;
+const command = restArgs.shift();
+if (!command) {
+  usage();
+}
+
+const current = cloneConfig(state.getConfig());
+current.capture ??= { seams: {} };
+current.capture.seams ??= {};
+
+if (command === "off") {
+  if (seam === "all") {
+    current.capture.seams = {};
+  } else {
+    delete current.capture.seams[seam];
+  }
+  const next = await state.update(current);
+  console.log(JSON.stringify({ configPath: RUNTIME_DIAGNOSTICS_CONFIG_PATH, ...next }, null, 2));
+  process.exit(0);
+}
+
+if (seam === "all") {
+  usage();
+}
+
+const minutes = numberOption(restArgs, "--minutes", DEFAULT_CAPTURE_MINUTES);
+const seamConfig = {
+  ...(current.capture.seams[seam] ?? {}),
+};
+
+if (command === "on") {
+  seamConfig.enabledUntil = minutesFromNowIso(minutes);
+  const rotateMinutes = numberOption(restArgs, "--rotate-minutes", seamConfig.rotateMinutes ?? 1);
+  const retentionHours = numberOption(restArgs, "--retention-hours", seamConfig.retentionHours ?? 24);
+  const queueLimit = numberOption(restArgs, "--queue-limit", seamConfig.queueLimit ?? 1_000);
+  seamConfig.rotateMinutes = rotateMinutes;
+  seamConfig.retentionHours = retentionHours;
+  seamConfig.queueLimit = queueLimit;
+} else if (command === "full-raw") {
+  seamConfig.fullRawUntil = minutesFromNowIso(minutes);
+} else {
+  usage();
+}
+
+current.capture.seams[seam] = seamConfig;
+const next = await state.update(current);
 console.log(JSON.stringify({ configPath: RUNTIME_DIAGNOSTICS_CONFIG_PATH, ...next }, null, 2));
