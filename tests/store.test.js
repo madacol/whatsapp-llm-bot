@@ -150,6 +150,26 @@ describe("store with injected DB", () => {
 
   });
 
+  describe("harness live input journal", () => {
+    it("persists pending sidecar live input until ack deletes it", async () => {
+      await store.createChat("store-live-input-chat");
+
+      const row = await store.enqueueHarnessLiveInput({
+        chatId: "store-live-input-chat",
+        turnId: "turn-1",
+        text: "follow up",
+      });
+      assert.equal(row.chat_id, "store-live-input-chat");
+      assert.equal(row.turn_id, "turn-1");
+      assert.equal(row.text, "follow up");
+
+      assert.deepEqual(await store.listPendingHarnessLiveInputs("store-live-input-chat"), [row]);
+
+      await store.deleteHarnessLiveInput(row.id);
+      assert.deepEqual(await store.listPendingHarnessLiveInputs("store-live-input-chat"), []);
+    });
+  });
+
   describe("workspace persistence", () => {
     it("stores and updates workspace domain state without exposing WhatsApp surface fields", async () => {
       await store.createChat("store-workspace-chat");

@@ -18,6 +18,7 @@
  *   text: string;
  *   target: LiveInputTarget;
  *   turn: ChatTurn;
+ *   journalId: number | null;
  * }} PendingLiveInput
  */
 
@@ -36,6 +37,10 @@
 /**
  * @typedef {{
  *   liveInputRetryDelayMs?: number;
+ *   liveInputJournal?: {
+ *     enqueue: (input: { chatId: string, turnId: string, text: string }) => Promise<{ id: number }>,
+ *     markAccepted: (id: number) => Promise<void>,
+ *   },
  * }} HarnessRunCoordinatorOptions
  */
 
@@ -61,6 +66,7 @@
  */
 export function createHarnessRunCoordinator(options = {}) {
   const liveInputRetryDelayMs = options.liveInputRetryDelayMs ?? 50;
+  const liveInputJournal = options.liveInputJournal ?? null;
   /** @type {Map<string, PendingRunState>} */
   const pendingRuns = new Map();
 
@@ -73,17 +79,61 @@ export function createHarnessRunCoordinator(options = {}) {
   }
 
   /**
+   * @param {{ chatId: string, text: string, turn: ChatTurn, target: LiveInputTarget & { injectMessage: NonNullable<LiveInputTarget["injectMessage"]> }, journalId?: number | null }} input
+   * @returns {Promise<{ accepted: boolean, journalId: number | null }>}
+   */
+  async function tryInjectLiveInput(input) {
+    const { chatId, text, target, turn } = input;
+    let journalId = input.journalId ?? null;
+    if (liveInputJournal && journalId === null) {
+      try {
+        const row = await liveInputJournal.enqueue({
+          chatId,
+          turnId: getLiveInputTurnId(turn),
+          text,
+        });
+        journalId = row.id;
+      } catch {
+        return { accepted: false, journalId };
+      }
+    }
+    try {
+      const accepted = !!(await target.injectMessage(chatId, text));
+      if (accepted && liveInputJournal && journalId !== null) {
+        try {
+          await liveInputJournal.markAccepted(journalId);
+        } catch {
+          // The sidecar accepted the input. Leaving the durable row behind is
+          // safer than reporting a failed injection and sending it twice.
+        }
+      }
+      return { accepted, journalId };
+    } catch {
+      return { accepted: false, journalId };
+    }
+  }
+
+  /**
+   * @param {ChatTurn} turn
+   * @returns {string}
+   */
+  function getLiveInputTurnId(turn) {
+    if ("id" in turn && typeof turn.id === "string" && turn.id) {
+      return turn.id;
+    }
+    return turn.chatId;
+  }
+
+  /**
    * @param {string} chatId
    * @param {string} text
    * @param {LiveInputTarget & { injectMessage: NonNullable<LiveInputTarget["injectMessage"]> }} target
-   * @returns {Promise<boolean>}
+   * @param {ChatTurn} turn
+   * @param {number | null} [journalId]
+   * @returns {Promise<{ accepted: boolean, journalId: number | null }>}
    */
-  async function tryInjectLiveInput(chatId, text, target) {
-    try {
-      return !!(await target.injectMessage(chatId, text));
-    } catch {
-      return false;
-    }
+  async function tryInjectLiveInputForTurn(chatId, text, target, turn, journalId = null) {
+    return tryInjectLiveInput({ chatId, text, target, turn, journalId });
   }
 
   /**
@@ -104,8 +154,15 @@ export function createHarnessRunCoordinator(options = {}) {
         remaining.push(liveInput);
         continue;
       }
-      const injected = await tryInjectLiveInput(liveInput.chatId, liveInput.text, liveInput.target);
-      if (!injected) {
+      const injected = await tryInjectLiveInputForTurn(
+        liveInput.chatId,
+        liveInput.text,
+        liveInput.target,
+        liveInput.turn,
+        liveInput.journalId,
+      );
+      if (!injected.accepted) {
+        liveInput.journalId = injected.journalId;
         remaining.push(liveInput);
       }
     }
@@ -136,10 +193,11 @@ export function createHarnessRunCoordinator(options = {}) {
    * @param {string} text
    * @param {ChatTurn} turn
    * @param {LiveInputTarget} target
+   * @param {number | null} [journalId]
    * @returns {void}
    */
-  function queueLiveInputRetry(chatId, pending, text, turn, target) {
-    pending.pendingLiveInputs.push({ chatId, text, target, turn });
+  function queueLiveInputRetry(chatId, pending, text, turn, target, journalId = null) {
+    pending.pendingLiveInputs.push({ chatId, text, target, turn, journalId });
     scheduleLiveInputRetry(chatId, pending);
   }
 
@@ -162,10 +220,11 @@ export function createHarnessRunCoordinator(options = {}) {
       if (pending) {
         const sameOwner = !ownerKey || !pending.ownerKey || ownerKey === pending.ownerKey;
         if (pending.isActive && userText && canInjectLiveInput(pending.liveInputTarget)) {
-          if (await tryInjectLiveInput(chatId, userText, pending.liveInputTarget)) {
+          const injected = await tryInjectLiveInputForTurn(chatId, userText, pending.liveInputTarget, turn);
+          if (injected.accepted) {
             return { status: "injected" };
           }
-          queueLiveInputRetry(chatId, pending, userText, turn, pending.liveInputTarget);
+          queueLiveInputRetry(chatId, pending, userText, turn, pending.liveInputTarget, injected.journalId);
           return { status: "buffered", reason: "live-input-retry" };
         }
         if (pending.isActive) {

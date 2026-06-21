@@ -275,6 +275,39 @@ export function normalizeWhatsAppIngressJournalRow(raw) {
 
 /**
  * @param {unknown} raw
+ * @returns {import("../store.js").HarnessLiveInputRow | null}
+ */
+export function normalizeHarnessLiveInputRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+
+  const id = normalizeIntegerId(raw.id);
+  const createdAt = normalizeTimestampValue(raw.created_at);
+  const updatedAt = normalizeTimestampValue(raw.updated_at);
+  if (
+    id === null
+    || typeof raw.chat_id !== "string"
+    || typeof raw.turn_id !== "string"
+    || typeof raw.text !== "string"
+    || !createdAt
+    || !updatedAt
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    chat_id: raw.chat_id,
+    turn_id: raw.turn_id,
+    text: raw.text,
+    created_at: createdAt,
+    updated_at: updatedAt,
+  };
+}
+
+/**
+ * @param {unknown} raw
  * @returns {ProjectRow | null}
  */
 export function normalizeProjectRow(raw) {

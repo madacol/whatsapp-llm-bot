@@ -31,6 +31,33 @@ function createTurn(chatId, text) {
   };
 }
 
+/**
+ * @template T
+ * @returns {{ promise: Promise<T>, resolve: (value: T) => void }}
+ */
+function createDeferred() {
+  /** @type {(value: T) => void} */
+  let resolve = () => {};
+  const promise = new Promise((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
+/**
+ * @param {() => boolean} predicate
+ * @returns {Promise<void>}
+ */
+async function waitUntil(predicate) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await delay(5);
+  }
+  assert.fail("Timed out waiting for condition");
+}
+
 describe("createHarnessRunCoordinator", () => {
   it("buffers messages while a run is pending setup", async () => {
     const coordinator = createHarnessRunCoordinator();
@@ -71,6 +98,55 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(injectedResult.status, "injected");
     assert.deepEqual(injected, ["chat-2:follow-up"]);
     assert.equal(coordinator.finishRun("chat-2"), null);
+  });
+
+  it("keeps live input durable until the active sidecar acks injection", async () => {
+    const sidecarAck = createDeferred();
+    /** @type {string[]} */
+    const events = [];
+    const liveInputTarget = {
+      supportsLiveInput: true,
+      injectMessage: async (_chatId, text) => {
+        events.push(`inject:${text}`);
+        await sidecarAck.promise;
+        events.push(`ack:${text}`);
+        return true;
+      },
+    };
+    const liveInputJournal = {
+      enqueue: async ({ chatId, turnId, text }) => {
+        events.push(`enqueue:${chatId}:${turnId}:${text}`);
+        return { id: 41 };
+      },
+      markAccepted: async (id) => {
+        events.push(`accepted:${id}`);
+      },
+    };
+
+    const coordinator = createHarnessRunCoordinator({ liveInputJournal });
+    await coordinator.beginRun({
+      turn: createTurn("chat-ack", "first"),
+      userText: "first",
+      liveInputTarget,
+    });
+    coordinator.markRunActive("chat-ack");
+    const followUpTurn = createTurn("chat-ack", "follow-up");
+    const injected = coordinator.beginRun({ turn: followUpTurn, userText: "follow-up" });
+
+    await waitUntil(() => events.includes("inject:follow-up"));
+    assert.deepEqual(events, [
+      "enqueue:chat-ack:chat-ack:follow-up",
+      "inject:follow-up",
+    ]);
+
+    sidecarAck.resolve(undefined);
+    assert.deepEqual(await injected, { status: "injected" });
+    assert.deepEqual(events, [
+      "enqueue:chat-ack:chat-ack:follow-up",
+      "inject:follow-up",
+      "ack:follow-up",
+      "accepted:41",
+    ]);
   });
 
   it("injects active follow-up text into the original adapter target when the selected owner changes mid-run", async () => {
@@ -145,6 +221,53 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(followUp.status, "buffered");
     assert.deepEqual(injected, ["follow-up"]);
     assert.equal(coordinator.finishRun("chat-4"), null);
+  });
+
+  it("reuses one durable live-input row across retries until sidecar ack", async () => {
+    /** @type {string[]} */
+    const events = [];
+    let ready = false;
+    const liveInputTarget = {
+      supportsLiveInput: true,
+      injectMessage: async (_chatId, text) => {
+        events.push(`inject:${text}`);
+        if (!ready) {
+          return false;
+        }
+        return true;
+      },
+    };
+    const liveInputJournal = {
+      enqueue: async ({ text }) => {
+        events.push(`enqueue:${text}`);
+        return { id: 9 };
+      },
+      markAccepted: async (id) => {
+        events.push(`accepted:${id}`);
+      },
+    };
+
+    const coordinator = createHarnessRunCoordinator({ liveInputRetryDelayMs: 1, liveInputJournal });
+    await coordinator.beginRun({
+      turn: createTurn("chat-retry-durable", "first"),
+      userText: "first",
+      liveInputTarget,
+    });
+    coordinator.markRunActive("chat-retry-durable");
+    const followUp = await coordinator.beginRun({
+      turn: createTurn("chat-retry-durable", "follow-up"),
+      userText: "follow-up",
+    });
+    ready = true;
+    await waitUntil(() => events.includes("accepted:9"));
+
+    assert.equal(followUp.status, "buffered");
+    assert.deepEqual(events, [
+      "enqueue:follow-up",
+      "inject:follow-up",
+      "inject:follow-up",
+      "accepted:9",
+    ]);
   });
 
   it("returns a fallback turn when live input loses the race with turn completion", async () => {
