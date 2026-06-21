@@ -1,5 +1,4 @@
-import { createLogger } from "../logger.js";
-import { getHarnessRawEventLogger } from "./raw-event-log.js";
+import { getDefaultFixtureCapture } from "../diagnostics/capture.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { getHarnessRuntimeDiagnosticRaw, normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 
@@ -12,10 +11,7 @@ import { getHarnessRuntimeDiagnosticRaw, normalizeHarnessRuntimeEvent } from "./
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeCommandEvent
  *   | import("./harness-runtime-events.js").HarnessRuntimeToolEvent
  *   | import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent} HarnessRuntimeProgressEvent
- * @typedef {import("./raw-event-log.js").HarnessRawEventLogger} HarnessRawEventLogger
  */
-
-const log = createLogger("harness:runtime-events");
 
 /**
  * @type {Pick<Required<AgentIOHooks>, "onReasoning" | "onToolResult" | "onLlmResponse" | "onUsage" | "onPlan" | "onRuntimeEvent">}
@@ -159,7 +155,7 @@ function cleanCompletedReasoningParts(parts) {
  *   emitRuntimeEvent?: (event: HarnessRuntimeEvent) => Promise<void>,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
- *   rawEventLogger?: HarnessRawEventLogger | null,
+ *   fixtureCapture?: import("../diagnostics/capture.js").FixtureCapture | null,
  * }} input
  * @returns {{
  *   result: AgentResult,
@@ -169,7 +165,7 @@ function cleanCompletedReasoningParts(parts) {
 export function createHarnessRuntimeEventDispatcher(input) {
   const hooks = { ...DEFAULT_RUNTIME_EVENT_HOOKS, ...input.hooks };
   const emitRuntimeEvent = input.emitRuntimeEvent ?? hooks.onRuntimeEvent;
-  const rawEventLogger = input.rawEventLogger === undefined ? getHarnessRawEventLogger() : input.rawEventLogger;
+  const fixtureCapture = input.fixtureCapture === undefined ? getDefaultFixtureCapture() : input.fixtureCapture;
   /** @type {Map<string, LlmResponseMetadata>} */
   const subagentThreads = new Map();
   /** @type {Set<string>} */
@@ -276,8 +272,8 @@ export function createHarnessRuntimeEventDispatcher(input) {
     return responses;
   }
 
-  /**
-   * @param {{ threadId?: string, text: string }} response
+   /**
+    * @param {{ threadId?: string, text: string }} response
    * @returns {Promise<void>}
    */
   async function emitSubagentResponse(response) {
@@ -346,24 +342,26 @@ export function createHarnessRuntimeEventDispatcher(input) {
   /**
    * @param {HarnessRuntimeEvent} event
    * @param {import("./harness-runtime-events.js").HarnessRuntimeRawEvent | undefined} diagnosticRaw
-   * @returns {Promise<void>}
+   * @returns {void}
    */
-  async function captureRawEvent(event, diagnosticRaw) {
-    if (!rawEventLogger || !diagnosticRaw) {
+  function captureRawEvent(event, diagnosticRaw) {
+    if (!fixtureCapture || !diagnosticRaw) {
       return;
     }
-    try {
-      await rawEventLogger.write({
+    fixtureCapture.capture({
+      seam: "harness.raw-event",
+      direction: "provider_to_runtime",
+      event: event.type,
+      ...(event.createdAt ? { capturedAt: event.createdAt } : {}),
+      payload: {
         provider: event.provider,
         type: event.type,
         ...(event.eventId ? { eventId: event.eventId } : {}),
         ...(event.createdAt ? { createdAt: event.createdAt } : {}),
         ...(event.providerInstanceId ? { providerInstanceId: event.providerInstanceId } : {}),
         raw: diagnosticRaw,
-      });
-    } catch (error) {
-      log.warn("Failed to capture raw harness runtime event:", error);
-    }
+      },
+    });
   }
 
   /**
@@ -373,7 +371,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
   async function handleEvent(event) {
     const diagnosticRaw = getHarnessRuntimeDiagnosticRaw(event);
     const normalizedEvent = normalizeHarnessRuntimeEvent(event);
-    await captureRawEvent(normalizedEvent, diagnosticRaw);
+    captureRawEvent(normalizedEvent, diagnosticRaw);
     if (shouldSuppressChatRuntimeProgress(normalizedEvent)) {
       return;
     }

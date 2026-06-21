@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createRuntimeDiagnosticsState, setDefaultRuntimeDiagnosticsStateForTesting } from "../diagnostics-config.js";
-import { createNdjsonAcpProtocolLogger, createRuntimeGatedAcpProtocolLogger, getDefaultAcpProtocolLogger, openAcpConnection } from "../harnesses/acp-client.js";
+import { openAcpConnection } from "../harnesses/acp-client.js";
 
 describe("ACP client process stderr", () => {
   /** @type {string | undefined} */
@@ -32,50 +32,6 @@ describe("ACP client process stderr", () => {
     if (originalAcpProtocolLog === undefined) delete process.env.MADABOT_ACP_PROTOCOL_LOG;
     else process.env.MADABOT_ACP_PROTOCOL_LOG = originalAcpProtocolLog;
     setDefaultRuntimeDiagnosticsStateForTesting(null);
-  });
-
-  it("provides a default ACP protocol logger that stays quiet unless explicitly enabled", () => {
-    assert.notEqual(getDefaultAcpProtocolLogger(), null);
-
-    process.env.MADABOT_ACP_PROTOCOL_LOG = "1";
-    assert.notEqual(getDefaultAcpProtocolLogger(), null);
-  });
-
-  it("observes runtime toggles without replacing the ACP protocol logger", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protocol-log-"));
-    const configPath = path.join(tempDir, "logging.json");
-    const logger = createRuntimeGatedAcpProtocolLogger(
-      path.join(tempDir, "acp.ndjson"),
-      createRuntimeDiagnosticsState({ configPath, env: {}, reloadIntervalMs: 0 }),
-    );
-
-    await logger.write({
-      timestamp: "2026-06-11T12:00:00.000Z",
-      direction: "client_to_agent",
-      kind: "request",
-      id: 1,
-      method: "initialize",
-      message: { jsonrpc: "2.0", id: 1, method: "initialize" },
-    });
-    assert.deepEqual((await fs.readdir(tempDir)).sort(), []);
-
-    await fs.writeFile(configPath, JSON.stringify({ acpProtocolLog: true }));
-    await logger.write({
-      timestamp: "2026-06-11T12:01:00.000Z",
-      direction: "agent_to_client",
-      kind: "notification",
-      method: "session/update",
-      message: { jsonrpc: "2.0", method: "session/update" },
-    });
-
-    assert.deepEqual((await fs.readdir(tempDir)).sort(), [
-      "acp.2026-06-11T12Z.ndjson",
-      "logging.json",
-    ]);
-    assert.match(
-      await fs.readFile(path.join(tempDir, "acp.2026-06-11T12Z.ndjson"), "utf8"),
-      /"method":"session\/update"/,
-    );
   });
 
   it("drains child stderr without mirroring provider chatter into the bot log by default", async () => {
@@ -115,7 +71,7 @@ describe("ACP client process stderr", () => {
     assert.match(String(calls[0]?.[2]), /visible stderr/);
   });
 
-  it("observes runtime ACP stderr logging toggles without reconnecting the manager", async () => {
+  it("does not treat ACP stderr mirroring as seam capture config", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-stderr-log-"));
     const diagnostics = createRuntimeDiagnosticsState({
       configPath: path.join(tempDir, "logging.json"),
@@ -124,7 +80,14 @@ describe("ACP client process stderr", () => {
     });
     setDefaultRuntimeDiagnosticsStateForTesting(diagnostics);
 
-    const hiddenCalls = await captureDebugLogs(async () => {
+    await diagnostics.update({
+      capture: {
+        seams: {
+          "acp.protocol": { enabledUntil: "9999-12-31T23:59:59.999Z" },
+        },
+      },
+    });
+    const calls = await captureDebugLogs(async () => {
       const connection = await openAcpConnection({
         command: process.execPath,
         args: ["-e", stderrFixtureCode("hidden stderr\n")],
@@ -132,18 +95,7 @@ describe("ACP client process stderr", () => {
       await delay(100);
       await connection.close();
     });
-    assert.deepEqual(hiddenCalls, []);
-
-    await diagnostics.update({ acpStderrLog: true });
-    const visibleCalls = await captureDebugLogs(async (calls) => {
-      const connection = await openAcpConnection({
-        command: process.execPath,
-        args: ["-e", stderrFixtureCode("runtime stderr\n")],
-      });
-      await waitFor(() => calls.length > 0);
-      await connection.close();
-    });
-    assert.match(String(visibleCalls[0]?.[2]), /runtime stderr/);
+    assert.deepEqual(calls, []);
   });
 
   it("reports child exit details and stderr tail when pending requests are rejected", async () => {
@@ -172,16 +124,17 @@ describe("ACP client process stderr", () => {
     assert.equal(details?.stderrTail, "fatal provider detail");
   });
 
-  it("records the full ACP JSON-RPC transcript when a protocol logger is provided", async () => {
+  it("captures the full ACP JSON-RPC transcript when fixture capture is provided", async () => {
     /** @type {Array<Record<string, unknown>>} */
-    const protocolEntries = [];
+    const captureEntries = [];
     const connection = await openAcpConnection({
       command: process.execPath,
       args: ["-e", jsonRpcResponderFixtureCode()],
-      protocolLogger: {
-        write(entry) {
-          protocolEntries.push(structuredClone(entry));
+      fixtureCapture: {
+        capture(entry) {
+          captureEntries.push(structuredClone(entry));
         },
+        waitForIdle: async () => {},
       },
     });
     try {
@@ -190,20 +143,19 @@ describe("ACP client process stderr", () => {
       assert.equal(notification.value?.method, "session/update");
 
       assert.deepEqual(
-        protocolEntries.map((entry) => [entry.direction, entry.kind, entry.method ?? null, entry.id ?? null]),
+        captureEntries.map((entry) => [entry.seam, entry.direction, entry.event]),
         [
-          ["client_to_agent", "request", "initialize", 1],
-          ["agent_to_client", "response", null, 1],
-          ["agent_to_client", "notification", "session/update", null],
+          ["acp.protocol", "client_to_agent", "initialize"],
+          ["acp.protocol", "agent_to_client", "response"],
+          ["acp.protocol", "agent_to_client", "session/update"],
         ],
       );
-      assert.deepEqual(/** @type {{ message?: unknown }} */ (protocolEntries[0]).message, {
+      assert.deepEqual(/** @type {{ payload?: unknown }} */ (captureEntries[0]).payload, {
         jsonrpc: "2.0",
         id: 1,
         method: "initialize",
         params: { client: "test" },
       });
-      assert.equal(typeof protocolEntries[0]?.timestamp, "string");
     } finally {
       await connection.close();
     }
@@ -213,7 +165,7 @@ describe("ACP client process stderr", () => {
     const connection = await openAcpConnection({
       command: process.execPath,
       args: ["-e", jsonRpcResponderFixtureCode({ responseDelayMs: 80, notificationFirst: true })],
-      protocolLogger: null,
+      fixtureCapture: null,
     });
     try {
       assert.deepEqual(
@@ -223,65 +175,6 @@ describe("ACP client process stderr", () => {
     } finally {
       await connection.close();
     }
-  });
-});
-
-describe("ACP protocol log rotation", () => {
-  it("writes ACP protocol entries to UTC hourly log files", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protocol-log-"));
-    const logger = createNdjsonAcpProtocolLogger(path.join(tempDir, "acp.ndjson"));
-
-    await logger.write({
-      timestamp: "2026-06-04T13:12:00.000Z",
-      direction: "client_to_agent",
-      kind: "request",
-      id: 1,
-      method: "initialize",
-      message: { jsonrpc: "2.0", id: 1, method: "initialize" },
-    });
-    await logger.write({
-      timestamp: "2026-06-04T14:00:01.000Z",
-      direction: "agent_to_client",
-      kind: "notification",
-      method: "session/update",
-      message: { jsonrpc: "2.0", method: "session/update" },
-    });
-
-    assert.deepEqual((await fs.readdir(tempDir)).sort(), [
-      "acp.2026-06-04T13Z.ndjson",
-      "acp.2026-06-04T14Z.ndjson",
-    ]);
-    assert.match(
-      await fs.readFile(path.join(tempDir, "acp.2026-06-04T13Z.ndjson"), "utf8"),
-      /"method":"initialize"/,
-    );
-    assert.match(
-      await fs.readFile(path.join(tempDir, "acp.2026-06-04T14Z.ndjson"), "utf8"),
-      /"method":"session\/update"/,
-    );
-  });
-
-  it("deletes matching hourly ACP protocol logs older than 24 hours when a new hour starts", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protocol-log-"));
-    await fs.writeFile(path.join(tempDir, "acp.2026-06-03T12Z.ndjson"), "{}\n");
-    await fs.writeFile(path.join(tempDir, "acp.2026-06-03T13Z.ndjson"), "{}\n");
-    await fs.writeFile(path.join(tempDir, "other.2026-06-03T12Z.ndjson"), "{}\n");
-    const logger = createNdjsonAcpProtocolLogger(path.join(tempDir, "acp.ndjson"));
-
-    await logger.write({
-      timestamp: "2026-06-04T13:05:00.000Z",
-      direction: "client_to_agent",
-      kind: "request",
-      id: 1,
-      method: "initialize",
-      message: { jsonrpc: "2.0", id: 1, method: "initialize" },
-    });
-
-    assert.deepEqual((await fs.readdir(tempDir)).sort(), [
-      "acp.2026-06-03T13Z.ndjson",
-      "acp.2026-06-04T13Z.ndjson",
-      "other.2026-06-03T12Z.ndjson",
-    ]);
   });
 });
 

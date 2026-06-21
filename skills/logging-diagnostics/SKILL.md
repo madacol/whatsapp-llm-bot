@@ -19,10 +19,11 @@ Runtime tools in this repo:
 
 ```bash
 node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" status
-node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" acp on
-node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" raw on
+node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" capture acp.protocol on --minutes 5
+node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" capture whatsapp.inbound on --minutes 5 --rotate-minutes 1
+node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" capture whatsapp.inbound full-raw --minutes 1
 node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" level debug
-node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" all off
+node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" capture all off
 ```
 
 If a needed diagnostic does not have a runtime toggle:

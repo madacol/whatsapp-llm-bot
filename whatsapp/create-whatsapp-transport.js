@@ -1,8 +1,5 @@
 import { createLogger } from "../logger.js";
-import { appendFileSync, mkdirSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { getDefaultRuntimeDiagnosticsState } from "../diagnostics-config.js";
+import { getDefaultFixtureCapture } from "../diagnostics/capture.js";
 import { adaptIncomingMessages } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
@@ -27,11 +24,6 @@ import { editWhatsAppMessageByHandle } from "./outbound/send-content.js";
 import { getOutboundQueueReplayDelayMs } from "../whatsapp-outbound-queue-config.js";
 
 const log = createLogger("whatsapp");
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, "..");
-const LOGS_DIR = path.join(REPO_ROOT, "logs");
-const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-upsert-shape.jsonl");
-const WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-reactions.jsonl");
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
 const WHATSAPP_TURN_COALESCE_DELAY_MS = 250;
 
@@ -488,42 +480,61 @@ export function buildWhatsAppUpsertShapeDiagnostic(message) {
 }
 
 /**
- * @param {BaileysMessage} message
+ * @param {unknown} event
  * @param {{
- *   diagnosticsState?: import("../diagnostics-config.js").RuntimeDiagnosticsState,
- *   targetPath?: string,
+ *   fixtureCapture?: import("../diagnostics/capture.js").FixtureCapture | null,
  * }} [options]
  * @returns {void}
  */
-export function appendWhatsAppUpsertDiagnostic(message, options = {}) {
-  const diagnosticsState = options.diagnosticsState ?? getDefaultRuntimeDiagnosticsState();
-  if (!diagnosticsState.isWhatsAppUpsertLogEnabled()) {
+export function captureWhatsAppUpsertEvent(event, options = {}) {
+  const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
+  if (!fixtureCapture) {
     return;
   }
-  const targetPath = options.targetPath ?? WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH;
-  mkdirSync(path.dirname(targetPath), { recursive: true });
-  appendFileSync(targetPath, `${JSON.stringify(buildWhatsAppUpsertShapeDiagnostic(message))}\n`);
+  fixtureCapture.capture({
+    seam: "whatsapp.inbound",
+    direction: "baileys_to_shell",
+    event: "messages.upsert",
+    payload: event,
+  });
 }
 
 /**
  * @param {import("./runtime/reaction-runtime.js").ReactionRuntimeObserverEvent} event
  * @param {{
- *   diagnosticsState?: import("../diagnostics-config.js").RuntimeDiagnosticsState,
- *   targetPath?: string,
+ *   fixtureCapture?: import("../diagnostics/capture.js").FixtureCapture | null,
  * }} [options]
  * @returns {void}
  */
-export function appendWhatsAppReactionDiagnostic(event, options = {}) {
-  const diagnosticsState = options.diagnosticsState ?? getDefaultRuntimeDiagnosticsState();
-  if (!diagnosticsState.isWhatsAppReactionLogEnabled()) {
+export function captureWhatsAppReactionRuntimeEvent(event, options = {}) {
+  const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
+  if (!fixtureCapture) {
     return;
   }
-  const targetPath = options.targetPath ?? WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH;
-  mkdirSync(path.dirname(targetPath), { recursive: true });
-  appendFileSync(targetPath, `${JSON.stringify({
-    receivedAt: new Date().toISOString(),
-    ...event,
-  })}\n`);
+  fixtureCapture.capture({
+    seam: "whatsapp.reaction",
+    direction: "runtime",
+    event: event.type,
+    payload: event,
+  });
+}
+
+/**
+ * @param {unknown[]} reactions
+ * @param {{ fixtureCapture?: import("../diagnostics/capture.js").FixtureCapture | null }} [options]
+ * @returns {void}
+ */
+export function captureWhatsAppReactionEvent(reactions, options = {}) {
+  const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
+  if (!fixtureCapture) {
+    return;
+  }
+  fixtureCapture.capture({
+    seam: "whatsapp.reaction",
+    direction: "baileys_to_shell",
+    event: "messages.reaction",
+    payload: reactions,
+  });
 }
 
 /**
@@ -742,7 +753,7 @@ function serializeTransportError(error) {
 export async function createWhatsAppTransport(options = {}) {
   const confirmRuntime = createConfirmRuntime();
   const selectRuntime = createSelectRuntime();
-  const reactionRuntime = createReactionRuntime({ observer: appendWhatsAppReactionDiagnostic });
+  const reactionRuntime = createReactionRuntime({ observer: captureWhatsAppReactionRuntimeEvent });
   const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
   const outboundStore = options.outboundStore;
 
@@ -1097,9 +1108,9 @@ export async function createWhatsAppTransport(options = {}) {
       }
 
       if (events["messages.upsert"]) {
+        captureWhatsAppUpsertEvent(events["messages.upsert"]);
         const { messages } = events["messages.upsert"];
         for (const message of messages) {
-          appendWhatsAppUpsertDiagnostic(message);
           if (outboundStore) {
             await outboundStore.enqueueWhatsAppIngressJournalEntry({
               ingressKey: createUpsertIngressKey(message),
@@ -1119,6 +1130,7 @@ export async function createWhatsAppTransport(options = {}) {
       }
 
       if (events["messages.reaction"]) {
+        captureWhatsAppReactionEvent(events["messages.reaction"]);
         if (outboundStore) {
           if (!ingressDispatcher) {
             throw new Error("WhatsApp ingress dispatcher is unavailable.");

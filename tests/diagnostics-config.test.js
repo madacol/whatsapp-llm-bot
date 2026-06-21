@@ -6,84 +6,98 @@ import path from "node:path";
 import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
 
 describe("runtime diagnostics config", () => {
-  it("uses environment defaults until the runtime config file overrides them", async () => {
+  it("uses operational environment defaults until the runtime config file adds capture seams", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "diagnostics-config-"));
     const configPath = path.join(tempDir, "logging.json");
     const state = createRuntimeDiagnosticsState({
       configPath,
       env: {
-        MADABOT_ACP_PROTOCOL_LOG: "1",
         MADABOT_ACP_STDERR_LOG: "1",
-        MADABOT_RAW_EVENT_LOG: "0",
         DB_DIAGNOSTICS: "1",
         LOG_LEVEL: "warn",
       },
-      legacyWhatsAppDiagnosticEnabled: true,
       reloadIntervalMs: 0,
     });
 
-    assert.equal(state.isAcpProtocolLogEnabled(), true);
     assert.equal(state.isAcpStderrLogEnabled(), true);
-    assert.equal(state.isRawEventLogEnabled(), false);
     assert.equal(state.isDbCacheLogEnabled(), true);
-    assert.equal(state.isWhatsAppUpsertLogEnabled(), true);
-    assert.equal(state.isWhatsAppReactionLogEnabled(), true);
-    assert.equal(state.isWhatsAppOutboundLogEnabled(), false);
+    assert.deepEqual(state.getConfig().capture, { seams: {} });
     assert.equal(state.getConfig().logLevel, "warn");
 
     await fs.writeFile(configPath, JSON.stringify({
-      acpProtocolLog: false,
-      acpStderrLog: false,
-      rawEventLog: true,
-      dbCacheLog: false,
-      whatsappUpsertLog: false,
-      whatsappReactionLog: true,
-      whatsappOutboundLog: true,
+      capture: {
+        seams: {
+          "acp.protocol": {
+            enabledUntil: "2026-06-21T09:00:00.000Z",
+            rotateMinutes: 5,
+            retentionHours: 12,
+            queueLimit: 20,
+            fieldPolicies: {
+              content: { capBytes: 1024 },
+              unknownGroup: { capBytes: 10 },
+            },
+          },
+        },
+      },
       logLevel: "debug",
     }));
 
-    assert.equal(state.isAcpProtocolLogEnabled(), false);
-    assert.equal(state.isAcpStderrLogEnabled(), false);
-    assert.equal(state.isRawEventLogEnabled(), true);
-    assert.equal(state.isDbCacheLogEnabled(), false);
-    assert.equal(state.isWhatsAppUpsertLogEnabled(), false);
-    assert.equal(state.isWhatsAppReactionLogEnabled(), true);
-    assert.equal(state.isWhatsAppOutboundLogEnabled(), true);
+    assert.equal(state.isAcpStderrLogEnabled(), true);
+    assert.equal(state.isDbCacheLogEnabled(), true);
+    assert.deepEqual(state.getConfig().capture.seams["acp.protocol"], {
+      enabledUntil: "2026-06-21T09:00:00.000Z",
+      rotateMinutes: 5,
+      retentionHours: 12,
+      queueLimit: 20,
+      fieldPolicies: {
+        content: { capBytes: 1024 },
+        unknownGroup: { capBytes: 10 },
+      },
+    });
     assert.equal(state.getConfig().logLevel, "debug");
   });
 
-  it("persists runtime logging changes and reflects them without recreating state", async () => {
+  it("persists runtime capture changes and reflects them without recreating state", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "diagnostics-config-"));
     const configPath = path.join(tempDir, "logging.json");
     const state = createRuntimeDiagnosticsState({
       configPath,
       env: {},
-      legacyWhatsAppDiagnosticEnabled: false,
       reloadIntervalMs: 0,
     });
 
-    assert.equal(state.isAcpProtocolLogEnabled(), false);
-    assert.equal(state.isRawEventLogEnabled(), false);
+    assert.deepEqual(state.getConfig().capture, { seams: {} });
 
-    await state.update({ acpProtocolLog: true });
+    await state.update({
+      capture: {
+        seams: {
+          "whatsapp.inbound": {
+            enabledUntil: "2026-06-21T09:00:00.000Z",
+            fieldPolicies: {
+              jpegThumbnail: { capBytes: 65536 },
+            },
+          },
+        },
+      },
+    });
 
-    assert.equal(state.isAcpProtocolLogEnabled(), true);
-    assert.equal(state.isRawEventLogEnabled(), false);
     assert.deepEqual(JSON.parse(await fs.readFile(configPath, "utf8")), {
-      acpProtocolLog: true,
-      acpStderrLog: false,
-      rawEventLog: false,
-      dbCacheLog: false,
-      whatsappUpsertLog: false,
-      whatsappReactionLog: false,
-      whatsappOutboundLog: false,
+      capture: {
+        seams: {
+          "whatsapp.inbound": {
+            enabledUntil: "2026-06-21T09:00:00.000Z",
+            fieldPolicies: {
+              jpegThumbnail: { capBytes: 65536 },
+            },
+          },
+        },
+      },
       logLevel: null,
     });
 
-    await state.update({ rawEventLog: true, acpProtocolLog: false, logLevel: "error" });
+    await state.update({ logLevel: "error" });
 
-    assert.equal(state.isAcpProtocolLogEnabled(), false);
-    assert.equal(state.isRawEventLogEnabled(), true);
+    assert.deepEqual(Object.keys(state.getConfig().capture.seams), ["whatsapp.inbound"]);
     assert.equal(state.getConfig().logLevel, "error");
   });
 });

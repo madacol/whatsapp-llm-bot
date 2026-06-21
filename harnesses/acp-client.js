@@ -5,14 +5,12 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../logger.js";
 import { getDefaultRuntimeDiagnosticsState } from "../diagnostics-config.js";
-import { createHourlyNdjsonLogWriter } from "../hourly-ndjson-log.js";
+import { getDefaultFixtureCapture } from "../diagnostics/capture.js";
 
 const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
-const LOGS_DIR = path.join(REPO_ROOT, "logs");
-const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
 
 /**
  * @typedef {{
@@ -31,25 +29,8 @@ const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
  *   env?: NodeJS.ProcessEnv,
  *   signal?: AbortSignal,
  *   handleRequest?: (message: Record<string, unknown>) => Promise<unknown>,
- *   protocolLogger?: AcpProtocolLogger | null,
+ *   fixtureCapture?: import("../diagnostics/capture.js").FixtureCapture | null,
  * }} OpenAcpConnectionOptions
- */
-
-/**
- * @typedef {{
- *   timestamp: string,
- *   direction: "client_to_agent" | "agent_to_client",
- *   kind: "request" | "response" | "notification",
- *   id?: string | number,
- *   method?: string,
- *   message: Record<string, unknown>,
- * }} AcpProtocolLogEntry
- */
-
-/**
- * @typedef {{
- *   write: (entry: AcpProtocolLogEntry) => Promise<void> | void,
- * }} AcpProtocolLogger
  */
 
 /**
@@ -217,54 +198,6 @@ function cleanStderrTail(value) {
 }
 
 /**
- * @param {string} filePath
- * @returns {AcpProtocolLogger}
- */
-export function createNdjsonAcpProtocolLogger(filePath) {
-  const writer = createHourlyNdjsonLogWriter(filePath);
-
-  return {
-    write(entry) {
-      return writer.write(entry);
-    },
-  };
-}
-
-/**
- * @param {string} filePath
- * @param {import("../diagnostics-config.js").RuntimeDiagnosticsState} [diagnosticsState]
- * @returns {AcpProtocolLogger}
- */
-export function createRuntimeGatedAcpProtocolLogger(filePath, diagnosticsState = getDefaultRuntimeDiagnosticsState()) {
-  /** @type {AcpProtocolLogger | null} */
-  let logger = null;
-  return {
-    write(entry) {
-      if (!diagnosticsState.isAcpProtocolLogEnabled()) {
-        return;
-      }
-      if (!logger) {
-        logger = createNdjsonAcpProtocolLogger(filePath);
-      }
-      return logger.write(entry);
-    },
-  };
-}
-
-/** @type {AcpProtocolLogger | null} */
-let cachedDefaultProtocolLogger = null;
-
-/**
- * @returns {AcpProtocolLogger}
- */
-export function getDefaultAcpProtocolLogger() {
-  if (!cachedDefaultProtocolLogger) {
-    cachedDefaultProtocolLogger = createRuntimeGatedAcpProtocolLogger(ACP_PROTOCOL_LOG_BASE_PATH);
-  }
-  return cachedDefaultProtocolLogger;
-}
-
-/**
  * @param {Record<string, unknown>} message
  * @returns {"request" | "response" | "notification"}
  */
@@ -279,25 +212,21 @@ function classifyAcpProtocolMessage(message) {
 }
 
 /**
- * @param {AcpProtocolLogger | null} protocolLogger
+ * @param {import("../diagnostics/capture.js").FixtureCapture | null} fixtureCapture
  * @param {"client_to_agent" | "agent_to_client"} direction
  * @param {Record<string, unknown>} message
  * @returns {void}
  */
-function logAcpProtocolMessage(protocolLogger, direction, message) {
-  if (!protocolLogger) {
+function captureAcpProtocolMessage(fixtureCapture, direction, message) {
+  if (!fixtureCapture) {
     return;
   }
-  const entry = {
-    timestamp: new Date().toISOString(),
+  const kind = classifyAcpProtocolMessage(message);
+  fixtureCapture.capture({
+    seam: "acp.protocol",
     direction,
-    kind: classifyAcpProtocolMessage(message),
-    ...(message.id !== undefined && (typeof message.id === "string" || typeof message.id === "number") ? { id: message.id } : {}),
-    ...(typeof message.method === "string" ? { method: message.method } : {}),
-    message,
-  };
-  Promise.resolve(protocolLogger.write(entry)).catch((error) => {
-    log.warn("Failed to write ACP protocol log entry.", error);
+    event: typeof message.method === "string" ? message.method : kind,
+    payload: message,
   });
 }
 
@@ -334,9 +263,7 @@ function formatConnectionClosedMessage(details) {
  * @returns {Promise<AcpConnection>}
  */
 export async function openAcpConnection(options) {
-  const protocolLogger = options.protocolLogger === undefined
-    ? getDefaultAcpProtocolLogger()
-    : options.protocolLogger;
+  const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
   const proc = spawn(resolveAcpCommandPath(options.command), options.args ?? [], {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options.cwd ? { cwd: options.cwd } : {}),
@@ -374,7 +301,7 @@ export async function openAcpConnection(options) {
    */
   function send(message) {
     const jsonRpcMessage = { jsonrpc: "2.0", ...message };
-    logAcpProtocolMessage(protocolLogger, "client_to_agent", jsonRpcMessage);
+    captureAcpProtocolMessage(fixtureCapture, "client_to_agent", jsonRpcMessage);
     proc.stdin.write(`${JSON.stringify(jsonRpcMessage)}\n`);
   }
 
@@ -428,7 +355,7 @@ export async function openAcpConnection(options) {
           continue;
         }
         refreshActivityTimeouts();
-        logAcpProtocolMessage(protocolLogger, "agent_to_client", message);
+        captureAcpProtocolMessage(fixtureCapture, "agent_to_client", message);
 
         if (typeof message.id === "number" && !("method" in message)) {
           if ("error" in message) {
