@@ -24,7 +24,6 @@ import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
 import { buildLiveInputText } from "./live-input-text.js";
-import { defaultRestartGate } from "../restart-gate.js";
 import { createBangCommandRouter } from "../commands/bang-command-router.js";
 import { runClearConversationCommand } from "../commands/clear-conversation-command.js";
 import { handleSlashDiffCommand } from "../slash-diff-command.js";
@@ -423,7 +422,6 @@ function resolveProviderLiveInputTarget(harnessInstance) {
  *   restartCommandHandler?: ReturnType<typeof import("../commands/restart-command.js").createRestartCommandHandler>,
  *   transport?: ChatTransport,
  *   workspacePresentation?: WorkspacePresentationPort,
- *   restartGate?: import("../restart-gate.js").RestartGate,
  *   liveInputFallbackDelayMs?: number,
  * }} ConversationRunnerDeps
  */
@@ -438,7 +436,6 @@ export function createConversationRunner({
   llmClient,
   restartCommandHandler,
   workspacePresentation,
-  restartGate = defaultRestartGate,
   liveInputFallbackDelayMs = DEFAULT_LIVE_INPUT_FALLBACK_DELAY_MS,
 }) {
   const {
@@ -1189,11 +1186,6 @@ export function createConversationRunner({
 
   return {
     async handleMessage(turn) {
-      if (restartGate.isWaiting()) {
-        restartGate.queueTurn(turn);
-        log.debug("Queued incoming message while restart is waiting", turn.chatId);
-        return;
-      }
       await dispatchTurn(turn);
     },
   };
