@@ -454,7 +454,12 @@ export function createConversationRunner({
     popHarnessForkStack,
   } = store;
 
-  const runCoordinator = createHarnessRunCoordinator();
+  const runCoordinator = createHarnessRunCoordinator({
+    liveInputJournal: {
+      enqueue: store.enqueueHarnessLiveInput,
+      markAccepted: store.deleteHarnessLiveInput,
+    },
+  });
   const harnessSessionDirectory = getHarnessSessionDirectory();
   const workspaceBinding = createWorkspaceBindingService(store);
   const workspaceControl = createWorkspaceControl({ store, workspacePresentation });

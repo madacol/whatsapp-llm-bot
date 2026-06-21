@@ -98,6 +98,22 @@ export async function runStoreMigrations(db) {
       ON whatsapp_ingress_journal (state, id);
     `;
 
+    await db.sql`
+      CREATE TABLE IF NOT EXISTS harness_live_input_journal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id),
+        turn_id TEXT NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
+    await db.sql`
+      CREATE INDEX IF NOT EXISTS idx_harness_live_input_journal_chat_id
+      ON harness_live_input_journal (chat_id, id);
+    `;
+
     await addColumnIfMissing(db, "workspaces", "workspace_chat_subject", "workspace_chat_subject TEXT");
     await addColumnIfMissing(db, "workspaces", "conflicted_files", "conflicted_files TEXT NOT NULL DEFAULT '[]'");
 

@@ -2,6 +2,7 @@ import { getChatDb, getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { ensureChatConfig, readChatConfig } from "./chat-config.js";
 import { createChatStore } from "./store/repos/chats.js";
+import { createHarnessLiveInputStore } from "./store/repos/harness-live-inputs.js";
 import { createMessageStore } from "./store/repos/messages.js";
 import { createProjectStore } from "./store/repos/projects.js";
 import { createWhatsAppStore, createWhatsAppStoreInternals } from "./store/repos/whatsapp.js";
@@ -88,6 +89,15 @@ const log = createLogger("store");
  *   created_at: string;
  *   updated_at: string;
  * }} WhatsAppIngressJournalRow
+ *
+ * @typedef {{
+ *   id: number;
+ *   chat_id: string;
+ *   turn_id: string;
+ *   text: string;
+ *   created_at: string;
+ *   updated_at: string;
+ * }} HarnessLiveInputRow
  */
 
 /**
@@ -192,6 +202,13 @@ export async function getChatOrThrow(_db, chatId) {
  *   markWhatsAppIngressJournalIgnored: (id: number) => Promise<void>;
  *   markWhatsAppIngressJournalFailed: (id: number, reason: string) => Promise<void>;
  *   markWhatsAppIngressJournalDeadLetter: (id: number, reason: string) => Promise<void>;
+ *   enqueueHarnessLiveInput: (input: {
+ *     chatId: string,
+ *     turnId: string,
+ *     text: string,
+ *   }) => Promise<HarnessLiveInputRow>;
+ *   listPendingHarnessLiveInputs: (chatId?: string | null) => Promise<HarnessLiveInputRow[]>;
+ *   deleteHarnessLiveInput: (id: number) => Promise<void>;
  *   archiveWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>;
  *   setWorkspaceStatus: (workspaceId: string, status: WorkspaceStatus, options?: { conflictedFiles?: string[] }) => Promise<WorkspaceRow | null>;
  *   updateWorkspaceLastTestStatus: (workspaceId: string, lastTestStatus: WorkspaceRow["last_test_status"]) => Promise<WorkspaceRow | null>;
@@ -257,6 +274,10 @@ export async function initStore(injectedDb, options = {}) {
   }
 
   const chatStore = createChatStore({ ensureChatExists });
+  const harnessLiveInputStore = createHarnessLiveInputStore({
+    db,
+    ensureChatExists,
+  });
   const messageStore = createMessageStore({ getChatDb: getInitializedChatDb });
   const whatsappInternals = createWhatsAppStoreInternals({
     db,
@@ -273,6 +294,7 @@ export async function initStore(injectedDb, options = {}) {
 
   return {
     ...chatStore,
+    ...harnessLiveInputStore,
     listChatIds,
 
     async closeDb() {
