@@ -1,8 +1,9 @@
 import { createLogger } from "../../logger.js";
 import { resolveOutputVisibility } from "../../chat-output-visibility.js";
 import { getOutboundQueueReplayDelayMs } from "../../whatsapp-outbound-queue-config.js";
-import { makeTextMessage } from "../message-payloads.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
+import { buildWhatsAppTextDeliveryPlan } from "./delivery-plan.js";
+import { executeWhatsAppDeliveryPlan } from "./delivery-plan-executor.js";
 import {
   deleteQueuedWhatsAppOutbound,
   getWhatsAppOutboundStore,
@@ -120,7 +121,7 @@ function isConnectionRecoverableWhatsAppSendError(error) {
  */
 async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, store) {
   if (payload.kind === "text") {
-    await sock.sendMessage(chatId, makeTextMessage(payload.text));
+    await executeWhatsAppDeliveryPlan(sock, chatId, buildWhatsAppTextDeliveryPlan({ text: payload.text }));
     return undefined;
   }
   const chat = payload.event.kind === "runtime_event" ? await store?.getChat?.(chatId) : undefined;
