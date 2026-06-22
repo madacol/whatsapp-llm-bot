@@ -5,26 +5,26 @@ import { formatPlanPresentationText } from "../plan-presentation.js";
 import {
   formatCommandInspectText,
   formatToolInspectBody,
-  formatSdkToolCall,
+  formatToolCallSummary,
   getToolCallSummary,
 } from "../whatsapp/tool-presenter.js";
 
 describe("WhatsApp tool presenter", () => {
   it("keeps semantic labels for explicit tools", () => {
     assert.equal(
-      formatSdkToolCall("Read", { file_path: "/repo/src/app.js" }, "/repo"),
+      formatToolCallSummary("Read", { file_path: "/repo/src/app.js" }, "/repo"),
       "*Read*  `src/app.js`",
     );
     assert.equal(
-      formatSdkToolCall("Read", { file_path: "/repo/src/app.js", offset: 10, limit: 3 }, "/repo"),
+      formatToolCallSummary("Read", { file_path: "/repo/src/app.js", offset: 10, limit: 3 }, "/repo"),
       "*Read*  `src/app.js:10-12`",
     );
     assert.equal(
-      formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
+      formatToolCallSummary("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
       "*Search*  `needle` in *src*",
     );
     assert.equal(
-      formatSdkToolCall(
+      formatToolCallSummary(
         "Grep",
         { pattern: "ThreadTurnStart|turn.start|thread.turn.start|modelSelection", path: "/repo/orchestration.ts" },
         "/repo",
@@ -32,7 +32,7 @@ describe("WhatsApp tool presenter", () => {
       "*Search*  `ThreadTurnStart|turn.start|thread.turn.start|modelSelection` in *orchestration.ts*",
     );
     assert.equal(
-      formatSdkToolCall("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
+      formatToolCallSummary("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
       "*List*  `*.js` in `src`",
     );
   });
@@ -59,6 +59,16 @@ describe("WhatsApp tool presenter", () => {
     );
   });
 
+  it("falls back to a generic summary for unrecognized tool calls", () => {
+    assert.equal(
+      formatToolCallSummary("mass_rename", {
+        replacements: [{ from: "old-name", to: "new-name" }],
+        dry_run: false,
+      }),
+      '*mass_rename*\nreplacements: [{"from":"old-name","to":"new-name"}], dry_run: false',
+    );
+  });
+
   it("renders agent controls with intent-specific labels", () => {
     assert.equal(
       getToolCallSummary("spawn_agent", {
@@ -70,7 +80,7 @@ describe("WhatsApp tool presenter", () => {
 
   it("shows update_plan contents in summaries from plan-style arguments", () => {
     assert.equal(
-      formatSdkToolCall("update_plan", {
+      formatToolCallSummary("update_plan", {
         explanation: "Tighten the display labels",
         plan: [
           { step: "Patch the formatter", status: "in_progress" },

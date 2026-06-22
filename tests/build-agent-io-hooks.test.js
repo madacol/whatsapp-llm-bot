@@ -625,6 +625,56 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
+  it("passes unrecognized tool actions through runtime output events", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const toolCall = {
+      id: "mass-rename-1",
+      name: "mass_rename",
+      arguments: JSON.stringify({
+        replacements: [{ from: "old-name", to: "new-name" }],
+        dry_run: false,
+      }),
+    };
+
+    await hooks.onToolCall?.(toolCall);
+    await hooks.onToolComplete?.(toolCall);
+
+    assert.deepEqual(sent.map((entry) => entry.event), [
+      {
+        kind: "runtime_event",
+        cwd: "/repo",
+        event: {
+          type: "tool.started",
+          provider: "codex",
+          tool: {
+            id: "mass-rename-1",
+            name: "mass_rename",
+            arguments: {
+              replacements: [{ from: "old-name", to: "new-name" }],
+              dry_run: false,
+            },
+          },
+        },
+      },
+      {
+        kind: "runtime_event",
+        cwd: "/repo",
+        event: {
+          type: "tool.completed",
+          provider: "codex",
+          tool: {
+            id: "mass-rename-1",
+            name: "mass_rename",
+            arguments: {
+              replacements: [{ from: "old-name", to: "new-name" }],
+              dry_run: false,
+            },
+          },
+        },
+      },
+    ]);
+  });
+
   it("renders edit diffs even when generic tool progress is hidden", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,
