@@ -2,14 +2,14 @@
 
 ## Final repo state
 
-- Task is complete and removed from [`tasks/todo.md`](todo.md).
+- Task is complete and removed from [`tasks/todo.md`](../todo.md).
 - Live review clarified that files created earlier in the same turn must also render later delete+add rewrites as updates.
-- Added capture script: [`../scripts/codex-app-server-approval-delete-add-capture.js`](../scripts/codex-app-server-approval-delete-add-capture.js).
-- Added real direct app-server fixture: [`../tests/fixtures/codex-app-server-approval-delete-add-traffic.json`](../tests/fixtures/codex-app-server-approval-delete-add-traffic.json).
+- Added capture script: [`../../scripts/codex-app-server-approval-delete-add-capture.js`](../../scripts/codex-app-server-approval-delete-add-capture.js).
+- Added real direct app-server fixture: [`../../tests/fixtures/codex-app-server-approval-delete-add-traffic.json`](../../tests/fixtures/codex-app-server-approval-delete-add-traffic.json).
 - Added this detail doc.
 - Added a WhatsApp e2e pipeline regression test for the captured delete+add rewrite shape.
 - Added an in-run ACP file-change baseline ledger so changes already shown to the user refresh the starting point for later file-change reconciliation.
-- `tasks/quoted-thinking-inspect-regression.md` remains the next unrelated task.
+- [`tasks/quoted-thinking-inspect-regression.md`](../quoted-thinking-inspect-regression.md) remains a separate unrelated active task.
 
 ## Outcome
 
