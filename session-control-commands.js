@@ -100,7 +100,9 @@ export async function handleSessionControlCommand({ command, chatId, context, ca
         return true;
       }
 
+      await cancelActiveQuery?.();
       await sessionControl.archive(chatId);
+      await sessionControl.clearRuntime?.(chatId);
       const restored = await sessionControl.restore(chatId, sessionId);
       if (!restored) {
         await appOutput.replyWithToolResult("Failed to restore session.");

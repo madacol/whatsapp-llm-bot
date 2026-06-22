@@ -114,6 +114,56 @@ describe("handleSessionControlCommand", () => {
     assert.ok(replies[0]?.includes("Fixing WhatsApp parser"));
   });
 
+  it("cancels and clears the active runtime before restoring a selected session", async () => {
+    /** @type {string[]} */
+    const calls = [];
+    /** @type {string[]} */
+    const replies = [];
+    const context = createContext();
+    context.reply = async (event) => {
+      replies.push(getReplyText(event));
+      return undefined;
+    };
+    context.select = async () => "sess-restored";
+
+    const handled = await handleSessionControlCommand({
+      command: "resume",
+      chatId: "chat-1",
+      context,
+      cancelActiveQuery: async () => {
+        calls.push("cancel");
+        return true;
+      },
+      sessionControl: {
+        archive: async (chatId) => {
+          calls.push(`archive:${chatId}`);
+          return { id: "sess-current", kind: "codex", cleared_at: "2026-03-19T21:30:00.000Z", title: "Current session" };
+        },
+        getHistory: async () => [
+          { id: "sess-restored", kind: "codex", cleared_at: "2026-03-19T21:00:00.000Z", title: "Restored session" },
+        ],
+        restore: async (chatId, sessionId) => {
+          calls.push(`restore:${chatId}:${sessionId}`);
+          return { id: "sess-restored", kind: "codex", cleared_at: "2026-03-19T21:00:00.000Z", title: "Restored session" };
+        },
+        clearRuntime: async (chatId) => {
+          calls.push(`clear-runtime:${chatId}`);
+          return true;
+        },
+      },
+      now: () => new Date("2026-03-19T22:00:00.000Z"),
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(calls, [
+      "cancel",
+      "archive:chat-1",
+      "clear-runtime:chat-1",
+      "restore:chat-1:sess-restored",
+    ]);
+    assert.ok(replies[0]?.includes("Session restored"));
+  });
+
   it("does not archive or restore anything when resume selection is cancelled", async () => {
     /** @type {string[]} */
     const calls = [];
