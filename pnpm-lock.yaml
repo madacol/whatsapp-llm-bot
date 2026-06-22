@@ -11,7 +11,7 @@ overrides:
 
 patchedDependencies:
   '@agentclientprotocol/codex-acp@0.0.44':
-    hash: fd41d011d016742f7a16ec63e1bbe4b5097bcf0f827be53e02d8223d25cc05c5
+    hash: a8f55c30ece8a1d2e6250b29dfdf20891e0fb10e0017f4869cfb7bb3bc6683dc
     path: patches/@agentclientprotocol__codex-acp@0.0.44.patch
 
 importers:
@@ -69,7 +69,7 @@ importers:
         version: 0.37.0(@anthropic-ai/sdk@0.99.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
       '@agentclientprotocol/codex-acp':
         specifier: 0.0.44
-        version: 0.0.44(patch_hash=fd41d011d016742f7a16ec63e1bbe4b5097bcf0f827be53e02d8223d25cc05c5)(zod@3.25.76)
+        version: 0.0.44(patch_hash=a8f55c30ece8a1d2e6250b29dfdf20891e0fb10e0017f4869cfb7bb3bc6683dc)(zod@3.25.76)
       '@earendil-works/pi-coding-agent':
         specifier: 0.75.5
         version: 0.75.5(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(ws@8.20.1)(zod@3.25.76)
@@ -2018,7 +2018,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@0.0.44(patch_hash=fd41d011d016742f7a16ec63e1bbe4b5097bcf0f827be53e02d8223d25cc05c5)(zod@3.25.76)':
+  '@agentclientprotocol/codex-acp@0.0.44(patch_hash=a8f55c30ece8a1d2e6250b29dfdf20891e0fb10e0017f4869cfb7bb3bc6683dc)(zod@3.25.76)':
     dependencies:
       '@agentclientprotocol/sdk': 0.21.1(zod@3.25.76)
       '@openai/codex': 0.128.0
