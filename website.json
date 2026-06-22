@@ -8,7 +8,7 @@
   {
     "subdomain": "architecture-review",
     "access": {
-      "mode": "public"
+      "mode": "tailnet"
     },
     "static": {
       "root": "./architecture-review-site"
