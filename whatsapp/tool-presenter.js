@@ -7,29 +7,6 @@ import { formatPlanPresentationInspect } from "../plan-presentation.js";
 import { formatStructuredInspectOutput } from "../tool-inspect-formatters.js";
 import { buildToolPresentation } from "./tool-presentation-model.js";
 
-/**
- * Tool names that map to the shared semantic SDK-style presentation layer.
- * @type {Set<string>}
- */
-const SDK_PRESENTATION_TOOLS = new Set([
-  "Read",
-  "Grep",
-  "Glob",
-  "WebSearch",
-  "search_query",
-  "open",
-  "find",
-  "update_plan",
-  "spawn_agent",
-  "send_input",
-  "wait_agent",
-  "resume_agent",
-  "close_agent",
-  "parallel",
-  "stdin",
-  "write_stdin",
-]);
-
 /** Map file extensions to language identifiers for syntax highlighting. */
 const EXT_TO_LANG = /** @type {Record<string, string>} */ ({
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
@@ -406,10 +383,7 @@ export function formatToolPresentationInspect(presentation, output) {
  * @param {string | null | undefined} [cwd]
  * @returns {string | null}
  */
-export function formatSdkToolCall(name, args, cwd) {
-  if (!SDK_PRESENTATION_TOOLS.has(name)) {
-    return null;
-  }
+export function formatToolCallSummary(name, args, cwd) {
   const presentation = buildToolPresentation(name, args, undefined, cwd, undefined);
   return presentation ? formatToolPresentationSummary(presentation) : null;
 }

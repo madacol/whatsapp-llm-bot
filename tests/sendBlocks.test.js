@@ -657,6 +657,42 @@ describe("sendEvent – runtime events", () => {
     }
   });
 
+  it("renders generic fallback details for unrecognized runtime tools", async () => {
+    const { sock, sent } = createMockSock();
+    const tool = {
+      id: "runtime-generic-tool-1",
+      name: "mass_rename",
+      arguments: {
+        replacements: [{ from: "old-name", to: "new-name" }],
+        dry_run: false,
+      },
+    };
+
+    await sendEvent(sock, "runtime-generic-tool-chat", {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.started",
+        provider: "acp",
+        tool,
+      },
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
+    await sendEvent(sock, "runtime-generic-tool-chat", {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.completed",
+        provider: "acp",
+        tool,
+      },
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
+
+    assert.deepEqual(sent.map((entry) => entry.msg.text), [
+      '🔧 *mass_rename*\nreplacements: [{"from":"old-name","to":"new-name"}], dry_run: false',
+      '✅ *mass_rename*\nreplacements: [{"from":"old-name","to":"new-name"}], dry_run: false',
+    ]);
+  });
+
   it("renders ACP command runtime progress inside WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 

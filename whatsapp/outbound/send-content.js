@@ -881,22 +881,41 @@ function formatRuntimeToolSummary(tool, cwd) {
   if (semanticSummary) {
     return semanticSummary;
   }
+  const detailSummary = formatRuntimeToolDetailSummary(tool, cwd);
+  if (detailSummary.handled) {
+    return detailSummary.summary;
+  }
+  return formatGenericToolSummary(tool.name, tool.arguments, cwd);
+}
+
+/**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @param {string | null | undefined} cwd
+ * @returns {{ handled: true, summary: string | null } | { handled: false }}
+ */
+function formatRuntimeToolDetailSummary(tool, cwd) {
   const displayName = tool.name.trim() || "Tool";
   if (displayName === "Shell") {
     const command = getStringArg(tool.arguments, ["command"]);
     if (command) {
-      return formatRuntimeCommandSummary(command);
+      return { handled: true, summary: formatRuntimeCommandSummary(command) };
     }
   }
   if (displayName === "stdin" || displayName === "write_stdin") {
-    return null;
+    return { handled: true, summary: null };
   }
   const pathDetail = getStringArg(tool.arguments, ["path", "file_path", "filePath"]);
   if (pathDetail) {
-    return formatRuntimeProgressEntry(displayName, `\`${shortenPath(pathDetail, cwd ?? null)}\``);
+    return {
+      handled: true,
+      summary: formatRuntimeProgressEntry(displayName, `\`${shortenPath(pathDetail, cwd ?? null)}\``),
+    };
   }
-  const textDetail = getStringArg(tool.arguments, ["title", "message", "prompt", "query", "q"]);
-  return formatRuntimeProgressEntry(displayName, textDetail);
+  const textDetail = getStringArg(tool.arguments, ["description", "title", "message", "prompt", "query", "q"]);
+  if (textDetail) {
+    return { handled: true, summary: formatRuntimeProgressEntry(displayName, textDetail) };
+  }
+  return { handled: false };
 }
 
 /**
@@ -911,6 +930,20 @@ function formatSemanticToolSummary(name, args, cwd) {
     return null;
   }
   if (presentation.kind === "generic") {
+    return null;
+  }
+  return formatToolPresentationSummary(presentation);
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @returns {string | null}
+ */
+function formatGenericToolSummary(name, args, cwd) {
+  const presentation = buildToolPresentation(name, args, undefined, cwd ?? null, undefined);
+  if (presentation?.kind !== "generic") {
     return null;
   }
   return formatToolPresentationSummary(presentation);
