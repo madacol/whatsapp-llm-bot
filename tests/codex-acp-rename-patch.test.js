@@ -10,7 +10,7 @@ describe("patched codex-acp rename patch handling", () => {
     const bundle = await fs.readFile(codexAcpEntryPoint, "utf8");
     const patch = await fs.readFile(patchPath, "utf8");
 
-    for (const source of [bundle, patch]) {
+    for (const source of [bundle, patch.replace(/^[+ ]/gm, "")]) {
       assert.match(source, /function extractMoveTargetPathFromDiff\(diff\)/);
       assert.match(source, /function stripUnsupportedPatchMetadata\(diff\)/);
       assert.match(source, /!line\.startsWith\("Moved to: "\)/);
