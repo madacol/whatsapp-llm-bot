@@ -5,6 +5,6 @@
 
 ## Todo
 
-- Fix thinking-message rendering so separate thinking updates are not coalesced into one visible message.
+- Fix thinking-message rendering so separate thinking updates are not coalesced into one visible message. [details](quoted-thinking-inspect-regression.md)
 
 ## Blocked
