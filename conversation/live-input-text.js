@@ -1,10 +1,6 @@
 import { hasMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import { renderContentBlock } from "../message-formatting.js";
-import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
-import { createLogger } from "../logger.js";
-import { errorToString } from "../utils.js";
-
-const log = createLogger("conversation:live-input");
+import { enrichMediaInputBlocks, extractTopLevelText } from "../media-input-enrichment.js";
 
 /**
  * @typedef {{
@@ -63,25 +59,6 @@ function renderLiveInputMediaReference(block) {
   }
   const suffix = metadata.length > 0 ? ` (${metadata.join(", ")})` : "";
   return `- ${block.type}${suffix}: ${resolveMediaPath(block.path)} (canonical: ${block.path})`;
-}
-
-/**
- * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
- * @returns {string | null}
- */
-function getMediaBlockPath(block) {
-  return hasMediaPath(block) ? block.path : null;
-}
-
-/**
- * @param {IncomingContentBlock[]} blocks
- * @returns {string}
- */
-function extractTopLevelText(blocks) {
-  return blocks
-    .filter(/** @returns {block is TextContentBlock} */ (block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
 }
 
 /**
@@ -163,115 +140,6 @@ function renderLiveInputPrompt(blocks, options = {}) {
 }
 
 /**
- * @param {IncomingContentBlock[]} blocks
- * @param {{
- *   llmClient: LlmClient,
- *   mediaToTextModels?: { image?: string, audio?: string, video?: string, general?: string },
- *   db: ChatDb,
- *   contextMessages: ChatMessage[],
- *   currentText: string,
- * } & LiveInputAudioTranscriptionObserver} input
- * @returns {Promise<IncomingContentBlock[]>}
- */
-async function augmentLiveInputBlocks(blocks, input) {
-  /** @type {IncomingContentBlock[]} */
-  const augmented = [];
-
-  for (const block of blocks) {
-    if (block.type === "quote") {
-      augmented.push({ ...block, content: await augmentLiveInputBlocks(block.content, input) });
-      continue;
-    }
-
-    if (block.type === "image" || block.type === "video") {
-      if (block.alt) {
-        augmented.push(block);
-        continue;
-      }
-      const modelId = resolveMediaModel(block.type, input.mediaToTextModels ?? {});
-      if (!modelId) {
-        log.info("Skipped live input media transcription; no model configured", {
-          contentType: block.type,
-          path: getMediaBlockPath(block),
-        });
-        augmented.push(block);
-        continue;
-      }
-      try {
-        const alt = await getMediaTranslation({
-          block,
-          contentType: block.type,
-          modelId,
-          llmClient: input.llmClient,
-          db: input.db,
-          contextMessages: input.contextMessages,
-          currentText: input.currentText,
-        });
-        log.info("Added live input media description", {
-          contentType: block.type,
-          path: getMediaBlockPath(block),
-          modelId,
-          descriptionLength: alt.length,
-        });
-        augmented.push({ ...block, alt });
-      } catch (error) {
-        log.warn("Live input media transcription failed", {
-          contentType: block.type,
-          path: getMediaBlockPath(block),
-          modelId,
-          error: errorToString(error),
-        });
-        augmented.push(block);
-      }
-      continue;
-    }
-
-    if (block.type === "audio") {
-      augmented.push(block);
-      const modelId = resolveMediaModel("audio", input.mediaToTextModels ?? {});
-      if (!modelId) {
-        log.info("Skipped live input audio transcription; no model configured", {
-          path: getMediaBlockPath(block),
-        });
-        continue;
-      }
-      try {
-        await input.onAudioTranscriptionStart?.({ block, modelId });
-        const description = await getMediaTranslation({
-          block,
-          contentType: "audio",
-          modelId,
-          llmClient: input.llmClient,
-          db: input.db,
-          contextMessages: input.contextMessages,
-          currentText: input.currentText,
-        });
-        log.info("Added live input audio description", {
-          path: getMediaBlockPath(block),
-          modelId,
-          descriptionLength: description.length,
-        });
-        await input.onAudioTranscriptionComplete?.({ block, modelId, transcription: description });
-        augmented.push({ type: "text", text: description });
-      } catch (error) {
-        log.warn("Live input audio transcription failed", {
-          path: getMediaBlockPath(block),
-          modelId,
-          error: errorToString(error),
-        });
-        await input.onAudioTranscriptionFailure?.({ block, modelId, error });
-        // Keep the canonical audio block when translation fails.
-      }
-      continue;
-    }
-
-    augmented.push(block);
-  }
-
-  return augmented;
-}
-
-/**
  * Build a text-only representation of an incoming turn suitable for harness
  * live-input steering.
  * @param {{
@@ -284,7 +152,7 @@ async function augmentLiveInputBlocks(blocks, input) {
  * @returns {Promise<string>}
  */
 export async function buildLiveInputText(input) {
-  const augmented = await augmentLiveInputBlocks(input.content, {
+  const enriched = await enrichMediaInputBlocks(input.content, {
     llmClient: input.llmClient,
     mediaToTextModels: input.mediaToTextModels,
     db: input.db,
@@ -294,5 +162,5 @@ export async function buildLiveInputText(input) {
     onAudioTranscriptionComplete: input.onAudioTranscriptionComplete,
     onAudioTranscriptionFailure: input.onAudioTranscriptionFailure,
   });
-  return renderLiveInputPrompt(augmented, { includeMediaReferences: input.includeMediaReferences });
+  return renderLiveInputPrompt(enriched.blocks, { includeMediaReferences: input.includeMediaReferences });
 }
