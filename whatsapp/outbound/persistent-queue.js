@@ -1,7 +1,8 @@
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
 import { resolveOutputVisibility } from "../../chat-output-visibility.js";
 import { getOutboundQueuePersistDelayMs } from "../../whatsapp-outbound-queue-config.js";
-import { makeTextMessage } from "../message-payloads.js";
+import { buildWhatsAppTextDeliveryPlan } from "./delivery-plan.js";
+import { executeWhatsAppDeliveryPlan } from "./delivery-plan-executor.js";
 import { enqueueWhatsAppOutbound } from "./queue-store.js";
 import { createQueuedMessageHandle } from "./queued-handles.js";
 import {
@@ -216,7 +217,7 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }
   }
 
   try {
-    await sock.sendMessage(chatId, makeTextMessage(text));
+    await executeWhatsAppDeliveryPlan(sock, chatId, buildWhatsAppTextDeliveryPlan({ text }));
     return "sent";
   } catch (error) {
     if (!isRecoverableWhatsAppSendError(error)) {
@@ -244,7 +245,7 @@ async function queueTextAfterDebouncedRetry({ getSocket, chatId, text, store }) 
   const sock = getSocket();
   if (sock) {
     try {
-      await sock.sendMessage(chatId, makeTextMessage(text));
+      await executeWhatsAppDeliveryPlan(sock, chatId, buildWhatsAppTextDeliveryPlan({ text }));
       return "sent";
     } catch (error) {
       if (!isRecoverableWhatsAppSendError(error)) {
