@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review - whatsapp-llm-bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      body { letter-spacing: 0; }
+      .deep-box { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; }
+      .thin-box { background: #fff; border: 1px solid #cbd5e1; color: #0f172a; }
+      .leak-arrow { color: #dc2626; }
+      .band { border-left: 6px solid #94a3b8; }
+      .band-hot { border-left-color: #dc2626; }
+      .band-deep { border-left-color: #059669; }
+      .seam-line { border-top: 2px dashed #94a3b8; }
+      .mini-label { font-size: 0.68rem; text-transform: uppercase; color: #64748b; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-6 py-10 space-y-10">
+      <header class="space-y-5">
+        <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500">Architecture Review</p>
+            <h1 class="text-4xl font-semibold">whatsapp-llm-bot</h1>
+            <p class="text-sm text-slate-500 mt-2">2026-06-22 13:59 UTC</p>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs text-slate-600 md:w-[28rem]">
+            <div class="thin-box rounded p-2">solid box = module</div>
+            <div class="thin-box rounded p-2 border-dashed">dashed line = seam</div>
+            <div class="thin-box rounded p-2"><span class="leak-arrow">red arrow</span> = leakage</div>
+            <div class="deep-box rounded p-2">dark box = deep module</div>
+          </div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-8">
+        <article id="media-enrichment" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-2xl font-semibold mr-2">Deepen Media Input Enrichment</h2>
+            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">in-process</span>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-[1fr_1.25fr]">
+            <div>
+              <p class="mini-label mb-2">Files</p>
+              <ul class="font-mono text-sm text-slate-700 space-y-1">
+                <li>media-to-text.js</li>
+                <li>conversation/live-input-text.js</li>
+                <li>harnesses/prompt-media.js</li>
+                <li>conversation/build-harness-turn-input.js</li>
+                <li>tests/media-to-text.test.js</li>
+                <li>tests/prompt-media.test.js</li>
+              </ul>
+            </div>
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">Before</p>
+                <div class="space-y-2 text-sm">
+                  <div class="thin-box rounded p-2">convertUnsupportedMedia<br><span class="text-xs text-slate-500">history, target-model gaps</span></div>
+                  <div class="thin-box rounded p-2">buildLiveInputText<br><span class="text-xs text-slate-500">live input, audio status</span></div>
+                  <div class="thin-box rounded p-2">prompt-media<br><span class="text-xs text-slate-500">text-first harness prompts</span></div>
+                  <div class="text-center text-red-600 text-xs font-semibold">same traversal and model policy repeated</div>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">After</p>
+                <div class="deep-box rounded-lg p-4 min-h-[14rem] flex flex-col justify-between">
+                  <div>
+                    <p class="text-sm font-semibold">Media Input Enrichment</p>
+                    <p class="text-xs text-slate-300 mt-2">one interface for block traversal, context reset, media-to-text model choice, cache use, and audio status events</p>
+                  </div>
+                  <div class="grid grid-cols-3 gap-2 text-center text-xs text-slate-200">
+                    <div class="rounded bg-white/10 p-2">history</div>
+                    <div class="rounded bg-white/10 p-2">live input</div>
+                    <div class="rounded bg-white/10 p-2">text prompt</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="mini-label">Problem</p>
+              <p class="text-sm mt-1">Media-to-text policy is shallow: callers must know content traversal, quote recursion, current text, context reset, model fallback, and output shape.</p>
+            </div>
+            <div>
+              <p class="mini-label">Solution</p>
+              <p class="text-sm mt-1">Move media block enrichment behind one deep module; callers choose intent and receive enriched blocks or rendered text.</p>
+            </div>
+            <div>
+              <p class="mini-label">Wins</p>
+              <ul class="text-sm mt-1 space-y-1">
+                <li>locality: one media policy</li>
+                <li>leverage: one test surface</li>
+                <li>audio behavior stops drifting</li>
+                <li>quote recursion fixed once</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article id="agent-runtime" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-2xl font-semibold mr-2">Put Agent Runtime Behind Turn Orchestration</h2>
+            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">ports & adapters</span>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-[1fr_1.25fr]">
+            <div>
+              <p class="mini-label mb-2">Files</p>
+              <ul class="font-mono text-sm text-slate-700 space-y-1">
+                <li>conversation/create-conversation-runner.js</li>
+                <li>conversation/harness-session-binding.js</li>
+                <li>conversation/build-harness-turn-input.js</li>
+                <li>harnesses/registry.js</li>
+                <li>harnesses/adapter.js</li>
+                <li>harnesses/run-coordinator.js</li>
+                <li>harnesses/acp.js</li>
+              </ul>
+            </div>
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-2">Before</p>
+                <pre class="mermaid">
+flowchart TB
+  TO[Turn Orchestration]
+  SEL[resolve harness selection]
+  CFG[build run config]
+  SESS[session binding]
+  COORD[live input coordinator]
+  DISP[runtime event dispatcher]
+  ACP[ACP adapter]
+  TO --> SEL
+  TO --> CFG
+  TO --> SESS
+  TO --> COORD
+  TO --> DISP
+  TO --> ACP
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class SEL,CFG,SESS,COORD,DISP,ACP leak;
+                </pre>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-2">After</p>
+                <div class="space-y-3">
+                  <div class="thin-box rounded p-3 text-sm">Turn Orchestration<br><span class="text-xs text-slate-500">routing, chat policy, command handoff</span></div>
+                  <div class="seam-line"></div>
+                  <div class="deep-box rounded-lg p-4 text-sm min-h-[10rem]">
+                    <p class="font-semibold">Agent Runtime</p>
+                    <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-200">
+                      <div class="rounded bg-white/10 p-2">selection</div>
+                      <div class="rounded bg-white/10 p-2">session</div>
+                      <div class="rounded bg-white/10 p-2">live input</div>
+                      <div class="rounded bg-white/10 p-2">ACP adapter</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="mini-label">Problem</p>
+              <p class="text-sm mt-1">Turn Orchestration is shallow because its interface requires harness selection, adapter lifecycle, live input races, runtime event filtering, and durable cursor policy.</p>
+            </div>
+            <div>
+              <p class="mini-label">Solution</p>
+              <p class="text-sm mt-1">Deepen Agent Runtime so Turn Orchestration submits turns and semantic commands while runtime selection, session binding, and ACP adapter details stay behind the seam.</p>
+            </div>
+            <div>
+              <p class="mini-label">Wins</p>
+              <ul class="text-sm mt-1 space-y-1">
+                <li>locality: runtime bugs concentrate</li>
+                <li>leverage: smaller runner tests</li>
+                <li>Harness vocabulary contained</li>
+                <li>live input policy internal</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article id="whatsapp-presentation" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-2xl font-semibold mr-2">Deepen WhatsApp Presentation Into Delivery Plans</h2>
+            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">local-substitutable</span>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-[1fr_1.25fr]">
+            <div>
+              <p class="mini-label mb-2">Files</p>
+              <ul class="font-mono text-sm text-slate-700 space-y-1">
+                <li>whatsapp/outbound/send-content.js</li>
+                <li>whatsapp/outbound/event-rendering.js</li>
+                <li>whatsapp/outbound/file-change-content.js</li>
+                <li>whatsapp/tool-presenter.js</li>
+                <li>message-renderer.js</li>
+                <li>tests/whatsapp-transport.test.js</li>
+                <li>tests/outbound-event-rendering.test.js</li>
+              </ul>
+            </div>
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">Before</p>
+                <div class="space-y-2">
+                  <div class="band band-hot bg-white rounded p-2 text-sm">render OutboundEvent</div>
+                  <div class="band band-hot bg-white rounded p-2 text-sm">pinned status state</div>
+                  <div class="band band-hot bg-white rounded p-2 text-sm">runtime command edits</div>
+                  <div class="band band-hot bg-white rounded p-2 text-sm">snapshot diff continuation</div>
+                  <div class="band band-hot bg-white rounded p-2 text-sm">Baileys send/edit/pin</div>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">After</p>
+                <div class="space-y-3">
+                  <div class="deep-box rounded p-3 text-sm">WhatsApp Presentation<br><span class="text-xs text-slate-300">OutboundEvent stream to delivery plans</span></div>
+                  <div class="seam-line"></div>
+                  <div class="thin-box rounded p-3 text-sm">Baileys Delivery Adapter<br><span class="text-xs text-slate-500">send, edit, pin, relay media</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="mini-label">Problem</p>
+              <p class="text-sm mt-1">WhatsApp outbound is shallow: rendering, status state, edit handles, snapshot continuation, and Baileys delivery share one large interface.</p>
+            </div>
+            <div>
+              <p class="mini-label">Solution</p>
+              <p class="text-sm mt-1">Move stateful Presentation decisions into a delivery-plan module and keep Baileys calls in a concrete adapter behind the seam.</p>
+            </div>
+            <div>
+              <p class="mini-label">Wins</p>
+              <ul class="text-sm mt-1 space-y-1">
+                <li>locality: display policy isolated</li>
+                <li>leverage: transport-free tests</li>
+                <li>OutboundEvent remains canonical</li>
+                <li>delivery adapter gets smaller</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-lg border border-emerald-200 bg-emerald-50 p-6">
+        <p class="text-xs uppercase tracking-wider text-emerald-800">Top recommendation</p>
+        <h2 class="mt-2 text-2xl font-semibold"><a class="underline decoration-emerald-500 underline-offset-4" href="#media-enrichment">Deepen Media Input Enrichment</a></h2>
+        <p class="mt-2 text-sm text-emerald-950">Tackle this first because it is narrow, well-tested, and repeats the same media-to-text policy across multiple current seams; it should produce quick locality and leverage without reopening ADRs.</p>
+      </section>
+    </main>
+  </body>
+</html>
