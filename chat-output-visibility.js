@@ -3,11 +3,12 @@
  */
 
 /**
- * @typedef {"thinking" | "changes" | "subagents"} OutputVisibilityKey
+ * @typedef {"toolStatus" | "thinking" | "changes" | "subagents"} OutputVisibilityKey
  *
  * @typedef {{
  *   tools?: boolean;
  *   commands?: boolean;
+ *   toolStatus?: boolean;
  *   thinking?: boolean;
  *   changes?: boolean;
  *   subagents?: boolean;
@@ -15,6 +16,7 @@
  *
  * @typedef {{
  *   toolDetails: boolean;
+ *   toolStatus: boolean;
  *   thinking: boolean;
  *   changes: boolean;
  *   subagents: boolean;
@@ -30,6 +32,12 @@
 
 /** @type {readonly OutputVisibilityFlagDefinition[]} */
 export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
+  {
+    key: "toolStatus",
+    label: "tool status",
+    description: "Show tool and command progress as one pinned status message instead of individual messages.",
+    defaultValue: false,
+  },
   {
     key: "thinking",
     label: "thinking",
@@ -50,14 +58,10 @@ export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
   },
 ]);
 
-/** @type {ReadonlyMap<OutputVisibilityKey, OutputVisibilityFlagDefinition>} */
-const OUTPUT_VISIBILITY_FLAG_MAP = new Map(
-  OUTPUT_VISIBILITY_FLAGS.map((flag) => [flag.key, flag]),
-);
-
 /** @type {OutputVisibility} */
 export const DEFAULT_OUTPUT_VISIBILITY = Object.freeze({
   toolDetails: false,
+  toolStatus: false,
   thinking: true,
   changes: true,
   subagents: true,
@@ -76,7 +80,8 @@ function isRecord(value) {
  * @returns {value is OutputVisibilityKey}
  */
 export function isOutputVisibilityKey(value) {
-  return OUTPUT_VISIBILITY_FLAG_MAP.has(/** @type {OutputVisibilityKey} */ (value));
+  const trimmed = value.trim();
+  return OUTPUT_VISIBILITY_FLAGS.some((flag) => flag.key.toLowerCase() === trimmed.toLowerCase());
 }
 
 /**
@@ -90,6 +95,11 @@ export function normalizeOutputVisibility(raw) {
 
   /** @type {OutputVisibilityOverrides} */
   const normalized = {};
+  const toolStatus = raw.toolStatus;
+  if (typeof toolStatus === "boolean") {
+    normalized.toolStatus = toolStatus;
+  }
+
   const thinking = raw.thinking;
   if (typeof thinking === "boolean") {
     normalized.thinking = thinking;
@@ -153,10 +163,7 @@ export function getEnabledOutputVisibilityKeys(raw) {
  */
 export function getOutputVisibilityFlagDefinition(key) {
   const normalizedKey = key.trim().toLowerCase();
-  if (!isOutputVisibilityKey(normalizedKey)) {
-    return null;
-  }
-  return OUTPUT_VISIBILITY_FLAG_MAP.get(normalizedKey) ?? null;
+  return OUTPUT_VISIBILITY_FLAGS.find((flag) => flag.key.toLowerCase() === normalizedKey) ?? null;
 }
 
 /**

@@ -7,16 +7,18 @@ import {
 } from "../chat-output-visibility.js";
 
 describe("chat output visibility", () => {
-  it("does not expose tool display as a configurable visibility option", () => {
+  it("exposes pinned tool status as an opt-in visibility option", () => {
     assert.deepEqual(
-      buildOutputVisibilityOverrides(["toolDetails", "thinking", "changes", "subagents"]),
-      {},
+      buildOutputVisibilityOverrides(["toolStatus", "thinking", "changes", "subagents"]),
+      { toolStatus: true },
     );
+    assert.equal(resolveOutputVisibility({}).toolStatus, false);
+    assert.equal(resolveOutputVisibility({ toolStatus: true }).toolStatus, true);
   });
 
   it("ignores legacy tools and commands keys", () => {
     assert.deepEqual(normalizeOutputVisibility({ tools: true }), {});
-    assert.equal(resolveOutputVisibility({ tools: true }).toolDetails, false);
+    assert.equal(resolveOutputVisibility({ tools: true }).toolStatus, false);
     assert.deepEqual(
       normalizeOutputVisibility({ toolDetails: true, tools: true, commands: false }),
       {},
