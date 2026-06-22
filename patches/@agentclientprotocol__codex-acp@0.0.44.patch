@@ -71,7 +71,7 @@
      };
    }
    return {
-@@ -17452,6 +17491,13 @@
+@@ -17419,6 +17452,13 @@
    }
    return "Search";
  }
@@ -85,7 +85,7 @@
  async function createPatchContent(change) {
    if (change.kind.type === "add" && !isUnifiedDiff(change.diff)) {
      return {
-@@ -17482,17 +17529,25 @@
+@@ -17449,7 +17489,14 @@
    if (oldContent === null) {
      return null;
    }
@@ -101,7 +101,7 @@
    if (newContent === false) {
      return null;
    }
-   return {
+@@ -17457,9 +17504,10 @@
      type: "diff",
      oldText: change.kind.type === "add" ? null : oldContent,
      newText: newContent,
@@ -114,8 +114,7 @@
      }
    };
  }
-@@ -17522,6 +17565,37 @@
-   } catch {
+@@ -17495,6 +17543,37 @@
      return null;
    }
  }
@@ -150,12 +149,11 @@
 +  const itemId = event && typeof event === "object" && typeof event.itemId === "string" ? event.itemId : "unknown";
 +  return `terminal-interaction:${itemId}`;
 +}
-
+-
++
  // src/CodexEventHandler.ts
  var CodexEventHandler = class {
-@@ -17585,17 +17657,19 @@
-         return this.createModelReroutedEvent(notification.params);
-       case "fuzzyFileSearch/sessionUpdated":
+@@ -17563,17 +17642,19 @@
          return this.handleFuzzyFileSearchSessionUpdated(notification.params);
        case "fuzzyFileSearch/sessionCompleted":
          return this.handleFuzzyFileSearchSessionCompleted(notification.params);
@@ -175,8 +173,11 @@
 -      case "item/reasoning/summaryPartAdded":
 -      case "item/reasoning/textDelta":
        case "turn/diff/updated":
+-      case "item/commandExecution/terminalInteraction":
        case "item/fileChange/outputDelta":
-@@ -17667,6 +17715,64 @@
+       case "item/fileChange/patchUpdated":
+       case "account/updated":
+@@ -17667,6 +17748,65 @@
        }
      };
    }
@@ -242,7 +243,7 @@
    async createItemEvent(event) {
      switch (event.item.type) {
        case "fileChange":
-@@ -17677,12 +17745,13 @@
+@@ -17677,12 +17817,12 @@
          return await createMcpToolCallUpdate(event.item);
        case "dynamicToolCall":
          return await createDynamicToolCallUpdate(event.item);
@@ -252,17 +253,21 @@
        case "userMessage":
        case "hookPrompt":
        case "agentMessage":
+-      case "reasoning":
 -      case "webSearch":
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -17688,6 +17757,8 @@
+@@ -17690,6 +17830,8 @@
        case "contextCompaction":
        case "plan":
          return null;
 +      case "reasoning":
 +        return this.createReasoningNotificationEvent({});
-@@ -17711,6 +17780,16 @@
+     }
+   }
+   async completeItemEvent(event) {
+@@ -17711,8 +17853,18 @@
          };
        case "commandExecution":
          return this.completeCommandExecutionEvent(event.item);
@@ -280,7 +285,9 @@
 -        const summary = event.item.summary[0];
 +        const summary = event.item.summary[0] ?? event.item.content[0];
          if (!summary) return null;
-@@ -17725,7 +17804,6 @@
+         return {
+           sessionUpdate: "agent_thought_chunk",
+@@ -17725,7 +17877,6 @@
        case "userMessage":
        case "hookPrompt":
        case "agentMessage":
@@ -288,7 +295,7 @@
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -19025,6 +19103,10 @@
+@@ -19025,6 +19176,10 @@
  };
  
  // src/CodexAcpClient.ts
@@ -299,7 +306,7 @@
  var CodexAcpClient = class {
    codexClient;
    config;
-@@ -19201,6 +19283,28 @@
+@@ -19201,6 +19356,28 @@
        thread: response.thread
      };
    }
@@ -328,7 +335,8 @@
    async newSession(request) {
      await this.refreshSkills(request.cwd, request._meta);
      const response = await this.codexClient.threadStart({
-@@ -19328,12 +19432,27 @@
+@@ -19327,13 +19504,28 @@
+       input,
        approvalPolicy: agentMode.approvalPolicy,
        sandboxPolicy: agentMode.sandboxPolicy,
 -      summary: disableSummary ? "none" : null,
@@ -357,7 +365,7 @@
    async listSkills(params) {
      return this.codexClient.listSkills(params ?? {});
    }
-@@ -19443,6 +19562,9 @@
+@@ -19443,6 +19635,9 @@
        turnId: params.turnId
      });
    }
@@ -367,7 +375,7 @@
    async fetchAvailableModels() {
      const models = [];
      let cursor = null;
-@@ -19900,7 +20022,9 @@
+@@ -19900,7 +20095,9 @@
          },
          sessionCapabilities: {
            resume: {},
@@ -378,7 +386,7 @@
          },
          mcpCapabilities: {
            http: true,
-@@ -19912,6 +20036,26 @@
+@@ -19912,6 +20109,26 @@
    }
    async extMethod(method, params) {
      const methodRequest = { method, params };
@@ -405,7 +413,7 @@
      if (!isExtMethodRequest(methodRequest)) {
        return {};
      }
-@@ -19967,6 +20111,7 @@
+@@ -19967,6 +20184,7 @@
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -413,7 +421,7 @@
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -19982,7 +20127,8 @@
+@@ -19982,7 +20200,8 @@
      this.publishAvailableCommandsAsync(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -423,7 +431,7 @@
    }
    async getActiveAccount() {
      if (this.codexAcpClient.getModelProvider()) {
-@@ -19997,6 +20143,7 @@
+@@ -19997,6 +20216,7 @@
        sessionId,
        modelState,
        modeState,
@@ -431,7 +439,7 @@
        thread
      } = await this.getOrCreateSessionWithHistory(params);
      await this.streamThreadHistory(sessionId, thread);
-@@ -20007,12 +20154,13 @@
+@@ -20007,12 +20227,13 @@
      });
      return {
        models: modelState,
@@ -447,7 +455,7 @@
      logger.log("Session resumed", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20020,7 +20168,30 @@
+@@ -20020,7 +20241,30 @@
      });
      return {
        models: modelState,
@@ -479,7 +487,7 @@
      };
    }
    async listSessions(params) {
-@@ -20030,7 +20201,7 @@
+@@ -20030,7 +20274,7 @@
    }
    async newSession(params) {
      logger.log("Starting new session...");
@@ -488,7 +496,7 @@
      logger.log("New session created", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20039,7 +20210,8 @@
+@@ -20039,7 +20283,8 @@
      return {
        sessionId,
        models: modelState,
@@ -498,7 +506,7 @@
      };
    }
    async authenticate(_params) {
-@@ -20102,6 +20274,42 @@
+@@ -20102,6 +20347,42 @@
      sessionState.supportedInputModalities = model.inputModalities;
      return {};
    }
@@ -541,7 +549,7 @@
    publishAvailableCommandsAsync(sessionId) {
      void this.availableCommands.publish(sessionId);
    }
-@@ -20145,6 +20353,55 @@
+@@ -20145,6 +20426,55 @@
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -597,7 +605,7 @@
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -20160,10 +20417,12 @@
+@@ -20160,10 +20490,12 @@
      await this.availableCommands.publish(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -610,7 +618,7 @@
        thread
      };
    }
-@@ -20259,7 +20518,7 @@
+@@ -20259,7 +20591,7 @@
        toolCallId: item.id,
        kind: "search",
        title: this.formatWebSearchTitle(item),
@@ -619,7 +627,7 @@
        rawInput: {
          query: item.query,
          action: item.action
-@@ -20452,12 +20711,12 @@
+@@ -20449,20 +20781,28 @@
        }
        const modelId = ModelId.fromString(sessionState.currentModelId);
        const modelLacksReasoning = sessionState.supportedReasoningEfforts.length > 0 && sessionState.supportedReasoningEfforts.every((e) => e.reasoningEffort === "none");
@@ -633,7 +641,6 @@
          });
        }
        if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some((b) => b.type === "image")) {
-@@ -20460,9 +20719,17 @@
          throw RequestError.invalidRequest("The current model does not support image input");
        }
        const agentMode = sessionState.agentMode;
@@ -654,7 +661,7 @@
        if (turnCompleted.turn.status === "interrupted") {
          await this.connection.sessionUpdate({
            sessionId: params.sessionId,
-@@ -20650,12 +20917,18 @@
+@@ -20650,12 +20990,18 @@
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }
@@ -673,7 +680,7 @@
    async threadList(params) {
      return await this.sendRequest({ method: "thread/list", params });
    }
-@@ -20665,6 +20938,9 @@
+@@ -20665,6 +21011,9 @@
    async threadRead(params) {
      return await this.sendRequest({ method: "thread/read", params });
    }
@@ -683,3 +690,33 @@
    async listMcpServerStatus(params) {
      return await this.sendRequest({ method: "mcpServerStatus/list", params });
    }
+@@ -20987,16 +21336,25 @@
+     defaultAuthRequest: defaultAuthRequest ?? null
+   });
+   const codexConnection = startCodexConnection(codexPath);
+-  process.stdin.on("close", (chunk) => {
++  const acpInput = fs.createReadStream(null, { fd: 0, autoClose: false });
++  const acpOutput = fs.createWriteStream(null, { fd: 1, autoClose: false });
++  let acpInputClosed = false;
++  function handleAcpInputClosed() {
++    if (acpInputClosed) {
++      return;
++    }
++    acpInputClosed = true;
+     codexConnection.process.stdin.end();
+     setTimeout(() => {
+       if (!codexConnection.process.killed) {
+-        logger.log("Codex still running 2s after stdin closed; terminating process");
++        logger.log("Codex still running 2s after ACP stdin closed; terminating process");
+         codexConnection.process.kill();
+       }
+     }, 2e3);
+-  });
+-  const acpJsonStream = createJsonStream(process.stdin, process.stdout);
++  }
++  acpInput.on("end", handleAcpInputClosed);
++  acpInput.on("close", handleAcpInputClosed);
++  const acpJsonStream = createJsonStream(acpInput, acpOutput);
+   function createAgent(connection) {
+     const appServerClient = new CodexAppServerClient(codexConnection.connection);
+     const codexClient = new CodexAcpClient(appServerClient, config2, modelProvider);

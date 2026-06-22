@@ -37,10 +37,10 @@ const fakeAccount = process.env.FAKE_CODEX_ACCOUNT_TYPE
 function send(message) {
   const json = JSON.stringify(message);
   if (useContentLengthFraming) {
-    process.stdout.write(`Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n${json}`);
+    fs.writeSync(1, `Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n${json}`);
     return;
   }
-  process.stdout.write(`${json}\n`);
+  fs.writeSync(1, `${json}\n`);
 }
 
 /**
@@ -600,7 +600,9 @@ function drainLineMessages() {
   }
 }
 
-process.stdin.on("data", (chunk) => {
+const stdin = fs.createReadStream(null, { fd: 0, autoClose: false });
+
+stdin.on("data", (chunk) => {
   inputBuffer = Buffer.concat([inputBuffer, chunk]);
   if (inputBuffer.includes("Content-Length:")) {
     useContentLengthFraming = true;
@@ -611,4 +613,3 @@ process.stdin.on("data", (chunk) => {
     drainLineMessages();
   }
 });
-process.stdin.resume();
