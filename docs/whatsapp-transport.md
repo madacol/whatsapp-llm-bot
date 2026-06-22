@@ -1,8 +1,8 @@
-# WhatsApp Transport Module
+# WhatsApp Transport
 
-`whatsapp/` is the concrete WhatsApp Transport module. It owns the Baileys adapter details and converts between WhatsApp protocol behavior and app-owned turns, OutboundEvents, prompts, reactions, queues, and workspace surfaces.
+`whatsapp/` is the concrete WhatsApp Transport. It owns the Baileys adapter details and converts between WhatsApp protocol behavior and app-owned turns, OutboundEvents, prompts, reactions, queues, and workspace surfaces.
 
-This module may have internal seams for locality, but callers outside `whatsapp/` should use the WhatsApp Transport module's public surface rather than reaching into provider-specific internals.
+WhatsApp Transport may have internal seams for locality, but callers outside `whatsapp/` should use its public surface rather than reaching into provider-specific internals.
 
 ## Public Surface
 
@@ -14,7 +14,7 @@ This module may have internal seams for locality, but callers outside `whatsapp/
 - `whatsapp/connection-supervisor.js`: starts, stops, and reconnects the Baileys socket.
 - `whatsapp/message-payloads.js`: constructs common WhatsApp message payload shapes.
 - `whatsapp-hd-media.js`: handles WhatsApp HD media sending.
-- Baileys compatibility logic should stay inside the WhatsApp Transport module unless another Transport module needs the same app-owned concept.
+- Baileys compatibility logic should stay inside WhatsApp Transport unless another Transport needs the same app-owned concept.
 
 ## Inbound Submodules
 
