@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const ACP_AGENT_ENV_KEY = "MADABOT_ACP_AGENTS_JSON";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCAL_PI_COMMAND = path.join(REPO_ROOT, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
+const CODEX_ACP_APP_SERVER_LOGS = path.join(REPO_ROOT, "logs", "codex-acp");
 
 /**
  * @typedef {{
@@ -47,6 +48,9 @@ export const BUILT_IN_ACP_AGENT_DEFINITIONS = [
     name: "codex",
     displayName: "Codex",
     command: "codex-acp",
+    env: {
+      APP_SERVER_LOGS: CODEX_ACP_APP_SERVER_LOGS,
+    },
     docsUrl: "https://github.com/agentclientprotocol/codex-acp",
     sessionKind: "codex",
   },

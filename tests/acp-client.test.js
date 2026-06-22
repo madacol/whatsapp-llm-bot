@@ -124,6 +124,63 @@ describe("ACP client process stderr", () => {
     assert.equal(details?.stderrTail, "fatal provider detail");
   });
 
+  it("reports child context and stderr tail when a request times out", async () => {
+    const calls = await captureWarnLogs(async () => {
+      const connection = await openAcpConnection({
+        command: process.execPath,
+        args: ["-e", hangingRequestFixtureCode("session startup stalled\n")],
+        fixtureCapture: null,
+      });
+      try {
+        await assert.rejects(
+          connection.sendRequest("session/new", { cwd: process.cwd() }, { timeoutMs: 50 }),
+          (error) => {
+            assert.ok(error instanceof Error);
+            assert.match(error.message, /ACP request timed out after 50ms: session\/new/);
+            assert.match(error.message, /command=/);
+            assert.match(error.message, /pid=\d+/);
+            assert.match(error.message, /pending=session\/new#1/);
+            assert.match(error.message, /stderrTail=session startup stalled/);
+            return true;
+          },
+        );
+      } finally {
+        await connection.close();
+      }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.[0], "[harness:acp]");
+    assert.equal(calls[0]?.[1], "ACP request timed out.");
+    assert.deepEqual(calls[0]?.[2]?.pendingRequests, ["session/new#1"]);
+    assert.equal(calls[0]?.[2]?.stderrTail, "session startup stalled");
+  });
+
+  it("merges supplied environment entries with the parent process environment", async () => {
+    const previousSentinel = process.env.ACP_PARENT_ENV_SENTINEL;
+    const sentinel = `sentinel-${Date.now()}`;
+    process.env.ACP_PARENT_ENV_SENTINEL = sentinel;
+    const connection = await openAcpConnection({
+      command: process.execPath,
+      args: ["-e", envEchoFixtureCode()],
+      env: { ACP_CHILD_ENV: "override" },
+      fixtureCapture: null,
+    });
+    try {
+      assert.deepEqual(
+        await connection.sendRequest("initialize", {}, { timeoutMs: 500 }),
+        { parent: sentinel, child: "override" },
+      );
+    } finally {
+      await connection.close();
+      if (previousSentinel === undefined) {
+        delete process.env.ACP_PARENT_ENV_SENTINEL;
+      } else {
+        process.env.ACP_PARENT_ENV_SENTINEL = previousSentinel;
+      }
+    }
+  });
+
   it("captures the full ACP JSON-RPC transcript when fixture capture is provided", async () => {
     /** @type {Array<Record<string, unknown>>} */
     const captureEntries = [];
@@ -217,6 +274,38 @@ function exitOnRequestFixtureCode() {
     "setTimeout(() => {",
     `  require("node:fs").writeSync(2, ${JSON.stringify("fatal provider detail\n")});`,
     "  process.exit(7);",
+    "}, 20);",
+  ].join("");
+}
+
+/**
+ * @param {string} stderr
+ * @returns {string}
+ */
+function hangingRequestFixtureCode(stderr) {
+  return [
+    "process.stdin.resume();",
+    "setInterval(() => {}, 2147483647);",
+    `require("node:fs").writeSync(2, ${JSON.stringify(stderr)});`,
+  ].join("");
+}
+
+/**
+ * @returns {string}
+ */
+function envEchoFixtureCode() {
+  return [
+    "setInterval(() => {}, 2147483647);",
+    `const newline = ${JSON.stringify("\n")};`,
+    "setTimeout(() => {",
+    "  require('node:fs').writeSync(1, JSON.stringify({",
+    "    jsonrpc: '2.0',",
+    "    id: 1,",
+    "    result: {",
+    "      parent: process.env.ACP_PARENT_ENV_SENTINEL ?? null,",
+    "      child: process.env.ACP_CHILD_ENV ?? null,",
+    "    },",
+    "  }) + newline);",
     "}, 20);",
   ].join("");
 }

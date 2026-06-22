@@ -127,10 +127,41 @@ function jsonRpcErrorCode(error) {
 /**
  * @param {string} method
  * @param {number} timeoutMs
+ * @param {{
+ *   command: string,
+ *   pid?: number,
+ *   cwd?: string | null,
+ *   pendingRequests: string[],
+ *   stderrTail?: string,
+ * }} details
  * @returns {Error}
  */
-function createRequestTimeoutError(method, timeoutMs) {
-  return new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`);
+function createRequestTimeoutError(method, timeoutMs, details) {
+  const parts = [
+    `ACP request timed out after ${timeoutMs}ms: ${method}`,
+    `command=${details.command}`,
+  ];
+  if (typeof details.pid === "number") {
+    parts.push(`pid=${details.pid}`);
+  }
+  if (details.cwd) {
+    parts.push(`cwd=${details.cwd}`);
+  }
+  if (details.pendingRequests.length > 0) {
+    parts.push(`pending=${details.pendingRequests.join(",")}`);
+  }
+  if (details.stderrTail) {
+    parts.push(`stderrTail=${details.stderrTail}`);
+  }
+  return new Error(parts.join(" "));
+}
+
+/**
+ * @param {NodeJS.ProcessEnv | undefined} env
+ * @returns {NodeJS.ProcessEnv | undefined}
+ */
+function buildChildEnvironment(env) {
+  return env ? { ...process.env, ...env } : undefined;
 }
 
 /**
@@ -264,10 +295,11 @@ function formatConnectionClosedMessage(details) {
  */
 export async function openAcpConnection(options) {
   const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
+  const childEnv = buildChildEnvironment(options.env);
   const proc = spawn(resolveAcpCommandPath(options.command), options.args ?? [], {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options.cwd ? { cwd: options.cwd } : {}),
-    ...(options.env ? { env: options.env } : {}),
+    ...(childEnv ? { env: childEnv } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   });
 
@@ -408,14 +440,14 @@ export async function openAcpConnection(options) {
 
   return {
     proc,
-    sendRequest(method, params = {}, options = /** @type {{ timeoutMs?: number, refreshOnActivity?: boolean }} */ ({})) {
+    sendRequest(method, params = {}, requestOptions = /** @type {{ timeoutMs?: number, refreshOnActivity?: boolean }} */ ({})) {
       const id = nextRequestId;
       nextRequestId += 1;
       return new Promise((resolve, reject) => {
         /** @type {NodeJS.Timeout | undefined} */
         let timer;
-        const timeoutMs = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-          ? options.timeoutMs
+        const timeoutMs = typeof requestOptions.timeoutMs === "number" && Number.isFinite(requestOptions.timeoutMs) && requestOptions.timeoutMs > 0
+          ? requestOptions.timeoutMs
           : null;
         const clearRequestTimer = () => {
           if (timer) {
@@ -429,10 +461,19 @@ export async function openAcpConnection(options) {
           }
           clearRequestTimer();
           timer = setTimeout(() => {
+            const pendingRequestList = pendingRequestSummaries(pendingRequests);
             if (!pendingRequests.delete(id)) {
               return;
             }
-            reject(createRequestTimeoutError(method, timeoutMs));
+            const timeoutDetails = {
+              command: options.command,
+              pid: proc.pid,
+              ...(options.cwd ? { cwd: options.cwd } : {}),
+              pendingRequests: pendingRequestList,
+              ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
+            };
+            log.warn("ACP request timed out.", timeoutDetails);
+            reject(createRequestTimeoutError(method, timeoutMs, timeoutDetails));
           }, timeoutMs);
           timer.unref?.();
         };
@@ -446,7 +487,7 @@ export async function openAcpConnection(options) {
             clearRequestTimer();
             reject(error);
           },
-          ...(options.refreshOnActivity ? { refreshTimeout: armRequestTimer } : {}),
+          ...(requestOptions.refreshOnActivity ? { refreshTimeout: armRequestTimer } : {}),
         });
         armRequestTimer();
         send({ id, method, params });
