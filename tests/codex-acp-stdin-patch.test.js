@@ -26,6 +26,12 @@ describe("patched codex-acp stdin presentation", () => {
     assert.doesNotMatch(source, /const acpInput = fs\.createReadStream\(null, \{ fd: 0, autoClose: false \}\);/);
   });
 
+  it("retries transient ACP fd write backpressure", async () => {
+    const source = await fs.readFile(codexAcpEntryPoint, "utf8");
+
+    assert.match(source, /function writeAll\(fd, buffer\) \{[\s\S]*err\.code === "EAGAIN"[\s\S]*setTimeout\(writeNext, 10\);/);
+  });
+
   it("forwards Codex terminal interactions as stdin tool calls", async () => {
     const connection = await openFakeCodexAcpConnection();
 
