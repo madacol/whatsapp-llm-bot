@@ -1457,9 +1457,9 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(phases, ["reply-start", "reply-done", "after-response"]);
   });
 
-  it("keeps routing live input into an active turn while restart is waiting", async () => {
-    const chatId = "conv-restart-waiting-live-input";
-    const harnessName = "adapter-restart-waiting-live-input";
+  it("does not drop live input that arrives after the restart command", async () => {
+    const chatId = "conv-restart-command-live-input";
+    const harnessName = "adapter-restart-command-live-input";
     await seedChat(chatId, { enabled: true });
     await updateChatConfig(chatId, (current) => ({
       ...current,
@@ -1468,11 +1468,16 @@ describe("createConversationRunner prompt formatting", () => {
     }));
 
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
+    const { createRestartCommandHandler } = await import("../commands/restart-command.js");
     const releaseFirstRun = createDeferredVoid();
     /** @type {string[]} */
     const phases = [];
     /** @type {string[]} */
     const injectedTexts = [];
+    /** @type {Array<{ restartId?: string } | undefined>} */
+    const scheduledRestarts = [];
+    /** @type {import("../restart/restart-ack-store.js").RestartAckRecord[]} */
+    const savedRestartRecords = [];
     registerHarnessDriver({
       name: harnessName,
       supportsInstances: true,
@@ -1538,6 +1543,29 @@ describe("createConversationRunner prompt formatting", () => {
     const runner = createConversationRunner({
       store,
       llmClient: /** @type {LlmClient} */ ({}),
+      restartCommandHandler: createRestartCommandHandler({
+        createRestartId: () => "restart-live-input-sequence",
+        restartScheduler: (input) => {
+          phases.push("restart-scheduled");
+          scheduledRestarts.push(input);
+        },
+        restartAckStore: {
+          save: async (record) => {
+            savedRestartRecords.push(record);
+          },
+          read: async () => null,
+          clear: async () => {},
+        },
+        restartRuntime: {
+          listActiveTurns: () => [{
+            chatId,
+            label: harnessName,
+            activeTurnId: "turn-active-1",
+            resumeCursor: "session-active-1",
+            status: "running",
+          }],
+        },
+      }),
     });
 
     const firstTurn = createChatTurn({
@@ -1547,14 +1575,24 @@ describe("createConversationRunner prompt formatting", () => {
     const firstHandled = runner.handleMessage(firstTurn.context);
     await waitUntil(() => phases.includes("send"));
 
+    const restartTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "!restart" }],
+    });
+    await runner.handleMessage(restartTurn.context);
+
     const secondTurn = createChatTurn({
       chatId,
-      content: [{ type: "text", text: "this should inject while restart waits" }],
+      content: [{ type: "text", text: "this should inject after restart command" }],
     });
     await runner.handleMessage(secondTurn.context);
 
-    assert.deepEqual(phases, ["send", "inject"]);
-    assert.deepEqual(injectedTexts, ["this should inject while restart waits"]);
+    assert.deepEqual(phases, ["send", "restart-scheduled", "inject"]);
+    assert.deepEqual(injectedTexts, ["this should inject after restart command"]);
+    assert.deepEqual(scheduledRestarts, [{ restartId: "restart-live-input-sequence" }]);
+    assert.deepEqual(restartTurn.responses.map((response) => response.text), ["Restart signal sent."]);
+    assert.equal(secondTurn.responses.length, 0);
+    assert.equal(savedRestartRecords.length, 1);
 
     releaseFirstRun.resolve();
     await firstHandled;
