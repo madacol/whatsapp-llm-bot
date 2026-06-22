@@ -4,6 +4,7 @@
 
 - **Transport**: An inbound/outbound adapter such as WhatsApp or the HTTP API used by a voice assistant. Transports should convert external messages into app-owned turns and render app-owned outbound events, not carry provider-specific agent runtime details through the system.
 - **Turn Orchestration**: The app-owned layer that handles conversation intake, chat/workspace/session policy, routing, and agent-run initiation after a transport has normalized an inbound message.
+- **Media Input Enrichment**: The app-owned module that creates provider-ready text from image, audio, video, and quoted media blocks. It owns media-to-text model selection, recursive content traversal, context-reset-aware prompt context, generated image/video alt text, generated audio transcript text, and transcription status callbacks.
 - **Agent runtime seam**: The app-owned seam between Turn Orchestration and concrete agent providers. ACP adapters live behind this seam.
 - **ACP adapter**: A concrete adapter that speaks Agent Client Protocol to an agent provider such as Codex. ACP is provider/runtime protocol detail, not the app's presentation protocol.
 - **Agent Run Activity layer**: The app-owned layer that turns provider/runtime activity into canonical, run-scoped events for presentation. It owns normalization, raw provider payload interpretation, and run-scoped state policy such as correlation, deduplication, snapshot reconciliation, usage aggregation, and completion semantics.
