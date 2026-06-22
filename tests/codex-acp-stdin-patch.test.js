@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { openFakeCodexAcpConnection } from "./codex-acp-patch-fixture.js";
+import fs from "node:fs/promises";
+import { codexAcpEntryPoint, openFakeCodexAcpConnection } from "./codex-acp-patch-fixture.js";
 
 /**
  * @param {AsyncIterable<Record<string, unknown>>} notifications
@@ -17,6 +18,14 @@ async function waitForNotification(notifications, predicate) {
 }
 
 describe("patched codex-acp stdin presentation", () => {
+  it("keeps ACP fd stdio on direct reads so later client writes are consumed", async () => {
+    const source = await fs.readFile(codexAcpEntryPoint, "utf8");
+
+    assert.match(source, /function createFdJsonStream\(readFd, writeFd, onInputClosed\) \{[\s\S]*fs\.read\(readFd,/);
+    assert.match(source, /const acpJsonStream = createFdJsonStream\(0, 1, handleAcpInputClosed\);/);
+    assert.doesNotMatch(source, /const acpInput = fs\.createReadStream\(null, \{ fd: 0, autoClose: false \}\);/);
+  });
+
   it("forwards Codex terminal interactions as stdin tool calls", async () => {
     const connection = await openFakeCodexAcpConnection();
 
