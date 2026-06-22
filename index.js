@@ -9,7 +9,6 @@ import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { createWhatsAppTransport, createWhatsAppWorkspacePresenter } from "#whatsapp";
 import { startReminderDaemon } from "./reminder-daemon.js";
-import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import { createHttpApiTransport } from "./http-api-transport.js";
@@ -200,12 +199,10 @@ if (!process.env.TESTING) {
   }
 
   const stopReminders = startReminderDaemon(transport.sendText);
-  const stopModelsCache = startModelsCacheDaemon();
 
   async function cleanupResources() {
     try {
       stopReminders();
-      stopModelsCache();
       await stopHtmlServer();
       await apiTransport?.stop();
       await transport.stop();

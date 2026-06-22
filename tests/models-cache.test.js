@@ -1,4 +1,4 @@
-import { describe, it, before, after, beforeEach, afterEach } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -21,6 +21,14 @@ async function removeCache() {
 describe("models-cache", () => {
   afterEach(async () => {
     await removeCache();
+  });
+
+  describe("getCachedModels", () => {
+    it("returns an empty list when the cache file is missing", async () => {
+      await removeCache();
+      const { getCachedModels } = await import("../models-cache.js");
+      assert.deepEqual(await getCachedModels(), []);
+    });
   });
 
   describe("findClosestModels", () => {
@@ -86,37 +94,4 @@ describe("models-cache", () => {
     });
   });
 
-  describe("startModelsCacheDaemon", () => {
-    it("fetches immediately when cache file is missing", async () => {
-      await removeCache();
-
-      /** @type {import("../models-cache.js").OpenRouterModel[]} */
-      const fakeModels = [
-        { id: "test/model-1", name: "Test Model", description: "", context_length: 4096, pricing: { prompt: "0.000001", completion: "0.000001" } },
-      ];
-
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = /** @type {typeof fetch} */ (async () => ({
-        ok: true,
-        json: async () => ({ data: fakeModels }),
-      }));
-
-      try {
-        // Re-import to get fresh module
-        const { startModelsCacheDaemon, getCachedModels } = await import("../models-cache.js");
-        const stop = startModelsCacheDaemon();
-
-        // Give it a moment to write the file
-        await new Promise((r) => setTimeout(r, 200));
-
-        const models = await getCachedModels();
-        assert.equal(models.length, 1);
-        assert.equal(models[0].id, "test/model-1");
-
-        stop();
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
-  });
 });
