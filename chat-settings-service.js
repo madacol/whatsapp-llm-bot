@@ -170,6 +170,8 @@ function formatOutputVisibilityStateEmoji(enabled) {
  */
 function getShowPickerSubject(key) {
   switch (key) {
+    case "toolStatus":
+      return "pinned tool status";
     case "thinking":
       return "thinking";
     case "changes":

@@ -998,6 +998,101 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("routes tool and command rows through pinned status when tool status is enabled", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-pinned-tool-status-chat";
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, toolStatus: true };
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    }, undefined, undefined, { outputVisibility });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.started",
+        provider: "acp",
+        tool: {
+          id: "search-1",
+          name: "Search",
+          arguments: { pattern: "needle", path: "src" },
+        },
+      },
+    }, undefined, undefined, { outputVisibility });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.started",
+        provider: "acp",
+        command: {
+          command: "pnpm type-check",
+          status: "started",
+        },
+      },
+    }, undefined, undefined, { outputVisibility });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.completed",
+        provider: "acp",
+        command: {
+          command: "pnpm type-check",
+          status: "completed",
+        },
+      },
+    }, undefined, undefined, { outputVisibility });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "completed" },
+      },
+    }, undefined, undefined, { outputVisibility });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 86400,
+      },
+      {
+        text: "🔧 *Search*  `needle` in *src*",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "🔧 *Shell*  `pnpm type-check`",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "✅ *Shell*  `pnpm type-check`",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "✅ *CODEX*  turn completed",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 2,
+      },
+    ]);
+  });
+
   it("keeps final usage accounting in pinned status after action rows are omitted", async () => {
     const { sock, sent } = createMockSock();
     const chatId = "runtime-action-focused-usage-chat";

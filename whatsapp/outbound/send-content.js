@@ -64,7 +64,7 @@ const inMemoryEditHandles = new Map();
  *   waiters: Array<{ resolve: () => void, reject: (error: unknown) => void }>,
  * }>} */
 const pendingEditDebounces = new Map();
-/** @type {Map<string, { handle?: MessageHandle, entries: Array<{ key: string, icon: string, provider: string, summary: string }> }>} */
+/** @type {Map<string, { handle?: MessageHandle, entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> }>} */
 const turnStatusByChat = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
 const runtimeStatusByChat = new Map();
@@ -170,18 +170,6 @@ function getRuntimeToolReadLineRange(tool) {
     : typeof tool.arguments.offset === "number" ? tool.arguments.offset : undefined;
   const limit = typeof tool.arguments.limit === "number" ? tool.arguments.limit : undefined;
   return lineLimitToRange(line, limit);
-}
-
-/**
- * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
- * @returns {boolean}
- */
-function isLowSignalPinnedRuntimeTool(tool) {
-  const name = typeof tool.name === "string" ? tool.name.trim() : "";
-  return name === "Read"
-    || name === "List"
-    || /^Read\b/i.test(name)
-    || /^List files\b/i.test(name);
 }
 
 /**
@@ -664,6 +652,15 @@ async function prefixLatestToolMessage(chatId, emoji) {
       return true;
     }
   }
+  const pinnedState = turnStatusByChat.get(chatId);
+  if (pinnedState?.handle) {
+    const pinnedEntry = getLatestPinnedActionEntry(pinnedState);
+    if (pinnedEntry) {
+      pinnedEntry.reviewPrefix = emoji;
+      await pinnedState.handle.update({ kind: "text", text: renderPinnedTurnStatusText(pinnedState.entries) });
+      return true;
+    }
+  }
   return false;
 }
 
@@ -692,63 +689,6 @@ function formatRuntimeCommandSummary(command) {
     return formatRuntimeProgressEntry("Shell", `\n\`\`\`\n${trimmedCommand}\n\`\`\``);
   }
   return formatRuntimeProgressEntry("Shell", `\`${trimmedCommand}\``);
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-function stripShellArgumentQuotes(value) {
-  const trimmed = value.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
-    return trimmed.slice(1, -1).replace(/'\\''/g, "'");
-  }
-  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-    return trimmed.slice(1, -1).replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
-  }
-  return trimmed;
-}
-
-/**
- * @param {string} command
- * @returns {string}
- */
-function normalizePinnedShellCommand(command) {
-  const trimmed = command.trim();
-  const shellMatch = /^(?:\/[\w./-]+\/)?(?:zsh|bash|sh)\s+-lc\s+([\s\S]+)$/.exec(trimmed);
-  if (!shellMatch?.[1]) {
-    return trimmed;
-  }
-  return stripShellArgumentQuotes(shellMatch[1]);
-}
-
-/**
- * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
- * @returns {string}
- */
-function getPinnedRuntimeToolKey(tool) {
-  if (tool.name.trim() === "Shell") {
-    const command = getStringArg(tool.arguments, ["command"]);
-    if (command) {
-      return `tool:shell:${normalizePinnedShellCommand(command)}`;
-    }
-  }
-  return `tool:${tool.id}`;
-}
-
-/**
- * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
- * @param {string | null | undefined} cwd
- * @returns {string | null}
- */
-function formatPinnedRuntimeToolSummary(tool, cwd) {
-  if (tool.name.trim() === "Shell") {
-    const command = getStringArg(tool.arguments, ["command"]);
-    if (command) {
-      return formatRuntimeCommandSummary(normalizePinnedShellCommand(command));
-    }
-  }
-  return formatRuntimeToolSummary(tool, cwd);
 }
 
 /**
@@ -1397,13 +1337,14 @@ function renderRuntimeStatusInspectText(state) {
 }
 
 /**
- * @param {{ icon: string, provider?: string, summary: string }} entry
+ * @param {{ icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }} entry
  * @returns {string}
  */
 function renderPinnedStatusLine(entry) {
+  const prefix = entry.reviewPrefix ? `${entry.reviewPrefix} ` : "";
   return entry.provider
-    ? `${entry.icon} *${entry.provider}*  ${entry.summary}`
-    : `${entry.icon} ${entry.summary}`;
+    ? `${prefix}${entry.icon} *${entry.provider}*  ${entry.summary}`
+    : `${prefix}${entry.icon} ${entry.summary}`;
 }
 
 /**
@@ -1446,7 +1387,29 @@ function pinnedStatusContainsOnlyTurnAndActions(state) {
 }
 
 /**
- * @param {Array<{ key: string, icon: string, provider?: string, summary: string }>} entries
+ * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
+ * @returns {boolean}
+ */
+function shouldUsePinnedRuntimeActionStatus(outputVisibility) {
+  return outputVisibility?.toolStatus === true;
+}
+
+/**
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> }} state
+ * @returns {{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" } | undefined}
+ */
+function getLatestPinnedActionEntry(state) {
+  for (let index = state.entries.length - 1; index >= 0; index -= 1) {
+    const entry = state.entries[index];
+    if (entry.key.startsWith("tool:") || entry.key.startsWith("command:")) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * @param {Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }>} entries
  * @returns {string}
  */
 function renderPinnedTurnStatusText(entries) {
@@ -1455,8 +1418,8 @@ function renderPinnedTurnStatusText(entries) {
 }
 
 /**
- * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> }} state
- * @param {{ key: string, icon: string, provider?: string, summary: string }} entry
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> }} state
+ * @param {{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }} entry
  * @returns {void}
  */
 function upsertPinnedTurnStatusEntry(state, entry) {
@@ -1465,12 +1428,16 @@ function upsertPinnedTurnStatusEntry(state, entry) {
     state.entries.push(entry);
     return;
   }
+  const existing = state.entries[index];
+  if (existing?.reviewPrefix && !entry.reviewPrefix) {
+    entry.reviewPrefix = existing.reviewPrefix;
+  }
   state.entries.splice(index, 1);
   state.entries.push(entry);
 }
 
 /**
- * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> }} state
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> }} state
  * @param {string} key
  * @param {string} prefix
  * @param {string} fallback
@@ -1486,10 +1453,11 @@ function getPreviousPinnedStatusDetail(state, key, prefix, fallback) {
 
 /**
  * @param {RuntimeEventOutboundEvent} event
- * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> } | undefined} state
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> } | undefined} state
+ * @param {{ includeRuntimeActions: boolean }} options
  * @returns {{ key: string, icon: string, provider?: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
-function formatPinnedRuntimeStatusPresentation(event, state) {
+function formatPinnedRuntimeStatusPresentation(event, state, options) {
   const runtimeEvent = event.event;
   const provider = formatRuntimeProvider(runtimeEvent.provider);
   if (runtimeEvent.type === "reasoning.started" || runtimeEvent.type === "reasoning.updated") {
@@ -1510,33 +1478,32 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     || runtimeEvent.type === "tool.completed"
     || runtimeEvent.type === "tool.failed"
   ) {
-    if (!state || isNoopRuntimeTool(runtimeEvent.tool)) {
+    if (!options.includeRuntimeActions || isNoopRuntimeTool(runtimeEvent.tool)) {
       return null;
     }
     const displayTool = runtimeEvent.tool;
-    if (formatRuntimeToolSummary(displayTool, event.cwd)) {
-      return null;
-    }
-    if (isLowSignalPinnedRuntimeTool(displayTool)) {
-      return null;
-    }
     const status = runtimeEvent.type.split(".")[1];
     if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
       return null;
     }
-    const key = getPinnedRuntimeToolKey(displayTool);
-    const previousSummary = state.entries.find((entry) => entry.key === key)?.summary;
-    const summary = formatPinnedRuntimeToolSummary(displayTool, event.cwd);
+    const key = `tool:${displayTool.id}`;
+    const previousSummary = state?.entries.find((entry) => entry.key === key)?.summary;
+    const summary = formatRuntimeToolSummary(displayTool, event.cwd);
     if (!summary) {
       return null;
     }
     const summaryBase = previousSummary && shouldPreserveRuntimeSummary(previousSummary, summary)
       ? previousSummary
       : summary;
+    const nextSummary = appendReadLineRange(summaryBase, getRuntimeToolReadLineRange(displayTool));
+    if (status === "updated" && previousSummary === nextSummary) {
+      return null;
+    }
     return {
       key,
       icon: getRuntimeToolIcon(status),
-      summary: appendReadLineRange(summaryBase, getRuntimeToolReadLineRange(displayTool)),
+      summary: nextSummary,
+      createsStatus: !state,
     };
   }
 
@@ -1545,7 +1512,20 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     || runtimeEvent.type === "command.completed"
     || runtimeEvent.type === "command.failed"
   ) {
-    return null;
+    if (!options.includeRuntimeActions) {
+      return null;
+    }
+    const status = runtimeEvent.type.split(".")[1];
+    if (status !== "started" && status !== "completed" && status !== "failed") {
+      return null;
+    }
+    const command = runtimeEvent.command.command;
+    return {
+      key: `command:${command}`,
+      icon: getRuntimeCommandIcon(status),
+      summary: formatRuntimeCommandSummary(command),
+      createsStatus: !state,
+    };
   }
 
   if (runtimeEvent.type === "file-change.completed") {
@@ -1671,12 +1651,13 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
 
 /**
  * @param {OutboundEvent} event
- * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> } | undefined} state
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> } | undefined} state
+ * @param {{ includeRuntimeActions: boolean }} options
  * @returns {{ key: string, icon: string, provider?: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
-function formatPinnedStatusPresentation(event, state) {
+function formatPinnedStatusPresentation(event, state, options) {
   if (event.kind === "runtime_event") {
-    return formatPinnedRuntimeStatusPresentation(event, state);
+    return formatPinnedRuntimeStatusPresentation(event, state, options);
   }
   if (!state) {
     return null;
@@ -1748,12 +1729,14 @@ function formatPinnedStatusPresentation(event, state) {
  * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions) {
   let state = turnStatusByChat.get(chatId);
-  const presentation = formatPinnedStatusPresentation(event, state);
+  const presentation = formatPinnedStatusPresentation(event, state, {
+    includeRuntimeActions: shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility),
+  });
   if (!presentation) {
     return undefined;
   }
@@ -1909,10 +1892,16 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
   }
 
   if (event.event.type === "tool.started" || event.event.type === "tool.updated" || event.event.type === "tool.completed" || event.event.type === "tool.failed") {
+    if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility)) {
+      return turnStatusHandle;
+    }
     return sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
 
   if (event.event.type === "command.started" || event.event.type === "command.completed" || event.event.type === "command.failed") {
+    if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility)) {
+      return turnStatusHandle;
+    }
     return sendRuntimeCommandEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
 
