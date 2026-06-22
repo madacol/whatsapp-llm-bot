@@ -8,5 +8,5 @@
 - For behavior changes that preserve or alter supported behavior, prove red before production edits, then green, `pnpm type-check`, test, and commit with red/green verification noted.
 - Tests should prove user-valued behavior, not mirror implementation.
 - For cross-seam behavior, test from the relevant start seam to the relevant end seam before adding narrower tests.
-- For removals of obsolete behavior, prefer deleting code over adding characterization or boundary tests for the removed path. Delete or update tests that only assert removed behavior, rely on existing coverage for retained behavior, and add new tests only when they protect a remaining user-valued contract or a seam that should not regress.
+- For removals of obsolete behavior, prove the old behavior was covered by deleting or moving the tests that asserted it. Do not add new characterization, boundary, or absence tests whose only purpose is to prove the removed path is gone. After deletion, rely on retained tests for retained behavior, and add new tests only when they protect a remaining user-valued contract or a seam that should not regress.
 - For docs-only or instruction-only changes, skip code verification and commit.
