@@ -741,7 +741,6 @@ describe("buildAgentIoHooks", () => {
       "runtime_event",
       "runtime_event",
     ]);
-    assert.equal(sent.some((entry) => entry.event.kind === "compact_tool_activity"), false);
   });
 
   it("keeps runtime progress and non-tool events separate without transport grouping", async () => {
@@ -770,7 +769,6 @@ describe("buildAgentIoHooks", () => {
       "runtime_event",
       "runtime_event",
     ]);
-    assert.equal(sent.some((entry) => entry.event.kind === "compact_tool_activity"), false);
   });
 
   it("suppresses tool result progress events when visibility disables full tool details", async () => {

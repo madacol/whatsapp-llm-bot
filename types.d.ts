@@ -285,36 +285,6 @@ type ToolActivityEvent = {
   activity: ToolActivitySummary;
 };
 
-type CompactToolActivityEvent = {
-  kind: "compact_tool_activity";
-  cwd?: string | null;
-  activity:
-    | {
-        type: "command";
-        status: "started" | "completed" | "failed";
-        command: string;
-        output?: string;
-      }
-    | {
-        type: "file_read";
-        status: "started";
-        command: string;
-        paths: string[];
-        line?: number;
-        limit?: number;
-      }
-    | {
-        type: "tool";
-        status: "started" | "updated" | "completed" | "failed";
-        toolCall?: LlmChatResponse["toolCalls"][0];
-        readLine?: number;
-        readLimit?: number;
-      }
-    | {
-        type: "close";
-      };
-};
-
 type PlanEvent = {
   kind: "plan";
   presentation: import("./plan-presentation.js").PlanPresentation;
@@ -370,7 +340,6 @@ type OutboundEvent =
   | AgentToolResultEvent
   | ToolCallEvent
   | ToolActivityEvent
-  | CompactToolActivityEvent
   | PlanEvent
   | FileChangeEvent
   | SubagentMessageEvent

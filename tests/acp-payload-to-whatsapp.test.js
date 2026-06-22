@@ -311,7 +311,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent.length, 0, JSON.stringify(sent));
   });
 
-  it("renders raw ACP tool lifecycle payloads as compact Baileys messages by default", async () => {
+  it("renders raw ACP tool lifecycle payloads as concise Baileys messages by default", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
         sessionId: "s1",
@@ -1076,13 +1076,13 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(flushedMessages[1]?.text, "🔧 *Search*  `needle` in *src*", JSON.stringify(flushedMessages));
     assert.ok(
       typeof flushedMessages[2]?.text === "string" && flushedMessages[2].text.includes("_Plan_"),
-      `Expected plan after compact close, got ${JSON.stringify(flushedMessages)}`,
+      `Expected plan between concise tool updates, got ${JSON.stringify(flushedMessages)}`,
     );
     assert.equal(flushedMessages[3]?.text, "🔧 *Web search*  \"runtime migration\"");
     assert.equal(flushedMessages[3]?.edit, undefined);
   });
 
-  it("renders ACP read tool locations in compact WhatsApp progress", async () => {
+  it("renders ACP read tool locations in concise WhatsApp progress", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
         sessionId: "s1",
@@ -1104,7 +1104,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
   });
 
-  it("keeps ACP read line ranges from raw tool input in compact WhatsApp progress", async () => {
+  it("keeps ACP read line ranges from raw tool input in concise WhatsApp progress", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
         sessionId: "s1",
@@ -1204,7 +1204,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[1]?.msg.text, "✅ *Read*  `src/app.js`  *10-12*");
   });
 
-  it("keeps real ACP read payloads out of pinned status while rendering compact read activity", async () => {
+  it("keeps real ACP read payloads out of pinned status while rendering concise read activity", async () => {
     const chatId = "acp-payload-pinned-read@s.whatsapp.net";
     const toolCallId = "call_wp7MciriXBhbVOsDFY4b60pj";
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
@@ -1678,7 +1678,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent.some((entry) => String(entry.msg.text ?? "").includes("Guardian warning")), false);
   });
 
-  it("keeps Guardian prefixes when compact tool calls complete or fail", async () => {
+  it("keeps Guardian prefixes when concise tool calls complete or fail", async () => {
     const approved = await observeAcpPayloadSliceToBaileys([
       {
         sessionId: "s1",

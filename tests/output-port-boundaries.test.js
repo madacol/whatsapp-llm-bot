@@ -107,4 +107,20 @@ describe("output port boundaries", () => {
 
     assert.deepEqual(violations, []);
   });
+
+  it("removes compact tool activity outbound events from production code", () => {
+    const violations = [];
+
+    for (const file of listProjectFiles(repoRoot)) {
+      if (file.startsWith("tests/")) {
+        continue;
+      }
+      const source = readFileSync(join(repoRoot, file), "utf8");
+      if (/\bcompact_tool_activity\b|\bCompactToolActivityEvent\b|\bcompactToolActivityByChat\b/.test(source)) {
+        violations.push(file);
+      }
+    }
+
+    assert.deepEqual(violations, []);
+  });
 });
