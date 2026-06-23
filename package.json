@@ -25,6 +25,9 @@
     "keywords": [],
     "author": "madacol",
     "dependencies": {
+        "@agentclientprotocol/claude-agent-acp": "0.37.0",
+        "@agentclientprotocol/codex-acp": "0.0.44",
+        "@earendil-works/pi-coding-agent": "0.75.5",
         "@electric-sql/pglite": "^0.3.3",
         "@mozilla/readability": "^0.6.0",
         "@napi-rs/canvas": "^0.1.100",
@@ -37,17 +40,14 @@
         "nodemailer": "^8.0.1",
         "openai": "^4.104.0",
         "pdfjs-dist": "^4.10.38",
+        "pi-acp": "0.0.27",
         "sharp": "^0.34.5",
         "shiki": "^4.0.1",
         "turndown": "^7.2.2"
     },
     "devDependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.37.0",
-        "@agentclientprotocol/codex-acp": "0.0.44",
-        "@earendil-works/pi-coding-agent": "0.75.5",
         "@types/node": "^20.19.0",
         "@types/nodemailer": "^7.0.11",
-        "pi-acp": "0.0.27",
         "typescript": "^5.8.3"
     },
     "pnpm": {
