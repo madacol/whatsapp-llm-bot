@@ -282,6 +282,81 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     });
   });
 
+  it("does not concatenate separate ACP thinking traces into one completion", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const reasoningEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onReasoning: async (event) => {
+          reasoningEvents.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "Thinking...",
+      status: "updated",
+      contentParts: ["Thinking..."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "**Addressing user requests**\n\nI need to respond.",
+      status: "updated",
+      contentParts: ["**Addressing user requests**\n\nI need to respond."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "Thinking...",
+      status: "updated",
+      contentParts: ["Thinking..."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "**Updating tests based on user feedback**\n\nI need to remove absence-only tests.",
+      status: "updated",
+      contentParts: ["**Updating tests based on user feedback**\n\nI need to remove absence-only tests."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "assistant.completed",
+      provider: "acp",
+      text: "Done.",
+      contentType: "markdown",
+    });
+
+    assert.deepEqual(
+      reasoningEvents.filter((event) => event.status === "completed"),
+      [
+        {
+          status: "completed",
+          summaryParts: [],
+          contentParts: ["**Addressing user requests**\n\nI need to respond."],
+          text: "**Addressing user requests**\n\nI need to respond.",
+        },
+        {
+          status: "completed",
+          summaryParts: [],
+          contentParts: ["**Updating tests based on user feedback**\n\nI need to remove absence-only tests."],
+          text: "**Updating tests based on user feedback**\n\nI need to remove absence-only tests.",
+        },
+      ],
+    );
+  });
+
   it("preserves context window from earlier usage updates when final usage omits it", async () => {
     /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
     const usageEvents = [];
