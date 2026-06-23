@@ -9,6 +9,7 @@ import { createReactionRuntime } from "../runtime/reaction-runtime.js";
 const DEFAULT_PRESENCE_LEASE_TTL_MS = 20_000;
 const WHATSAPP_PRESENCE_PULSE_INTERVAL_MS = 8_000;
 const HARD_IGNORE_PREFIX = "//";
+const ASSISTANT_SOURCE_PREFIX = "🤖 ";
 
 /**
  * Escape a string for safe use inside a RegExp.
@@ -53,6 +54,54 @@ function createBotMentionPrefix(selfIds) {
 function detectBotMention(content, selfIds) {
   return content.some((block) => block.type === "text"
     && selfIds.some((selfId) => block.text.includes(`@${selfId}`)));
+}
+
+/**
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isTransientAssistantReasoningDisplay(text) {
+  if (!text.startsWith(ASSISTANT_SOURCE_PREFIX)) {
+    return false;
+  }
+
+  const body = text.slice(ASSISTANT_SOURCE_PREFIX.length).trim();
+  return body === "Thinking..."
+    || body === "Thought"
+    || body === "*Thinking*"
+    || body === "*Thought*"
+    || body.startsWith("*Thinking*\n\n")
+    || body.startsWith("*Thought*\n\n");
+}
+
+/**
+ * Remove bot-authored transient reasoning UI from quoted prompt context while
+ * keeping stable bot answers and the quoted sender facts intact.
+ * @param {IncomingContentBlock[]} content
+ * @param {boolean} repliedToBot
+ * @returns {IncomingContentBlock[]}
+ */
+function normalizeBotQuotedContent(content, repliedToBot) {
+  if (!repliedToBot) {
+    return content;
+  }
+
+  /** @type {IncomingContentBlock[]} */
+  const normalized = [];
+  for (const block of content) {
+    if (block.type !== "quote") {
+      normalized.push(block);
+      continue;
+    }
+
+    const quoteContent = block.content.filter((quotedBlock) =>
+      quotedBlock.type !== "text" || !isTransientAssistantReasoningDisplay(quotedBlock.text));
+    if (quoteContent.length === 0) {
+      continue;
+    }
+    normalized.push({ ...block, content: quoteContent });
+  }
+  return normalized;
 }
 
 /**
@@ -538,7 +587,11 @@ export async function buildIncomingTurn(
   const selfIds = getSelfIds(sock);
   const addressedToBot = detectBotMention(content, selfIds);
   const repliedToBot = quotedSenderId ? selfIds.includes(quotedSenderId) : false;
-  const normalizedContent = isGroup ? normalizeContent(content, selfIds) : content;
+  const botQuoteNormalizedContent = normalizeBotQuotedContent(content, repliedToBot);
+  if (botQuoteNormalizedContent.length === 0) {
+    return null;
+  }
+  const normalizedContent = isGroup ? normalizeContent(botQuoteNormalizedContent, selfIds) : botQuoteNormalizedContent;
   const senderName = turnMessage.pushName || "";
   const chatName = await resolveChatName(sock, chatId, isGroup, senderName);
   const io = createTurnIo({
