@@ -34,7 +34,7 @@ describe("ACP client process stderr", () => {
     setDefaultRuntimeDiagnosticsStateForTesting(null);
   });
 
-  it("resolves the installed codex-acp package when the pnpm bin shim is unavailable", () => {
+  it("resolves codex-acp to a repo-local executable instead of shell lookup", () => {
     const resolved = resolveAcpCommandPath("codex-acp");
 
     assert.notEqual(resolved, "codex-acp");

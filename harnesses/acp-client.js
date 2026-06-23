@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -10,7 +11,11 @@ import { getDefaultFixtureCapture } from "../diagnostics/capture.js";
 const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
+const requireFromHere = createRequire(import.meta.url);
 const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
+const ACP_COMMAND_PACKAGES = new Map([
+  ["codex-acp", "@agentclientprotocol/codex-acp"],
+]);
 
 /**
  * @typedef {{
@@ -266,6 +271,28 @@ function resolveInstalledPackageBin(command) {
 
 /**
  * @param {string} command
+ * @returns {string | null}
+ */
+function resolveKnownPackageBin(command) {
+  const packageName = ACP_COMMAND_PACKAGES.get(command);
+  if (!packageName) {
+    return null;
+  }
+  try {
+    const packageJsonPath = requireFromHere.resolve(`${packageName}/package.json`);
+    return resolvePackageBinTarget(path.dirname(packageJsonPath), command);
+  } catch {
+    try {
+      const entrypoint = requireFromHere.resolve(packageName);
+      return fs.existsSync(entrypoint) ? entrypoint : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * @param {string} command
  * @returns {string}
  */
 export function resolveAcpCommandPath(command) {
@@ -276,6 +303,10 @@ export function resolveAcpCommandPath(command) {
   const localBin = path.join(REPO_ROOT, "node_modules", ".bin", binName);
   if (fs.existsSync(localBin)) {
     return localBin;
+  }
+  const knownPackageBin = resolveKnownPackageBin(command);
+  if (knownPackageBin) {
+    return knownPackageBin;
   }
   return resolveInstalledPackageBin(command) ?? command;
 }
