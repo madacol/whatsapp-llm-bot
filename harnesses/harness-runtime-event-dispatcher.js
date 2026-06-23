@@ -107,9 +107,6 @@ function appendCoalescedDeltaText(current, incoming) {
   if (!current) {
     return incoming;
   }
-  if (incoming.trimStart().startsWith("Thinking...") && cleanCompletedReasoningText(current)) {
-    return incoming;
-  }
   if (current === incoming) {
     return current;
   }
@@ -130,59 +127,13 @@ function appendCoalescedDeltaText(current, incoming) {
 }
 
 /**
- * @param {string} text
- * @returns {string}
- */
-function cleanCompletedReasoningText(text) {
-  return text.replace(/^(?:\s*Thinking\.\.\.)+/, "").trim();
-}
-
-/**
  * @param {string[]} parts
  * @returns {string[]}
  */
 function cleanCompletedReasoningParts(parts) {
   return parts
-    .map((part) => cleanCompletedReasoningText(part.trim()))
+    .map((part) => part.trim())
     .filter(Boolean);
-}
-
-/**
- * @param {string} text
- * @returns {boolean}
- */
-function startsThinkingBoundary(text) {
-  return text.trimStart().startsWith("Thinking...");
-}
-
-/**
- * @param {HarnessRuntimeEvent} event
- * @returns {boolean}
- */
-function reasoningEventStartsThinkingBoundary(event) {
-  if (
-    event.type !== "reasoning.started"
-    && event.type !== "reasoning.updated"
-    && event.type !== "reasoning.completed"
-  ) {
-    return false;
-  }
-  const contentParts = event.contentParts ?? [event.text];
-  const summaryParts = event.summaryParts ?? [];
-  return [...contentParts, ...summaryParts].some(startsThinkingBoundary);
-}
-
-/**
- * @param {{ contentParts: string[], summaryParts: string[], contentDeltaText: string, summaryDeltaText: string }} state
- * @returns {boolean}
- */
-function openReasoningHasCompletedText(state) {
-  return cleanCompletedReasoningParts([
-    state.contentDeltaText.trim(),
-    ...state.contentParts.map((part) => part.trim()),
-    state.summaryDeltaText.trim(),
-    ...state.summaryParts.map((part) => part.trim()),
-  ]).length > 0;
 }
 
 /**
@@ -433,19 +384,11 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "reasoning.started":
       case "reasoning.updated":
       case "reasoning.completed":
-        if (
-          normalizedEvent.status !== "completed"
-          && openReasoning
-          && openReasoningHasCompletedText(openReasoning)
-          && reasoningEventStartsThinkingBoundary(normalizedEvent)
-        ) {
-          await completeOpenReasoning();
-        }
         rememberReasoning(normalizedEvent);
         if (normalizedEvent.status === "completed") {
           const contentParts = cleanCompletedReasoningParts(normalizedEvent.contentParts ?? [normalizedEvent.text]);
           const summaryParts = cleanCompletedReasoningParts(normalizedEvent.summaryParts ?? []);
-          const text = cleanCompletedReasoningText(normalizedEvent.text);
+          const text = normalizedEvent.text.trim();
           await hooks.onReasoning({
             status: normalizedEvent.status,
             summaryParts,
