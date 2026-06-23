@@ -994,6 +994,7 @@ export async function createWhatsAppTransport(options = {}) {
           {
             getSocket: getOpenSocket,
             ...(outboundStore ? { outboundStore } : {}),
+            scheduleQueuedOutboundRetry,
           },
         );
       },
@@ -1011,6 +1012,7 @@ export async function createWhatsAppTransport(options = {}) {
           {
             getSocket: getOpenSocket,
             ...(outboundStore ? { outboundStore } : {}),
+            scheduleQueuedOutboundRetry,
           },
         );
       },
