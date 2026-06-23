@@ -27,7 +27,7 @@ describe("patched codex-acp web search tool calls", () => {
           const thoughtUpdates = notifications
             .map((entry) => /** @type {{ params?: { update?: { sessionUpdate?: string } } }} */ (entry).params?.update)
             .filter((update) => update?.sessionUpdate === "agent_thought_chunk");
-          if (thoughtUpdates.length >= 2) {
+          if (thoughtUpdates.length >= 1) {
             return;
           }
         }
@@ -53,10 +53,6 @@ describe("patched codex-acp web search tool calls", () => {
       assert.deepEqual(thoughtUpdates, [
         {
           sessionUpdate: "agent_thought_chunk",
-          content: { type: "text", text: "Thinking..." },
-        },
-        {
-          sessionUpdate: "agent_thought_chunk",
           content: { type: "text", text: "Checking restart status." },
         },
       ]);
@@ -65,7 +61,7 @@ describe("patched codex-acp web search tool calls", () => {
     }
   });
 
-  it("emits a thinking placeholder for live Codex reasoning item lifecycles", async () => {
+  it("does not emit fake thought text for empty Codex reasoning item lifecycles", async () => {
     const connection = await openFakeCodexAcpConnection();
 
     try {
@@ -79,13 +75,9 @@ describe("patched codex-acp web search tool calls", () => {
 
       /** @type {Record<string, unknown>[]} */
       const notifications = [];
-      const collectNotifications = (async () => {
+      void (async () => {
         for await (const notification of connection.notifications) {
           notifications.push(notification);
-          const thoughtUpdate = /** @type {{ params?: { update?: { sessionUpdate?: string } } }} */ (notification).params?.update;
-          if (thoughtUpdate?.sessionUpdate === "agent_thought_chunk") {
-            return;
-          }
         }
       })();
 
@@ -95,21 +87,13 @@ describe("patched codex-acp web search tool calls", () => {
       }));
       assert.equal(result?.stopReason, "end_turn");
 
-      await Promise.race([
-        collectNotifications,
-        delay(500).then(() => {
-          throw new Error(`Timed out waiting for reasoning lifecycle ACP update: ${JSON.stringify(notifications)}`);
-        }),
-      ]);
+      await delay(100);
 
       const thoughtUpdates = notifications
         .map((entry) => /** @type {{ params?: { update?: Record<string, unknown> } }} */ (entry).params?.update)
         .filter((update) => update?.sessionUpdate === "agent_thought_chunk");
 
-      assert.deepEqual(thoughtUpdates, [{
-        sessionUpdate: "agent_thought_chunk",
-        content: { type: "text", text: "Thinking..." },
-      }]);
+      assert.deepEqual(thoughtUpdates, []);
     } finally {
       await connection.close();
     }

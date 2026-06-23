@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-process.stdin.resume();
 const keepAlive = setInterval(() => {}, 1 << 30);
 
 const minimalCapabilities = process.argv.includes("--minimal-capabilities");
@@ -1089,3 +1088,4 @@ process.stdin.on("data", (chunk) => {
     void handleMessage(message);
   }
 });
+process.stdin.resume();

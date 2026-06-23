@@ -596,13 +596,6 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         sessionId: "s1",
         update: {
           sessionUpdate: "agent_thought_chunk",
-          content: { type: "text", text: "Thinking..." },
-        },
-      },
-      {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "agent_thought_chunk",
           content: { type: "text", text: "**Inspecting user feedback**\n\nI" },
         },
       },
