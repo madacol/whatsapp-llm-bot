@@ -89,6 +89,7 @@ export function normalizeUpsertReactionMessage(message) {
     key: { id: reactedKey.id, remoteJid },
     reaction: { text: reactionMessage.text },
     senderId: getReactionSenderId(/** @type {{ remoteJid?: string | null, participant?: string | null, participantAlt?: string | null }} */ (message.key)),
+    ...(typeof message.key.fromMe === "boolean" ? { fromMe: message.key.fromMe } : {}),
   }];
 }
 

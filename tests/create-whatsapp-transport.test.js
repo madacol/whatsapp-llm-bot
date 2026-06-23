@@ -250,6 +250,7 @@ describe("message-event-classifier", () => {
       },
       reaction: { text: "👁" },
       senderId: "213597330374785",
+      fromMe: false,
     }]);
 
     const reactionRuntime = createReactionRuntime();
@@ -264,6 +265,36 @@ describe("message-event-classifier", () => {
       emoji: "👁",
       senderId: "213597330374785",
     });
+  });
+
+  it("preserves fromMe on reaction-message upserts", () => {
+    const normalized = normalizeUpsertReactionMessage(/** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: "user@s.whatsapp.net",
+        fromMe: true,
+        id: "self-reaction-msg",
+      },
+      message: {
+        reactionMessage: {
+          key: {
+            remoteJid: "user@s.whatsapp.net",
+            fromMe: true,
+            id: "inspectable-msg",
+          },
+          text: "👁",
+        },
+      },
+    }));
+
+    assert.deepEqual(normalized, [{
+      key: {
+        id: "inspectable-msg",
+        remoteJid: "user@s.whatsapp.net",
+      },
+      reaction: { text: "👁" },
+      senderId: "user",
+      fromMe: true,
+    }]);
   });
 
   it("classifies reaction-message upserts as reaction events", () => {
@@ -291,6 +322,7 @@ describe("message-event-classifier", () => {
         key: { id: "tool-msg-1", remoteJid: "chat@g.us" },
         reaction: { text: "👁" },
         senderId: "user",
+        fromMe: false,
       }],
     });
   });
