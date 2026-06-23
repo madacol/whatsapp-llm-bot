@@ -18,6 +18,15 @@ importers:
 
   .:
     dependencies:
+      '@agentclientprotocol/claude-agent-acp':
+        specifier: 0.37.0
+        version: 0.37.0(@anthropic-ai/sdk@0.99.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
+      '@agentclientprotocol/codex-acp':
+        specifier: 0.0.44
+        version: 0.0.44(patch_hash=8f86d83b27ee1e70aa25a49e03b44427f2f81ec24c03a696e0d962aa05e51935)(zod@3.25.76)
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.75.5
+        version: 0.75.5(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(ws@8.20.1)(zod@3.25.76)
       '@electric-sql/pglite':
         specifier: ^0.3.3
         version: 0.3.3
@@ -54,6 +63,9 @@ importers:
       pdfjs-dist:
         specifier: ^4.10.38
         version: 4.10.38
+      pi-acp:
+        specifier: 0.0.27
+        version: 0.0.27
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
@@ -64,24 +76,12 @@ importers:
         specifier: ^7.2.2
         version: 7.2.2
     devDependencies:
-      '@agentclientprotocol/claude-agent-acp':
-        specifier: 0.37.0
-        version: 0.37.0(@anthropic-ai/sdk@0.99.0(zod@3.25.76))(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
-      '@agentclientprotocol/codex-acp':
-        specifier: 0.0.44
-        version: 0.0.44(patch_hash=8f86d83b27ee1e70aa25a49e03b44427f2f81ec24c03a696e0d962aa05e51935)(zod@3.25.76)
-      '@earendil-works/pi-coding-agent':
-        specifier: 0.75.5
-        version: 0.75.5(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))(ws@8.20.1)(zod@3.25.76)
       '@types/node':
         specifier: ^20.19.0
         version: 20.19.0
       '@types/nodemailer':
         specifier: ^7.0.11
         version: 7.0.11
-      pi-acp:
-        specifier: 0.0.27
-        version: 0.0.27
       typescript:
         specifier: ^5.8.3
         version: 5.8.3

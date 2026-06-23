@@ -1,8 +1,24 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { BUILT_IN_ACP_AGENT_DEFINITIONS, createAcpAgentDriver } from "../harnesses/acp-agents.js";
 
 describe("ACP agent drivers", () => {
+  it("ships ACP runtime executables as production dependencies", () => {
+    const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const dependencies = packageJson.dependencies ?? {};
+    const devDependencies = packageJson.devDependencies ?? {};
+    for (const packageName of [
+      "@agentclientprotocol/claude-agent-acp",
+      "@agentclientprotocol/codex-acp",
+      "@earendil-works/pi-coding-agent",
+      "pi-acp",
+    ]) {
+      assert.equal(typeof dependencies[packageName], "string", `${packageName} must be installed in production`);
+      assert.equal(devDependencies[packageName], undefined, `${packageName} is used by runtime harnesses, not tests only`);
+    }
+  });
+
   it("enables Codex app-server logs in the built-in Codex adapter", () => {
     const codex = BUILT_IN_ACP_AGENT_DEFINITIONS.find((definition) => definition.name === "codex");
     assert.ok(codex);
