@@ -6,3 +6,4 @@ Completed task details are archived here instead of deleted.
 - Codex apply_patch delete+add rewrite diff. [details](codex-apply-patch-delete-add-diff.md)
 - Thinking message coalescing. [details](thinking-message-coalescing.md)
 - Quoted thinking inspect regression. [details](quoted-thinking-inspect-regression.md)
+- Inspect self-reaction regression. [details](inspect-self-reaction-regression.md)
