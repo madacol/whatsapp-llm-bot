@@ -8,3 +8,4 @@ Completed task details are archived here instead of deleted.
 - Quoted thinking inspect regression. [details](quoted-thinking-inspect-regression.md)
 - Inspect self-reaction regression. [details](inspect-self-reaction-regression.md)
 - ACP client handles missing command startup without crashing.
+- ACP Codex command resolution hardening. [details](acp-codex-command-resolution.md)

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { hasInlineMediaData, hasMediaPath, isValidMediaPath, resolveMediaPath } from "../attachment-paths.js";
-import { openAcpConnection } from "./acp-client.js";
+import { openAcpConnection, resolveAcpCommandPath } from "./acp-client.js";
 import { hasAcpSessionCapability, hasMadabotAcpSessionCapability, supportsAcpLoadSession } from "./acp-capabilities.js";
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
 import {
@@ -786,8 +786,10 @@ async function handlePromptUsage(input, runtimeDispatcher, promptResult) {
  * @returns {Promise<{ connection: Awaited<ReturnType<typeof openAcpConnection>>, capabilities: Record<string, unknown> }>}
  */
 async function openInitializedAcpConnection(input, handleRequest = async () => ({})) {
+  const resolvedCommand = resolveAcpCommandPath(input.command);
   log.info("Opening ACP connection", {
     command: input.command,
+    resolvedCommand,
     args: input.args ?? [],
     workdir: input.runConfig?.workdir ?? null,
   });
@@ -801,6 +803,7 @@ async function openInitializedAcpConnection(input, handleRequest = async () => (
   });
   log.info("ACP initialize request starting", {
     command: input.command,
+    resolvedCommand,
     workdir: input.runConfig?.workdir ?? null,
   });
   const initializeResult = await connection.sendRequest("initialize", {
@@ -815,6 +818,7 @@ async function openInitializedAcpConnection(input, handleRequest = async () => (
   const capabilities = readAgentCapabilities(initializeResult);
   log.info("ACP initialize request completed", {
     command: input.command,
+    resolvedCommand,
     capabilityKeys: Object.keys(capabilities).join(","),
   });
   return {
