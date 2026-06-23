@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createRuntimeDiagnosticsState, setDefaultRuntimeDiagnosticsStateForTesting } from "../diagnostics-config.js";
-import { openAcpConnection } from "../harnesses/acp-client.js";
+import { openAcpConnection, resolveAcpCommandPath } from "../harnesses/acp-client.js";
 
 describe("ACP client process stderr", () => {
   /** @type {string | undefined} */
@@ -32,6 +32,41 @@ describe("ACP client process stderr", () => {
     if (originalAcpProtocolLog === undefined) delete process.env.MADABOT_ACP_PROTOCOL_LOG;
     else process.env.MADABOT_ACP_PROTOCOL_LOG = originalAcpProtocolLog;
     setDefaultRuntimeDiagnosticsStateForTesting(null);
+  });
+
+  it("resolves the installed codex-acp package when the pnpm bin shim is unavailable", () => {
+    const resolved = resolveAcpCommandPath("codex-acp");
+
+    assert.notEqual(resolved, "codex-acp");
+    assert.ok(
+      resolved === path.join(process.cwd(), "node_modules", ".bin", process.platform === "win32" ? "codex-acp.cmd" : "codex-acp")
+        || resolved === path.join(process.cwd(), "node_modules", "@agentclientprotocol", "codex-acp", "dist", "index.js"),
+      resolved,
+    );
+  });
+
+  it("rejects missing ACP command startup instead of emitting an uncaught child error", async () => {
+    const missingCommand = `missing-acp-command-${Date.now()}`;
+    const calls = await captureWarnLogs(async () => {
+      await assert.rejects(
+        openAcpConnection({
+          command: missingCommand,
+          fixtureCapture: null,
+        }),
+        (error) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, /Failed to start ACP command/);
+          assert.match(error.message, /ENOENT/);
+          return true;
+        },
+      );
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.[0], "[harness:acp]");
+    assert.equal(calls[0]?.[1], "ACP child process failed to start.");
+    assert.equal(calls[0]?.[2]?.command, missingCommand);
+    assert.equal(calls[0]?.[2]?.code, "ENOENT");
   });
 
   it("drains child stderr without mirroring provider chatter into the bot log by default", async () => {
@@ -133,10 +168,10 @@ describe("ACP client process stderr", () => {
       });
       try {
         await assert.rejects(
-          connection.sendRequest("session/new", { cwd: process.cwd() }, { timeoutMs: 50 }),
+          connection.sendRequest("session/new", { cwd: process.cwd() }, { timeoutMs: 250 }),
           (error) => {
             assert.ok(error instanceof Error);
-            assert.match(error.message, /ACP request timed out after 50ms: session\/new/);
+            assert.match(error.message, /ACP request timed out after 250ms: session\/new/);
             assert.match(error.message, /command=/);
             assert.match(error.message, /pid=\d+/);
             assert.match(error.message, /pending=session\/new#1/);

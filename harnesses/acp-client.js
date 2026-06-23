@@ -165,16 +165,141 @@ function buildChildEnvironment(env) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string | null}
+ */
+function getErrorCode(error) {
+  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
+    ? error.code
+    : null;
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * @param {string} packageDir
+ * @param {string} command
+ * @returns {string | null}
+ */
+function resolvePackageBinTarget(packageDir, command) {
+  const packageJsonPath = path.join(packageDir, "package.json");
+  if (!fs.existsSync(packageJsonPath)) {
+    return null;
+  }
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+    if (!isRecord(packageJson)) {
+      return null;
+    }
+    const bin = packageJson.bin;
+    let relativeTarget = null;
+    if (typeof bin === "string" && typeof packageJson.name === "string" && path.basename(packageJson.name) === command) {
+      relativeTarget = bin;
+    } else if (isRecord(bin) && typeof bin[command] === "string") {
+      relativeTarget = bin[command];
+    }
+    if (!relativeTarget) {
+      return null;
+    }
+    const target = path.join(packageDir, relativeTarget);
+    return fs.existsSync(target) ? target : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} command
+ * @returns {string | null}
+ */
+function resolveInstalledPackageBin(command) {
+  const nodeModules = path.join(REPO_ROOT, "node_modules");
+  let entries;
+  try {
+    entries = fs.readdirSync(nodeModules, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+    const entryPath = path.join(nodeModules, entry.name);
+    if (entry.name.startsWith("@")) {
+      let scopedEntries;
+      try {
+        scopedEntries = fs.readdirSync(entryPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const scopedEntry of scopedEntries) {
+        const target = resolvePackageBinTarget(path.join(entryPath, scopedEntry.name), command);
+        if (target) {
+          return target;
+        }
+      }
+      continue;
+    }
+    const target = resolvePackageBinTarget(entryPath, command);
+    if (target) {
+      return target;
+    }
+  }
+
+  return null;
+}
+
+/**
  * @param {string} command
  * @returns {string}
  */
-function resolveAcpCommandPath(command) {
+export function resolveAcpCommandPath(command) {
   if (path.isAbsolute(command) || command.includes("/") || command.includes("\\")) {
     return command;
   }
   const binName = process.platform === "win32" ? `${command}.cmd` : command;
   const localBin = path.join(REPO_ROOT, "node_modules", ".bin", binName);
-  return fs.existsSync(localBin) ? localBin : command;
+  if (fs.existsSync(localBin)) {
+    return localBin;
+  }
+  return resolveInstalledPackageBin(command) ?? command;
+}
+
+/**
+ * @param {{ phase: "startup" | "runtime", command: string, resolvedCommand: string, cwd?: string | null, error: unknown }} input
+ * @returns {Error}
+ */
+function createAcpProcessError(input) {
+  const parts = [
+    input.phase === "startup"
+      ? `Failed to start ACP command "${input.command}".`
+      : `ACP command process error "${input.command}".`,
+    `resolved=${input.resolvedCommand}`,
+  ];
+  if (input.cwd) {
+    parts.push(`cwd=${input.cwd}`);
+  }
+  const code = getErrorCode(input.error);
+  if (code) {
+    parts.push(`code=${code}`);
+  }
+  parts.push(getErrorMessage(input.error));
+  return new Error(parts.join(" "), { cause: input.error });
 }
 
 /**
@@ -296,7 +421,8 @@ function formatConnectionClosedMessage(details) {
 export async function openAcpConnection(options) {
   const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
   const childEnv = buildChildEnvironment(options.env);
-  const proc = spawn(resolveAcpCommandPath(options.command), options.args ?? [], {
+  const resolvedCommand = resolveAcpCommandPath(options.command);
+  const proc = spawn(resolvedCommand, options.args ?? [], {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(childEnv ? { env: childEnv } : {}),
@@ -310,6 +436,45 @@ export async function openAcpConnection(options) {
   let closed = false;
   let closeRequested = false;
   let stderrTail = "";
+  let processError = /** @type {Error | null} */ (null);
+  let startupSettled = false;
+
+  const startup = new Promise((resolve, reject) => {
+    proc.once("spawn", () => {
+      startupSettled = true;
+      resolve(undefined);
+    });
+    proc.once("error", (error) => {
+      const phase = startupSettled ? "runtime" : "startup";
+      processError = createAcpProcessError({
+        phase,
+        command: options.command,
+        resolvedCommand,
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        error,
+      });
+      closed = true;
+      queue.end();
+      const pendingRequestList = pendingRequestSummaries(pendingRequests);
+      for (const [id, pending] of [...pendingRequests]) {
+        pendingRequests.delete(id);
+        pending.reject(processError);
+      }
+      if (!closeRequested) {
+        log.warn(phase === "startup" ? "ACP child process failed to start." : "ACP child process error.", {
+          command: options.command,
+          resolvedCommand,
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          code: getErrorCode(error),
+          message: getErrorMessage(error),
+          pendingRequests: pendingRequestList,
+        });
+      }
+      if (phase === "startup") {
+        reject(processError);
+      }
+    });
+  });
 
   proc.stderr.setEncoding("utf8");
   proc.stderr.on("data", (chunk) => {
@@ -417,6 +582,9 @@ export async function openAcpConnection(options) {
   })();
 
   proc.once("exit", (exitCode, signal) => {
+    if (processError) {
+      return;
+    }
     closed = true;
     queue.end();
     const pendingRequestList = pendingRequestSummaries(pendingRequests);
@@ -437,6 +605,8 @@ export async function openAcpConnection(options) {
       rejectRequest(id, message);
     }
   });
+
+  await startup;
 
   return {
     proc,
