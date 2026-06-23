@@ -300,6 +300,36 @@ describe("getMessageContent", () => {
     );
   });
 
+  it("keeps transient bot thinking quotes out of reply context", async () => {
+    const { sock } = createMockSock();
+    sock.user = { id: "bot-123:1@s.whatsapp.net" };
+    /** @type {ChatTurn | null} */
+    let capturedTurn = null;
+
+    await adaptIncomingMessage(
+      createWAMessage({
+        text: "continue",
+        chatId: "thinking-bot-quote@g.us",
+        isGroup: true,
+        quotedText: "🤖 *Thinking*\n\nThinking...",
+        quotedSenderId: "bot-123",
+      }),
+      sock,
+      async (turn) => {
+        capturedTurn = turn;
+      },
+      createConfirmRuntime(),
+      createSelectRuntime(),
+    );
+
+    assert.ok(capturedTurn, "Handler should receive the user reply");
+    assert.equal(capturedTurn.facts.repliedToBot, true);
+    assert.equal(capturedTurn.facts.quotedSenderId, "bot-123");
+
+    const quote = capturedTurn.content.find((block) => block.type === "quote");
+    assert.equal(quote, undefined);
+  });
+
   it("extracts image caption from quoted message", async () => {
     const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {

@@ -1,10 +1,10 @@
 # Quoted Thinking Inspect Regression
 
-Status: Todo
+Status: Done
 
 ## Context
 
-Audio note: [3376ada7a5c3d0a78f06b6c69f1d34256460069c4a19827d6423d4dbf349046c.ogg](../.media/3376ada7a5c3d0a78f06b6c69f1d34256460069c4a19827d6423d4dbf349046c.ogg)
+Audio note: [3376ada7a5c3d0a78f06b6c69f1d34256460069c4a19827d6423d4dbf349046c.ogg](../../.media/3376ada7a5c3d0a78f06b6c69f1d34256460069c4a19827d6423d4dbf349046c.ogg)
 
 Quoted symptom observed in chat:
 
@@ -23,3 +23,16 @@ This message I quoted is not working correctly. Uh, this is happening after we a
 - Regression appeared after adding the eye inspect reaction marker to inspectable messages.
 - Suspect quoted-message extraction or formatting is seeing transient thinking/status message updates as stable quoted content.
 - Reproduce from the WhatsApp quote path, not only the formatter in isolation.
+
+## Outcome
+
+- Added a chat-turn regression proving that quoting a bot-authored transient thinking message still counts as `repliedToBot` and preserves `quotedSenderId`.
+- Filtered transient assistant reasoning displays from quoted prompt context after the turn builder knows the quoted sender is the bot.
+- Kept stable bot answer quotes, such as `🤖 The build passed.`, available as context.
+
+## Verification
+
+- Red: `pnpm test tests/adapter.test.js --test-name-pattern "stable bot answer quotes|transient bot thinking quotes"` failed on the leaked `Thinking` quote.
+- Green: `pnpm test tests/adapter.test.js --test-name-pattern "stable bot answer quotes|transient bot thinking quotes"`.
+- `pnpm type-check`.
+- `git diff --check`.
