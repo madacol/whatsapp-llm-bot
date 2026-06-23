@@ -911,6 +911,55 @@ describe("createTurnIo", () => {
     await db.sql`DELETE FROM whatsapp_outbound_queue WHERE chat_id = ${chatId}`;
   });
 
+  it("schedules queued outbound replay when turn reply queues after recoverable send failure", async () => {
+    const chatId = `queued-turn-io-retry-${Date.now()}`;
+    const db = await createTestDb();
+    const store = await initStore(db);
+    let scheduledRetries = 0;
+
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      sendMessage: async () => {
+        throw new Error("Connection Closed");
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+    const io = createTurnIo({
+      sock,
+      getSocket: () => sock,
+      chatId,
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: "incoming-msg-queued-retry",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: createConfirmRuntime(),
+      reactionRuntime: createReactionRuntime(),
+      outboundStore: store,
+      scheduleQueuedOutboundRetry: () => {
+        scheduledRetries += 1;
+      },
+    });
+
+    const handle = await io.reply({
+      kind: "assistant_output",
+      content: "Send after retry",
+    });
+
+    assert.equal(handle?.deliveryStatus, "queued");
+    assert.equal(scheduledRetries, 1);
+    const queuedRows = await store.listWhatsAppOutboundQueueEntries();
+    const matchingRows = queuedRows.filter((row) => row.chat_id === chatId);
+    assert.equal(matchingRows.length, 1);
+    for (const row of matchingRows) {
+      await store.deleteWhatsAppOutboundQueueEntry(chatId, row.id);
+    }
+  });
+
   it("opens a WhatsApp-owned lease on outbound work, pulses composing on the adapter cadence, then pauses on expiry", async () => {
     const { io, presenceUpdates } = createPresenceTurnIo({
       messageId: "incoming-msg-3",

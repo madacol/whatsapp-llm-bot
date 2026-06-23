@@ -385,6 +385,7 @@ export async function finishTurnIo(io) {
  *   confirmRuntime: import("../runtime/confirm-runtime.js").ConfirmRuntime;
  *   reactionRuntime: import("../runtime/reaction-runtime.js").ReactionRuntime;
  *   outboundStore?: import("../../store.js").Store;
+ *   scheduleQueuedOutboundRetry?: () => void;
  *   presenceConfig?: {
  *     defaultLeaseTtlMs?: number,
  *     pulseIntervalMs?: number,
@@ -403,6 +404,7 @@ export function createTurnIo({
   confirmRuntime,
   reactionRuntime,
   outboundStore,
+  scheduleQueuedOutboundRetry,
   presenceConfig,
 }) {
   /**
@@ -457,6 +459,16 @@ export function createTurnIo({
     }
   }
 
+  /**
+   * @param {MessageHandle | undefined} handle
+   * @returns {void}
+   */
+  function scheduleQueuedReplayIfNeeded(handle) {
+    if (handle?.deliveryStatus === "queued") {
+      scheduleQueuedOutboundRetry?.();
+    }
+  }
+
   const select = selectRuntime.createSelect(getSocket ?? sock, chatId);
   const selectMany = selectRuntime.createSelectMany(getSocket ?? sock, chatId);
   const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
@@ -483,6 +495,7 @@ export function createTurnIo({
         reactionRuntime,
         ...(outboundStore ? { store: outboundStore } : {}),
       });
+      scheduleQueuedReplayIfNeeded(handle);
       refreshComposingAfterOutboundMessage();
       return handle;
     },
@@ -496,6 +509,7 @@ export function createTurnIo({
         reactionRuntime,
         ...(outboundStore ? { store: outboundStore } : {}),
       });
+      scheduleQueuedReplayIfNeeded(handle);
       refreshComposingAfterOutboundMessage();
       return handle;
     },
@@ -544,7 +558,7 @@ export function createTurnIo({
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
  * @returns {Promise<ChatTurn | null>}
  */
 export async function buildIncomingTurn(
@@ -605,6 +619,7 @@ export async function buildIncomingTurn(
     confirmRuntime,
     reactionRuntime,
     outboundStore: ioOptions?.outboundStore,
+    scheduleQueuedOutboundRetry: ioOptions?.scheduleQueuedOutboundRetry,
   });
 
   /** @type {ChatTurn} */
@@ -639,7 +654,7 @@ export async function buildIncomingTurn(
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessage(
@@ -751,7 +766,7 @@ function splitTurnsAtCommandBoundaries(turns) {
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessages(
