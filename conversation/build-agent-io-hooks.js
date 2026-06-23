@@ -242,6 +242,12 @@ export function buildAgentIoHooks(
       if (!visibility.thinking) {
         return;
       }
+      if (reasoningFinalized && event.status !== "completed") {
+        reasoningHandle = null;
+        pendingEncryptedReasoning = false;
+        reasoningInspectAttached = false;
+        reasoningFinalized = false;
+      }
       if (!reasoningHandle) {
         if (event.status === "completed" && !shouldCreateReasoningHandle(event)) {
           return;

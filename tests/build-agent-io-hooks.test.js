@@ -461,6 +461,53 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
+  it("starts a new thinking message for a new reasoning trace after finalization", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: ["First trace."],
+      text: "First trace.",
+    });
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: ["First trace."],
+      text: "First trace.",
+    });
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: ["Second trace."],
+      text: "Second trace.",
+    });
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: ["Second trace."],
+      text: "Second trace.",
+    });
+
+    assert.equal(subject.sent.length, 2);
+    assert.deepEqual(subject.reasoningUpdates, [
+      { kind: "text", text: "Thought" },
+      { kind: "text", text: "Thought" },
+    ]);
+    assert.deepEqual(subject.reasoningInspects, [
+      {
+        kind: "reasoning",
+        summary: "*Thought*",
+        text: "First trace.",
+      },
+      {
+        kind: "reasoning",
+        summary: "*Thought*",
+        text: "Second trace.",
+      },
+    ]);
+  });
+
   it("drops token fragments when a later reasoning completion contains the full text", async () => {
     const subject = createReasoningSubject();
 
