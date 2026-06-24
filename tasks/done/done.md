@@ -12,3 +12,4 @@ Completed task details are archived here instead of deleted.
 - Voice assistant client history merged into `whatsapp-llm-bot`. [details](merge-voice-assistant-client.md)
 - `!s show` poll votes delivered through Baileys `messages.update`. [details](show-settings-poll-no-response.md)
 - WhatsApp poll-backed select primitive handles raw LID poll votes. [details](whatsapp-select-primitive-poll-regression.md)
+- Journaled WhatsApp poll votes replay through the full ingress/select/outbound slice. [details](whatsapp-poll-live-participant-alt-regression.md)
