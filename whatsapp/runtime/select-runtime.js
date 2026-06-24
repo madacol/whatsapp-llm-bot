@@ -91,6 +91,7 @@ export function getPollCreationData(msg) {
  *   createSelect: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
  *   createSelectMany: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
  *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
+ *   observePollCreationMessage: (message: import('@whiskeysockets/baileys').WAMessage) => boolean;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   resolvePollUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
@@ -343,13 +344,13 @@ function addUniqueNormalizedUserJid(values, value) {
 }
 
 /**
- * Baileys can surface `messageSecret` as bytes on sent-message returns and as
- * base64 text on echoed/stored messages. Poll vote decryption needs the raw
- * bytes in both cases.
+ * Baileys can surface binary fields as bytes on live events, base64 text after
+ * JSON persistence, or Buffer-shaped JSON objects. Poll vote decryption needs
+ * the raw bytes in all cases.
  * @param {unknown} value
  * @returns {Uint8Array | null}
  */
-function normalizeMessageSecret(value) {
+function normalizeBinaryField(value) {
   if (value instanceof Uint8Array) {
     return value;
   }
@@ -357,7 +358,61 @@ function normalizeMessageSecret(value) {
     const decoded = Buffer.from(value, "base64");
     return decoded.length > 0 ? decoded : null;
   }
+  if (Array.isArray(value) && value.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)) {
+    return Buffer.from(value);
+  }
+  if (
+    value
+    && typeof value === "object"
+    && "type" in value
+    && value.type === "Buffer"
+    && "data" in value
+    && Array.isArray(value.data)
+    && value.data.every((item) => Number.isInteger(item) && item >= 0 && item <= 255)
+  ) {
+    return Buffer.from(value.data);
+  }
   return null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Parameters<typeof decryptPollVote>[0] | null}
+ */
+function normalizePollEncValue(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const encPayload = normalizeBinaryField("encPayload" in value ? value.encPayload : undefined);
+  const encIv = normalizeBinaryField("encIv" in value ? value.encIv : undefined);
+  if (!encPayload || !encIv) {
+    return null;
+  }
+  return { encPayload, encIv };
+}
+
+/**
+ * Refresh the stored sent poll with the bot-authored WhatsApp echo. In live
+ * Baileys, the poll echo can carry the vote decrypt secret that later votes
+ * are bound to, which may differ from the immediate sendMessage return.
+ * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
+ * @param {import('@whiskeysockets/baileys').WAMessage} message
+ * @returns {boolean}
+ */
+function observeSentPollCreationMessage(sentPolls, message) {
+  const pollMsgId = message.key?.id;
+  if (!message.key?.fromMe || !pollMsgId) {
+    return false;
+  }
+  if (!getPollCreationData(message.message)) {
+    return false;
+  }
+  if (!normalizeBinaryField(message.message?.messageContextInfo?.messageSecret)) {
+    return false;
+  }
+
+  rememberSentPoll(sentPolls, pollMsgId, message);
+  return true;
 }
 
 /**
@@ -414,8 +469,9 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
     return null;
   }
 
-  const encKey = normalizeMessageSecret(pollCreation.message?.messageContextInfo?.messageSecret);
-  if (!encKey || !pollUpdate.vote) {
+  const encKey = normalizeBinaryField(pollCreation.message?.messageContextInfo?.messageSecret);
+  const vote = normalizePollEncValue(pollUpdate.vote);
+  if (!encKey || !vote) {
     log.debug("Poll vote missing encKey or vote payload, skipping");
     return null;
   }
@@ -474,7 +530,7 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
   }
 
   const decrypted = decryptPollVoteWithCandidateAuthors(
-    pollUpdate.vote,
+    vote,
     encKey,
     creationKeyId,
     pollCreatorJidCandidates,
@@ -768,6 +824,15 @@ export function createSelectRuntime() {
           });
         });
       };
+    },
+
+    /**
+     * Observe a bot-authored poll creation echo from WhatsApp.
+     * @param {import('@whiskeysockets/baileys').WAMessage} message
+     * @returns {boolean}
+     */
+    observePollCreationMessage(message) {
+      return observeSentPollCreationMessage(sentPolls, message);
     },
 
     /**

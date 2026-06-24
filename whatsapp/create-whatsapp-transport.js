@@ -1046,6 +1046,8 @@ export async function createWhatsAppTransport(options = {}) {
     async function processIncomingUpsertMessage(message, options = {}) {
       const waitForBufferedTurnAcceptance = options.waitForBufferedTurnAcceptance ?? true;
       if (message.key.fromMe) {
+        selectRuntime.observePollCreationMessage(message);
+        confirmRuntime.observePollCreationMessage(message);
         return "ignored";
       }
 

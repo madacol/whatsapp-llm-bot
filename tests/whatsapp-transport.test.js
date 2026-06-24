@@ -100,6 +100,25 @@ async function getDeadLetterRows(db, chatId) {
   }));
 }
 
+/**
+ * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {string} chatId
+ * @returns {Promise<Array<{ source_event_type: string, state: string, last_error: string | null }>>}
+ */
+async function getIngressRows(db, chatId) {
+  const { rows } = await db.sql`
+    SELECT source_event_type, state, last_error
+    FROM whatsapp_ingress_journal
+    WHERE chat_id = ${chatId}
+    ORDER BY id ASC
+  `;
+  return rows.map((row) => ({
+    source_event_type: String(row.source_event_type),
+    state: String(row.state),
+    last_error: row.last_error === null ? null : String(row.last_error),
+  }));
+}
+
 function createBaileysGroupMetadataAttrsError() {
   const error = new TypeError("Cannot read properties of undefined (reading 'attrs')");
   error.stack = [
@@ -702,6 +721,210 @@ describe("WhatsApp transport community creation", () => {
     assert.ok(
       sentMessages.some((entry) => typeof entry.message.text === "string" && entry.message.text.includes("pinned_tool_status")),
       `Expected selected reply, got ${JSON.stringify(sentMessages)}`,
+    );
+  });
+
+  it("refreshes sent poll secrets from bot-authored poll echoes before raw vote decrypt", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const {
+      pollMsgId,
+      botPhoneJid,
+      botLidJid,
+      voterLidJid,
+      voterPhoneJid,
+      pollEncKey,
+      encIv,
+    } = RAW_LID_POLL_FIXTURE;
+    const chatId = `poll-echo-secret-${Date.now()}@g.us`;
+    const staleSendSecret = Buffer.from("ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100", "hex");
+    const selectedOption = "⚪ Show pinned tool status";
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {(value: unknown) => void} */
+    let resolveReply = () => {};
+    const replyHandled = new Promise((resolve) => {
+      resolveReply = resolve;
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        const id = "poll" in message ? pollMsgId : `sent-${sentMessages.length + 1}`;
+        sentMessages.push({ id, chatId: targetChatId, message });
+        if ("poll" in message) {
+          const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
+          return {
+            key: { id, remoteJid: targetChatId, fromMe: true },
+            message: {
+              messageContextInfo: {
+                messageSecret: staleSendSecret,
+              },
+              pollCreationMessage: {
+                name: "Choose which extra agent progress outputs are shown in chat.",
+                options: values
+                  .filter((value) => typeof value === "string")
+                  .map((value) => ({ optionName: value })),
+                selectableOptionsCount: 5,
+              },
+            },
+          };
+        }
+        return { key: { id, remoteJid: targetChatId, fromMe: true } };
+      },
+      sendPresenceUpdate: async () => {},
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: testStore,
+    });
+
+    await transport.start(async (turn) => {
+      const selection = await turn.io.selectMany(
+        "Choose which extra agent progress outputs are shown in chat.",
+        [
+          { id: "pinned_tool_status", label: selectedOption },
+          { id: "hide_thinking", label: "🟢 Hide thinking" },
+          { id: "hide_file_changes", label: "🟢 Hide file changes" },
+        ],
+        { deleteOnSelect: true },
+      );
+      await turn.io.reply(assistantOutputEvent([{ type: "markdown", text: JSON.stringify(selection) }]));
+      resolveReply(selection);
+    });
+
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({ "connection.update": { connection: "open" } });
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          createWAMessage({ chatId, text: "choose", senderId: "poll-user" }),
+        ],
+      },
+    });
+
+    await waitForCondition(
+      () => sentMessages.some((entry) => "poll" in entry.message),
+      `Expected selectMany to send a poll, got ${JSON.stringify(sentMessages)}`,
+    );
+
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+            key: {
+              remoteJid: chatId,
+              fromMe: true,
+              id: pollMsgId,
+            },
+            message: {
+              messageContextInfo: {
+                messageSecret: pollEncKey.toString("base64"),
+              },
+              pollCreationMessage: {
+                name: "Choose which extra agent progress outputs are shown in chat.",
+                options: [
+                  { optionName: selectedOption },
+                  { optionName: "🟢 Hide thinking" },
+                  { optionName: "🟢 Hide file changes" },
+                ],
+                selectableOptionsCount: 3,
+              },
+            },
+            messageTimestamp: "1782323910",
+            status: "PENDING",
+            participant: botPhoneJid,
+          }),
+        ],
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+            key: {
+              remoteJid: chatId,
+              fromMe: false,
+              id: "VOTE-LID-ECHO-SECRET-1",
+              participant: voterLidJid,
+              participantAlt: voterPhoneJid,
+              addressingMode: "lid",
+            },
+            messageTimestamp: 1782323913,
+            message: {
+              pollUpdateMessage: {
+                pollCreationMessageKey: {
+                  remoteJid: chatId,
+                  fromMe: true,
+                  id: pollMsgId,
+                  participant: botLidJid,
+                },
+                vote: createEncryptedPollVote({
+                  pollMsgId,
+                  pollCreatorJid: botLidJid,
+                  voterJid: voterLidJid,
+                  pollEncKey,
+                  encIv,
+                  selectedOption,
+                }),
+                senderTimestampMs: "1782323914269",
+              },
+            },
+          }),
+        ],
+      },
+    });
+
+    const result = await Promise.race([
+      replyHandled,
+      delay(5_000).then(() => "timeout"),
+    ]);
+    assert.deepEqual(result, { kind: "selected", ids: ["pinned_tool_status"] });
+    assert.ok(
+      sentMessages.some((entry) => "delete" in entry.message && /** @type {{ delete?: { id?: string } }} */ (entry.message).delete?.id === pollMsgId),
+      `Expected poll delete settlement, got ${JSON.stringify(sentMessages)}`,
+    );
+
+    await waitForTransportBackgroundWork();
+    const ingressRows = await getIngressRows(testDb, chatId);
+    assert.deepEqual(
+      ingressRows.map((row) => [row.source_event_type, row.state, row.last_error]),
+      [
+        ["messages.upsert", "done", null],
+        ["messages.upsert", "ignored", null],
+        ["messages.upsert", "done", null],
+      ],
     );
   });
 

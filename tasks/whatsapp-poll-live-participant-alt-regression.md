@@ -22,6 +22,12 @@ Investigate and fix live WhatsApp poll-backed select votes that still fail to se
 - Red proof: the new captured-shape select-runtime replay failed with the same `Unsupported state or unable to authenticate data` before production edits.
 - Fix: normalize `messageContextInfo.messageSecret` from base64 text to bytes before deriving the Baileys poll vote key.
 - Green proof: captured-shape select-runtime replay and transport-level `messages.upsert` selectMany replay now pass.
+- After commit `2b5a4e7`, a fresh `! restart` plus `!s show` at `2026-06-24 17:58 UTC` still produced durable journal vote rows stuck in `received` with the same Baileys GCM auth failure.
+- The fresh live ciphertext decrypts locally with the bot LID as poll creator, voter LID as voter, and the bot-authored poll echo's `messageSecret`, proving the crypto tuple is valid when using the WhatsApp echo payload.
+- The missing vertical slice was the durable ingress path: `messages.upsert` rows are serialized through the journal, bot-authored poll creation echoes were ignored before refreshing `sentPolls`, and encrypted vote byte fields can arrive as base64/JSON-shaped values instead of live Buffers.
+- Red proof: a journal-backed transport test that starts with an inbound WhatsApp command, stores rows in `whatsapp_ingress_journal`, observes a bot-authored poll echo, receives a raw vote, and asserts outbound delete/reply timed out before the fix.
+- Fix: observe bot-authored poll creation echoes before ignoring `fromMe` upserts, refresh the stored sent poll with the echo, and normalize encrypted vote byte fields before calling Baileys `decryptPollVote`.
+- Green proof: the journal-backed vertical slice now passes and asserts command `done`, poll echo `ignored`, vote `done`, with no journal errors.
 
 ## Constraints
 
@@ -43,7 +49,8 @@ Investigate and fix live WhatsApp poll-backed select votes that still fail to se
 - `pnpm test tests/select-runtime.test.js --test-name-pattern "base64 text"`: red before the fix, green after.
 - `pnpm test tests/select-runtime.test.js tests/whatsapp-transport.test.js`: passed.
 - `pnpm type-check`: passed.
+- `pnpm test tests/whatsapp-transport.test.js --test-name-pattern "refreshes sent poll secrets"`: red before the echo/byte normalization fix, green after.
+- `pnpm test tests/select-runtime.test.js tests/whatsapp-transport.test.js`: passed 45 tests after the echo/byte normalization fix.
+- `pnpm type-check`: passed after the echo/byte normalization fix.
 - Sandboxed `pnpm test --fast`: blocked by `listen EPERM` on localhost.
-- Host-level `pnpm test --fast`: passed 918 tests.
-- `pnpm run restart`: signal sent; host process remains on the pre-fix pid while this active Codex turn drains.
-- The old `17:38 UTC` prompt timed out before the fix could be loaded, so that poll card is stale for user-visible acknowledgement.
+- Host-level `pnpm test --fast`: passed 919 tests after the echo/byte normalization fix.
