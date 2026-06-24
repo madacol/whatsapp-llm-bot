@@ -604,7 +604,7 @@ describe("sendEvent – runtime events", () => {
       {
         pin: { id: "msg-1", remoteJid: "runtime-noise-chat", fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
       {
         text: "✅ *CODEX*  turn completed",
@@ -619,9 +619,100 @@ describe("sendEvent – runtime events", () => {
       {
         pin: { id: "msg-5", remoteJid: "runtime-noise-chat", fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
     ]);
+  });
+
+  it("unpins tracked status handles before starting a new turn status", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-status-new-turn-cleanup-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-2", chatId, status: "started" },
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 3600,
+      },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 2,
+      },
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-4", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 3600,
+      },
+    ]);
+  });
+
+  it("retries failed pre-turn cleanup unpins when the new turn completes", async () => {
+    const { sock, sent } = createMockSock();
+    const originalSendMessage = sock.sendMessage.bind(sock);
+    let failedPreTurnUnpin = false;
+    sock.sendMessage = async (chatId, msg) => {
+      const pin = /** @type {{ id?: unknown } | undefined} */ (msg.pin);
+      if (!failedPreTurnUnpin && msg.type === 2 && pin?.id === "msg-1") {
+        failedPreTurnUnpin = true;
+        throw new Error("temporary pre-turn unpin failure");
+      }
+      return originalSendMessage(chatId, msg);
+    };
+    const chatId = "runtime-failed-pre-turn-unpin-retry-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-2", chatId, status: "started" },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-2", chatId, status: "completed" },
+      },
+    });
+
+    const unpinIds = sent
+      .filter((entry) => entry.msg.type === 2 && entry.msg.pin && typeof entry.msg.pin === "object")
+      .map((entry) => /** @type {{ id?: string }} */ (entry.msg.pin).id);
+
+    assert.equal(failedPreTurnUnpin, true);
+    assert.deepEqual(unpinIds, ["msg-1", "msg-3"]);
   });
 
   it("shows thinking in the pinned status when reasoning updates", async () => {
@@ -653,7 +744,7 @@ describe("sendEvent – runtime events", () => {
       {
         pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
       {
         text: "💭 *LLM*  thinking",
@@ -837,13 +928,13 @@ describe("sendEvent – runtime events", () => {
       {
         pin: { id: "msg-1", remoteJid: "runtime-expired-turn-chat", fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
       { text: "✅ *CODEX*  turn completed", linkPreview: null },
       {
         pin: { id: "msg-3", remoteJid: "runtime-expired-turn-chat", fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
       {
         pin: { id: "msg-1", remoteJid: "runtime-expired-turn-chat", fromMe: true },
@@ -854,6 +945,76 @@ describe("sendEvent – runtime events", () => {
         type: 2,
       },
     ]);
+  });
+
+  it("retries failed stale replacement unpins when the turn completes", async () => {
+    const { sock, sent } = createMockSock();
+    const originalSendMessage = sock.sendMessage.bind(sock);
+    let failedStaleUnpin = false;
+    sock.sendMessage = async (chatId, msg) => {
+      const pin = /** @type {{ id?: unknown } | undefined} */ (msg.pin);
+      if (!failedStaleUnpin && msg.type === 2 && pin?.id === "msg-1") {
+        failedStaleUnpin = true;
+        throw new Error("temporary unpin failure");
+      }
+      return originalSendMessage(chatId, msg);
+    };
+    /** @type {import("../store.js").WhatsAppEditHandleRow | null} */
+    let savedHandle = null;
+    const expiredAt = "2000-01-01T00:00:00.000Z";
+    const store = {
+      saveWhatsAppEditHandle: async (/** @type {Parameters<import("../store.js").Store["saveWhatsAppEditHandle"]>[0]} */ input) => {
+        savedHandle = {
+          id: input.id,
+          chat_id: input.chatId,
+          message_key_json: input.messageKeyJson,
+          message_kind: input.messageKind,
+          created_at: input.createdAt,
+          expires_at: input.expiresAt,
+        };
+        return savedHandle;
+      },
+      getWhatsAppEditHandle: async () => savedHandle ? { ...savedHandle, expires_at: expiredAt } : null,
+      deleteExpiredWhatsAppEditHandles: async () => {},
+    };
+    const sendOptions = {
+      editHandleStore: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ (store)),
+    };
+    const chatId = "runtime-failed-stale-unpin-retry-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    }, undefined, undefined, sendOptions);
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "completed" },
+      },
+    }, undefined, undefined, sendOptions);
+
+    assert.equal(failedStaleUnpin, true);
+    assert.ok(
+      sent.some((entry) => entry.msg.pin
+        && typeof entry.msg.pin === "object"
+        && /** @type {{ id?: unknown }} */ (entry.msg.pin).id === "msg-1"
+        && entry.msg.type === 2),
+      `Expected turn completion to retry stale status unpin, got ${JSON.stringify(sent.map((entry) => entry.msg))}`,
+    );
+    assert.ok(
+      sent.some((entry) => entry.msg.pin
+        && typeof entry.msg.pin === "object"
+        && /** @type {{ id?: unknown }} */ (entry.msg.pin).id === "msg-3"
+        && entry.msg.type === 2),
+      `Expected turn completion to unpin replacement status, got ${JSON.stringify(sent.map((entry) => entry.msg))}`,
+    );
   });
 
   it("keeps raw read-title tools out of pinned runtime status", async () => {
@@ -899,7 +1060,7 @@ describe("sendEvent – runtime events", () => {
       {
         pin: { id: "msg-1", remoteJid: "runtime-raw-read-title-chat", fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
       { text: "🔧 *Read*  `bang-command-router.js`", linkPreview: null },
       {
@@ -1064,7 +1225,7 @@ describe("sendEvent – runtime events", () => {
       {
         pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
       {
         text: "🔧 *Search*  `needle` in *src*",

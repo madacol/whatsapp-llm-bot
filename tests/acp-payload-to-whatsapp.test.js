@@ -1269,7 +1269,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       {
         pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
         type: 1,
-        time: 86400,
+        time: 3600,
       },
       { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
       {

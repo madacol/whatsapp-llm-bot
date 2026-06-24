@@ -722,7 +722,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
     assert.deepEqual(pinnedStatus?.msg, {
       pin: { id: `sent-msg-${statusIndex}`, remoteJid: "e2e-acp-runtime-0@s.whatsapp.net", fromMe: true },
       type: 1,
-      time: 86400,
+      time: 3600,
     });
     assert.ok(
       sentMessages.some((entry) => entry.msg.edit

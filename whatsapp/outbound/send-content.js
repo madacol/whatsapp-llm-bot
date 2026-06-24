@@ -64,7 +64,7 @@ const inMemoryEditHandles = new Map();
  *   waiters: Array<{ resolve: () => void, reject: (error: unknown) => void }>,
  * }>} */
 const pendingEditDebounces = new Map();
-/** @type {Map<string, { handle?: MessageHandle, entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> }>} */
+/** @type {Map<string, PinnedTurnStatusState>} */
 const turnStatusByChat = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
 const runtimeStatusByChat = new Map();
@@ -173,6 +173,20 @@ function getRuntimeToolReadLineRange(tool) {
 }
 
 /**
+ * @typedef {{
+ *   key: string,
+ *   icon: string,
+ *   provider?: string,
+ *   summary: string,
+ *   reviewPrefix?: "👍" | "👎",
+ * }} PinnedTurnStatusEntry
+ *
+ * @typedef {{
+ *   handle?: MessageHandle,
+ *   entries: PinnedTurnStatusEntry[],
+ *   pinnedMessageKeys: import('@whiskeysockets/baileys').WAMessageKey[],
+ * }} PinnedTurnStatusState
+ *
  * @typedef {{
  *   id: string,
  *   chatId: string,
@@ -318,6 +332,41 @@ function getMessageKeyId(key) {
 }
 
 /**
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} left
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} right
+ * @returns {boolean}
+ */
+function messageKeysHaveSameId(left, right) {
+  const leftId = getMessageKeyId(left);
+  const rightId = getMessageKeyId(right);
+  return leftId !== undefined && leftId === rightId;
+}
+
+/**
+ * @param {PinnedTurnStatusState} state
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @returns {void}
+ */
+function rememberPinnedStatusKey(state, key) {
+  if (!key?.id || state.pinnedMessageKeys.some((existing) => messageKeysHaveSameId(existing, key))) {
+    return;
+  }
+  state.pinnedMessageKeys.push(serializeWhatsAppMessageKey(key));
+}
+
+/**
+ * @param {PinnedTurnStatusState} state
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @returns {void}
+ */
+function forgetPinnedStatusKey(state, key) {
+  if (!key?.id) {
+    return;
+  }
+  state.pinnedMessageKeys = state.pinnedMessageKeys.filter((existing) => !messageKeysHaveSameId(existing, key));
+}
+
+/**
  * @param {PinnedStatusDeliveryObserver | undefined} observer
  * @param {PinnedStatusDeliveryEvent} event
  * @returns {void}
@@ -342,12 +391,12 @@ function observePinnedStatusDelivery(observer, event) {
  * @param {string} chatId
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
  * @param {PinnedStatusDeliveryObserver | undefined} [observer]
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>}
  */
 async function pinWhatsAppMessage(sock, chatId, key, observer) {
   if (!key?.id) {
     observePinnedStatusDelivery(observer, { type: "pin.skipped", chatId });
-    return;
+    return false;
   }
   const messageId = getMessageKeyId(key);
   try {
@@ -356,6 +405,7 @@ async function pinWhatsAppMessage(sock, chatId, key, observer) {
       target: key,
     }));
     observePinnedStatusDelivery(observer, { type: "pin.succeeded", chatId, messageId });
+    return true;
   } catch (error) {
     observePinnedStatusDelivery(observer, {
       type: "pin.failed",
@@ -368,6 +418,7 @@ async function pinWhatsAppMessage(sock, chatId, key, observer) {
       messageId: key.id,
       error: formatErrorMessage(error),
     });
+    return false;
   }
 }
 
@@ -376,12 +427,12 @@ async function pinWhatsAppMessage(sock, chatId, key, observer) {
  * @param {string} chatId
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
  * @param {PinnedStatusDeliveryObserver | undefined} [observer]
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>}
  */
 async function unpinWhatsAppMessage(sock, chatId, key, observer) {
   if (!key?.id) {
     observePinnedStatusDelivery(observer, { type: "unpin.skipped", chatId });
-    return;
+    return false;
   }
   const messageId = getMessageKeyId(key);
   try {
@@ -390,6 +441,7 @@ async function unpinWhatsAppMessage(sock, chatId, key, observer) {
       target: key,
     }));
     observePinnedStatusDelivery(observer, { type: "unpin.succeeded", chatId, messageId });
+    return true;
   } catch (error) {
     observePinnedStatusDelivery(observer, {
       type: "unpin.failed",
@@ -402,6 +454,23 @@ async function unpinWhatsAppMessage(sock, chatId, key, observer) {
       messageId: key.id,
       error: formatErrorMessage(error),
     });
+    return false;
+  }
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {PinnedTurnStatusState} state
+ * @param {PinnedStatusDeliveryObserver | undefined} [observer]
+ * @returns {Promise<void>}
+ */
+async function unpinTrackedPinnedStatusMessages(sock, chatId, state, observer) {
+  const keys = [...state.pinnedMessageKeys];
+  for (const key of keys) {
+    if (await unpinWhatsAppMessage(sock, chatId, key, observer)) {
+      forgetPinnedStatusKey(state, key);
+    }
   }
 }
 
@@ -1744,8 +1813,16 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
   if (!state && !presentation.createsStatus) {
     return undefined;
   }
+  /** @type {import('@whiskeysockets/baileys').WAMessageKey[]} */
+  let retainedPinnedMessageKeys = [];
+  if (state && presentation.createsStatus && !presentation.closesStatus) {
+    await unpinTrackedPinnedStatusMessages(sock, chatId, state, sendOptions.pinnedStatusDeliveryObserver);
+    retainedPinnedMessageKeys = [...state.pinnedMessageKeys];
+    turnStatusByChat.delete(chatId);
+    state = undefined;
+  }
   if (!state) {
-    state = { entries: [] };
+    state = { entries: [], pinnedMessageKeys: retainedPinnedMessageKeys };
     turnStatusByChat.set(chatId, state);
   }
 
@@ -1762,7 +1839,9 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
       firstLine: getFirstLine(text),
       text,
     });
-    await pinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
+    if (await pinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver)) {
+      rememberPinnedStatusKey(state, state.handle?.messageKey);
+    }
   } else {
     try {
       await state.handle.update({ kind: "text", text });
@@ -1788,15 +1867,19 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
         firstLine: getFirstLine(text),
         text,
       });
-      await pinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
+      if (await pinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver)) {
+        rememberPinnedStatusKey(state, state.handle?.messageKey);
+      }
       if (getMessageKeyId(staleHandle.messageKey) !== getMessageKeyId(state.handle?.messageKey)) {
-        await unpinWhatsAppMessage(sock, chatId, staleHandle.messageKey, sendOptions.pinnedStatusDeliveryObserver);
+        if (await unpinWhatsAppMessage(sock, chatId, staleHandle.messageKey, sendOptions.pinnedStatusDeliveryObserver)) {
+          forgetPinnedStatusKey(state, staleHandle.messageKey);
+        }
       }
     }
   }
 
   if (presentation.closesStatus) {
-    await unpinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
+    await unpinTrackedPinnedStatusMessages(sock, chatId, state, sendOptions.pinnedStatusDeliveryObserver);
     turnStatusByChat.delete(chatId);
   }
   return state.handle;
