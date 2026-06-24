@@ -9,3 +9,4 @@ Completed task details are archived here instead of deleted.
 - Inspect self-reaction regression. [details](inspect-self-reaction-regression.md)
 - ACP client handles missing command startup without crashing.
 - ACP Codex command resolution hardening. [details](acp-codex-command-resolution.md)
+- Voice assistant client history merged into `whatsapp-llm-bot`. [details](merge-voice-assistant-client.md)
