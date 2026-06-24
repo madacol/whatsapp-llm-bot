@@ -6,7 +6,7 @@ User-visible failure and exact desired result, including acknowledgement, durabl
 
 ## Evidence
 
-Real input, logs, persisted state, trace, fixture, version, or other facts inspected before the fix.
+Real input, logs, persisted state, trace, fixture, version, or other facts inspected before the fix. If a prior fix failed, include the latest evidence that invalidated it.
 
 ## Vertical Red Proof
 
