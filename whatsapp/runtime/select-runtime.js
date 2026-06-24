@@ -346,7 +346,11 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
   }
 
   const voteJid = message.key.participant || message.key.remoteJid || "";
-  const isLidVote = isLidUser(voteJid);
+  const creationKeyParticipant = pollUpdate.pollCreationMessageKey?.participant || "";
+  const pollCreationKeyParticipant = pollCreation.key?.participant || "";
+  const isLidVote = isLidUser(voteJid)
+    || isLidUser(creationKeyParticipant)
+    || isLidUser(pollCreationKeyParticipant);
 
   /** @type {string} */
   let meId;
@@ -358,10 +362,14 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
   if (isLidVote) {
     meId = sock.user?.lid
       ? jidNormalizedUser(sock.user.lid)
-      : jidNormalizedUser(sock.user?.id ?? "");
+      : pollUpdate.pollCreationMessageKey?.fromMe === true && isLidUser(creationKeyParticipant)
+        ? creationKeyParticipant
+        : pollCreation.key?.fromMe === true && isLidUser(pollCreationKeyParticipant)
+          ? pollCreationKeyParticipant
+          : jidNormalizedUser(sock.user?.id ?? "");
     pollCreatorJid = pollCreation.key?.fromMe
       ? meId
-      : (pollCreation.key?.participant || pollCreation.key?.remoteJid || "");
+      : (pollUpdate.pollCreationMessageKey?.participant || pollCreation.key?.participant || pollCreation.key?.remoteJid || "");
     voterJid = message.key.fromMe
       ? meId
       : (message.key.participant || message.key.remoteJid || "");
