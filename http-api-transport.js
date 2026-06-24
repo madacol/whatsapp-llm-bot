@@ -1,11 +1,15 @@
 import { createServer } from "node:http";
 import { createLogger } from "./logger.js";
 import { createHttpTransportTurnLedger } from "./http-api-transport-ledger.js";
+import { mediaPathToMimeType, readMediaBuffer, validateMediaPath, writeMedia } from "./media-store.js";
+import { synthesizeSpeechForHttpApi } from "./http-api-speech.js";
 
 const log = createLogger("http-api-transport");
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_MAX_EVENTS = 1000;
 const MAX_BODY_BYTES = 1024 * 1024;
+const DEFAULT_MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+const CORS_ALLOWED_HEADERS = "authorization,content-type,last-event-id,x-request-id,x-chat-id,x-sender-id,x-sender-name,x-timestamp";
 
 /**
  * @typedef {{
@@ -33,15 +37,28 @@ const MAX_BODY_BYTES = 1024 * 1024;
  *   senderIds: string[];
  *   senderName: string;
  *   timestamp: Date;
- *   content: [TextContentBlock];
+ *   content: [TextContentBlock] | [AudioContentBlock];
  *   facts: TurnFacts;
  * }} HttpApiTurnPayload
+ *
+ * @typedef {{
+ *   text: string;
+ *   chatId: string;
+ *   turnId: string;
+ * }} HttpApiSpeechSynthesisInput
+ *
+ * @typedef {{
+ *   buffer: Buffer;
+ *   mimeType: string;
+ * }} HttpApiSpeechSynthesisResult
  *
  * @typedef {{
  *   port?: number;
  *   host?: string;
  *   authToken?: string;
  *   maxEvents?: number;
+ *   maxAudioBytes?: number;
+ *   synthesizeSpeech?: (input: HttpApiSpeechSynthesisInput) => Promise<HttpApiSpeechSynthesisResult | null | undefined>;
  * }} HttpApiTransportOptions
  *
  * @typedef {ChatTransport & {
@@ -136,7 +153,7 @@ function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type,last-event-id",
+    "access-control-allow-headers": CORS_ALLOWED_HEADERS,
     "content-type": "application/json; charset=utf-8",
   });
   res.end(JSON.stringify(payload));
@@ -150,16 +167,17 @@ function sendNoContent(res) {
   res.writeHead(204, {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type,last-event-id",
+    "access-control-allow-headers": CORS_ALLOWED_HEADERS,
   });
   res.end();
 }
 
 /**
  * @param {import("node:http").IncomingMessage} req
- * @returns {Promise<unknown>}
+ * @param {number} maxBytes
+ * @returns {Promise<Buffer>}
  */
-async function readJsonBody(req) {
+async function readBody(req, maxBytes) {
   /** @type {Buffer[]} */
   const chunks = [];
   let totalBytes = 0;
@@ -167,17 +185,34 @@ async function readJsonBody(req) {
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buffer.byteLength;
-    if (totalBytes > MAX_BODY_BYTES) {
+    if (totalBytes > maxBytes) {
       throw new Error("Request body is too large");
     }
     chunks.push(buffer);
   }
+  return Buffer.concat(chunks);
+}
 
-  const raw = Buffer.concat(chunks).toString("utf8");
+/**
+ * @param {import("node:http").IncomingMessage} req
+ * @returns {Promise<unknown>}
+ */
+async function readJsonBody(req) {
+  const body = await readBody(req, MAX_BODY_BYTES);
+  const raw = body.toString("utf8");
   if (!raw.trim()) {
     return null;
   }
   return JSON.parse(raw);
+}
+
+/**
+ * @param {import("node:http").IncomingMessage} req
+ * @param {number} maxBytes
+ * @returns {Promise<Buffer>}
+ */
+async function readBinaryBody(req, maxBytes) {
+  return readBody(req, maxBytes);
 }
 
 /**
@@ -232,6 +267,69 @@ function normalizeTurnPayload(body) {
 }
 
 /**
+ * @param {import("node:http").IncomingHttpHeaders} headers
+ * @param {URLSearchParams} searchParams
+ * @param {string} name
+ * @returns {string | null}
+ */
+function metadataString(headers, searchParams, name) {
+  return nonEmptyString(headers[`x-${name}`]) ?? nonEmptyString(searchParams.get(name));
+}
+
+/**
+ * @param {string | string[] | undefined} value
+ * @returns {string | null}
+ */
+function contentTypeHeader(value) {
+  if (Array.isArray(value)) {
+    return nonEmptyString(value[0]);
+  }
+  return nonEmptyString(value);
+}
+
+/**
+ * @param {import("node:http").IncomingHttpHeaders} headers
+ * @param {URLSearchParams} searchParams
+ * @param {AudioContentBlock} audioBlock
+ * @returns {HttpApiTurnPayload | null}
+ */
+function normalizeAudioTurnPayload(headers, searchParams, audioBlock) {
+  const requestId = metadataString(headers, searchParams, "request-id");
+  const chatId = metadataString(headers, searchParams, "chat-id");
+  if (!requestId || !chatId) {
+    return null;
+  }
+  const senderId = metadataString(headers, searchParams, "sender-id") ?? "api-user";
+  return {
+    requestId,
+    chatId,
+    senderIds: [senderId],
+    senderName: metadataString(headers, searchParams, "sender-name") ?? senderId,
+    timestamp: normalizeTimestamp(metadataString(headers, searchParams, "timestamp")),
+    content: [audioBlock],
+    facts: {
+      isGroup: false,
+      addressedToBot: true,
+      repliedToBot: false,
+    },
+  };
+}
+
+/**
+ * @param {string} baseUrl
+ * @param {string} mediaPath
+ * @param {string} mimeType
+ * @returns {{ path: string, mimeType: string, url: string }}
+ */
+function buildAudioResponse(baseUrl, mediaPath, mimeType) {
+  return {
+    path: mediaPath,
+    mimeType,
+    url: `${baseUrl}/api/media/${encodeURIComponent(mediaPath)}`,
+  };
+}
+
+/**
  * Create a simple HTTP API transport for non-WhatsApp clients.
  *
  * @param {HttpApiTransportOptions} [options]
@@ -242,6 +340,8 @@ export async function createHttpApiTransport(options = {}) {
   const requestedPort = options.port ?? 0;
   const authToken = options.authToken ?? "";
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+  const maxAudioBytes = options.maxAudioBytes ?? DEFAULT_MAX_AUDIO_BYTES;
+  const synthesizeSpeech = options.synthesizeSpeech ?? synthesizeSpeechForHttpApi;
   /** @type {(turn: ChatTurn) => Promise<void>} */
   let onTurn = async () => {};
   /** @type {import("node:http").Server | null} */
@@ -426,6 +526,155 @@ export async function createHttpApiTransport(options = {}) {
   }
 
   /**
+   * @param {import("node:http").IncomingMessage} req
+   * @param {import("node:http").ServerResponse} res
+   * @param {string} transportId
+   * @param {URLSearchParams} searchParams
+   * @param {boolean} waitForCompletion
+   * @returns {Promise<void>}
+   */
+  async function handleSubmitAudioTurn(req, res, transportId, searchParams, waitForCompletion) {
+    const mimeType = contentTypeHeader(req.headers["content-type"]);
+    if (!mimeType || !mimeType.toLowerCase().startsWith("audio/")) {
+      sendJson(res, 400, { error: "Expected audio request body with an audio/* content-type" });
+      return;
+    }
+    if (!metadataString(req.headers, searchParams, "request-id") || !metadataString(req.headers, searchParams, "chat-id")) {
+      sendJson(res, 400, { error: "Expected x-request-id and x-chat-id headers for audio turns" });
+      return;
+    }
+
+    let body;
+    try {
+      body = await readBinaryBody(req, maxAudioBytes);
+    } catch {
+      sendJson(res, 400, { error: "Audio request body is too large" });
+      return;
+    }
+    if (body.byteLength === 0) {
+      sendJson(res, 400, { error: "Expected non-empty audio request body" });
+      return;
+    }
+
+    const mediaPath = await writeMedia(body, mimeType, "audio");
+    const payload = normalizeAudioTurnPayload(req.headers, searchParams, {
+      type: "audio",
+      path: mediaPath,
+      mime_type: mimeType,
+    });
+    if (!payload) {
+      sendJson(res, 400, { error: "Expected x-request-id and x-chat-id headers for audio turns" });
+      return;
+    }
+
+    const ledgerTurn = ledger.createOrGetTurn(transportId, payload);
+    if (!ledgerTurn.created) {
+      const existing = ledgerTurn.record;
+      sendJson(res, waitForCompletion && existing.status === "completed" ? 200 : 202, {
+        turnId: existing.turnId,
+        requestId: existing.requestId,
+        status: existing.status === "completed" && waitForCompletion ? "completed" : "accepted",
+        ...(waitForCompletion && existing.status === "completed" ? { text: existing.text } : {}),
+      });
+      return;
+    }
+
+    const record = ledgerTurn.record;
+    const turn = buildTurn(transportId, payload, record);
+    ledger.setActiveTurn(payload.chatId, record.turnId);
+
+    /** @type {{ path: string, mimeType: string, url: string } | null} */
+    let audio = null;
+    const runTurn = async () => {
+      try {
+        updateTurnStatus(record, "running");
+        await onTurn(turn);
+        if (record.text.trim()) {
+          const speech = await synthesizeSpeech({
+            text: record.text,
+            chatId: payload.chatId,
+            turnId: record.turnId,
+          });
+          if (speech?.buffer?.byteLength && speech.mimeType) {
+            const outputPath = await writeMedia(speech.buffer, speech.mimeType, "audio");
+            const audioEventBlock = {
+              type: /** @type {const} */ ("audio"),
+              path: outputPath,
+              mime_type: speech.mimeType,
+            };
+            appendEvent(payload.chatId, {
+              kind: "assistant_output",
+              content: [audioEventBlock],
+            }, record.turnId);
+            audio = buildAudioResponse(transport.baseUrl, outputPath, speech.mimeType);
+          }
+        }
+        updateTurnStatus(record, "completed");
+      } catch (error) {
+        updateTurnStatus(record, "failed");
+        log.error("HTTP API transport audio turn handler failed:", error);
+      } finally {
+        ledger.clearActiveTurn(payload.chatId, record.turnId);
+      }
+    };
+
+    if (!waitForCompletion) {
+      sendJson(res, 202, {
+        turnId: record.turnId,
+        requestId: record.requestId,
+        status: "accepted",
+      });
+      void runTurn();
+      return;
+    }
+
+    await runTurn();
+    if (record.status === "failed") {
+      sendJson(res, 500, {
+        turnId: record.turnId,
+        requestId: record.requestId,
+        status: "failed",
+      });
+      return;
+    }
+
+    sendJson(res, 200, {
+      turnId: record.turnId,
+      requestId: record.requestId,
+      status: record.status,
+      text: record.text,
+      ...(audio ? { audio } : {}),
+    });
+  }
+
+  /**
+   * @param {import("node:http").ServerResponse} res
+   * @param {string} encodedMediaPath
+   * @returns {Promise<void>}
+   */
+  async function handleMediaDownload(res, encodedMediaPath) {
+    const mediaPath = decodePathPart(encodedMediaPath);
+    if (!mediaPath) {
+      sendJson(res, 400, { error: "Invalid media path" });
+      return;
+    }
+    try {
+      const validatedPath = validateMediaPath(mediaPath);
+      const buffer = await readMediaBuffer(validatedPath);
+      res.writeHead(200, {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET,POST,OPTIONS",
+        "access-control-allow-headers": CORS_ALLOWED_HEADERS,
+        "content-length": String(buffer.byteLength),
+        "content-type": mediaPathToMimeType(validatedPath, undefined),
+      });
+      res.end(buffer);
+    } catch {
+      sendJson(res, 404, { error: "Media not found" });
+    }
+  }
+
+  /**
    * @param {import("node:http").ServerResponse} res
    * @param {string} chatId
    * @param {number} after
@@ -480,6 +729,23 @@ export async function createHttpApiTransport(options = {}) {
         return;
       }
       await handleSubmitTurn(req, res, transportId, url.searchParams.get("wait") === "true");
+      return;
+    }
+
+    const audioSubmitMatch = url.pathname.match(/^\/api\/transports\/([^/]+)\/audio-turns$/);
+    if (req.method === "POST" && audioSubmitMatch) {
+      const transportId = decodePathPart(audioSubmitMatch[1] ?? "");
+      if (!transportId) {
+        sendJson(res, 400, { error: "Invalid transport id" });
+        return;
+      }
+      await handleSubmitAudioTurn(req, res, transportId, url.searchParams, url.searchParams.get("wait") === "true");
+      return;
+    }
+
+    const mediaMatch = url.pathname.match(/^\/api\/media\/([^/]+)$/);
+    if (req.method === "GET" && mediaMatch) {
+      await handleMediaDownload(res, mediaMatch[1] ?? "");
       return;
     }
 

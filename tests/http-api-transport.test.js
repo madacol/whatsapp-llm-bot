@@ -234,6 +234,86 @@ describe("http-api transport", () => {
     assert.equal(body.text, "Light is on.");
   });
 
+  it("accepts raw audio turns and returns synthesized assistant audio", async () => {
+    const transport = await createHttpApiTransport({
+      port: 0,
+      host: "127.0.0.1",
+      authToken: TOKEN,
+      synthesizeSpeech: async ({ text }) => {
+        assert.equal(text, "The answer is ready.");
+        return {
+          buffer: Buffer.from("fake assistant mp3"),
+          mimeType: "audio/mpeg",
+        };
+      },
+    });
+    transports.push(transport);
+    /** @type {ChatTurn[]} */
+    const turns = [];
+    await transport.start(async (turn) => {
+      turns.push(turn);
+      await turn.io.reply({
+        kind: "assistant_output",
+        content: [{ type: "text", text: "The answer is ready." }],
+      });
+    });
+
+    const res = await fetch(`${transport.baseUrl}/api/transports/voice/audio-turns?wait=true`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        "content-type": "audio/ogg; codecs=opus",
+        "x-request-id": "audio-request",
+        "x-chat-id": "api:client-1",
+        "x-sender-id": "android-user",
+        "x-sender-name": "Android User",
+      },
+      body: Buffer.from("fake ogg opus"),
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.requestId, "audio-request");
+    assert.equal(body.status, "completed");
+    assert.equal(body.text, "The answer is ready.");
+    assert.equal(body.audio.mimeType, "audio/mpeg");
+    assert.match(body.audio.path, /^[a-f0-9]{64}\.mp3$/);
+    assert.equal(body.audio.url, `${transport.baseUrl}/api/media/${body.audio.path}`);
+
+    assert.equal(turns.length, 1);
+    assert.equal(turns[0]?.senderName, "Android User");
+    assert.deepEqual(turns[0]?.senderIds, ["android-user"]);
+    assert.deepEqual(turns[0]?.content, [
+      {
+        type: "audio",
+        path: turns[0]?.content[0]?.path,
+        mime_type: "audio/ogg; codecs=opus",
+      },
+    ]);
+    assert.match(turns[0]?.content[0]?.path ?? "", /^[a-f0-9]{64}\.ogg$/);
+
+    const audioRes = await fetch(body.audio.url, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    assert.equal(audioRes.status, 200);
+    assert.equal(audioRes.headers.get("content-type"), "audio/mpeg");
+    assert.equal(Buffer.from(await audioRes.arrayBuffer()).toString("utf8"), "fake assistant mp3");
+
+    const eventsRes = await fetch(`${transport.baseUrl}/api/transports/voice/events?chatId=${encodeURIComponent("api:client-1")}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    const eventsBody = await eventsRes.json();
+    assert.equal(eventsBody.events.length, 2);
+    assert.deepEqual(eventsBody.events.map((event) => event.kind), ["assistant_output", "assistant_output"]);
+    assert.deepEqual(eventsBody.events[1].event.content, [
+      {
+        type: "audio",
+        path: body.audio.path,
+        mime_type: "audio/mpeg",
+      },
+    ]);
+  });
+
   it("returns turn status by turnId", async () => {
     const transport = await startTransport();
     const res = await postTurn(transport, turnPayload("status-request"));

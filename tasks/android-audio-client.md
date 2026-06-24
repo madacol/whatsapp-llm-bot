@@ -34,9 +34,31 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 - Build a native Android POC under `clients/android/` that owns wake phrase detection, recording, upload, and playback.
 - Use `sherpa-onnx` keyword spotting on Android for wake detection rather than Android cloud speech recognition or openWakeWord.
 
-## Blocker
+## Current Status
 
-Choose the first implementation slice and transport mode before behavior-changing edits.
+Active. First implementation slice is a complete-clip POC: Android records a full utterance after wake-word detection, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
+
+Android SDK setup/build is blocked until disk space is increased. The target is at least 4 GB free, preferably 6 GB.
+
+## Progress
+
+- Added backend raw audio turn API: `POST /api/transports/:transportId/audio-turns?wait=true` accepts `audio/*` request bodies with `x-request-id`, `x-chat-id`, sender headers, stores uploaded audio in `.media/`, and runs the normal turn handler with an `AudioContentBlock`.
+- Added authenticated media download API: `GET /api/media/:mediaPath`.
+- Added provider-backed HTTP API speech synthesis using the same OpenAI/OpenRouter direction as `clients/voice-pi/tts_openrouter.py`.
+- Added a small Android source scaffold under `clients/android/` with manual record/send/playback against the audio-turn API.
+- Added an explicit Android wake-word seam. The sherpa-onnx concrete detector still needs the Android KWS native libraries/assets and real-device testing.
+
+## Verification
+
+- `pnpm type-check`
+- `pnpm exec node --test tests/http-api-transport.test.js`
+- `pnpm test:fast` passed 911 tests.
+
+## Remaining
+
+- Install Android SDK/Gradle tooling on a machine with enough free disk.
+- Vendor or fetch sherpa-onnx Android KWS assets/native libraries and replace the current placeholder detector.
+- Build/install the APK on a physical Android device and verify microphone permission, audio upload, assistant audio playback, and wake-word behavior with `adb logcat`.
 
 ## Acceptance
 
