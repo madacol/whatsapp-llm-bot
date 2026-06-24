@@ -16,6 +16,7 @@ import { createSelectRuntime } from "./select-runtime.js";
  * @typedef {{
  *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>, sock: import('@whiskeysockets/baileys').WASocket) => void;
  *   handlePollVote: (event: ConfirmPollVoteEvent) => boolean;
+ *   observePollCreationMessage: (message: import('@whiskeysockets/baileys').WAMessage) => boolean;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<ConfirmPollVoteEvent | null>;
  *   resolvePollUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate, sock: import('@whiskeysockets/baileys').WASocket) => Promise<ConfirmPollVoteEvent | null>;
  *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
@@ -36,6 +37,10 @@ export function createConfirmRuntime() {
 
     handlePollVote(event) {
       return pollRuntime.handlePollVote(event);
+    },
+
+    observePollCreationMessage(message) {
+      return pollRuntime.observePollCreationMessage(message);
     },
 
     resolvePollVoteMessage(message, sock) {
