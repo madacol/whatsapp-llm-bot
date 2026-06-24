@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildWhatsAppUpsertShapeDiagnostic,
+  captureWhatsAppMessageUpdateEvent,
   captureWhatsAppReactionEvent,
   captureWhatsAppReactionRuntimeEvent,
   captureWhatsAppUpsertEvent,
@@ -94,6 +95,7 @@ describe("WhatsApp upsert shape diagnostics", () => {
     });
 
     captureWhatsAppUpsertEvent({ type: "notify", messages: [message] }, { fixtureCapture });
+    captureWhatsAppMessageUpdateEvent([{ key: { id: "poll-1", remoteJid: "chat@g.us" }, update: { pollUpdates: [] } }], { fixtureCapture });
     captureWhatsAppReactionEvent([{ key: { id: "msg-1", remoteJid: "chat@g.us" }, reaction: { text: "👁" } }], { fixtureCapture });
     captureWhatsAppReactionRuntimeEvent(
       {
@@ -111,6 +113,7 @@ describe("WhatsApp upsert shape diagnostics", () => {
       captured.map((entry) => [entry.seam, entry.direction, entry.event]),
       [
         ["whatsapp.inbound", "baileys_to_shell", "messages.upsert"],
+        ["whatsapp.inbound", "baileys_to_shell", "messages.update"],
         ["whatsapp.reaction", "baileys_to_shell", "messages.reaction"],
         ["whatsapp.reaction", "runtime", "reaction.received"],
       ],

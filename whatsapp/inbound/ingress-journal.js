@@ -1,4 +1,5 @@
 export const WHATSAPP_INGRESS_SOURCE_UPSERT = "messages.upsert";
+export const WHATSAPP_INGRESS_SOURCE_UPDATE = "messages.update";
 export const WHATSAPP_INGRESS_SOURCE_REACTION = "messages.reaction";
 
 /**
@@ -30,6 +31,53 @@ export function createUpsertIngressKey(message) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function formatPollSelectedOption(value) {
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString("hex");
+  }
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * @param {unknown} update
+ * @returns {string}
+ */
+function getPollUpdateIdentity(update) {
+  if (!isRecord(update) || !isRecord(update.pollUpdateMessageKey)) {
+    return "missing-poll-update-key";
+  }
+  const key = update.pollUpdateMessageKey;
+  const messageId = typeof key.id === "string" ? key.id : "missing-id";
+  const participant = typeof key.participant === "string" ? key.participant : "";
+  const remoteJid = typeof key.remoteJid === "string" ? key.remoteJid : "";
+  const selectedOptions = isRecord(update.vote) && Array.isArray(update.vote.selectedOptions)
+    ? update.vote.selectedOptions.map(formatPollSelectedOption).join("+")
+    : "";
+  const senderTimestampMs = typeof update.senderTimestampMs === "number" || typeof update.senderTimestampMs === "string"
+    ? update.senderTimestampMs
+    : "";
+  return `${remoteJid}:${messageId}:${participant}:${selectedOptions}:${senderTimestampMs}`;
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WAMessageUpdate} update
+ * @returns {{ chatId: string, ingressKey: string }}
+ */
+export function createMessageUpdateIngressIdentity(update) {
+  const chatId = update.key.remoteJid || "unknown-chat";
+  const messageId = update.key.id || "missing-id";
+  const pollUpdates = update.update.pollUpdates ?? [];
+  const pollUpdateIds = pollUpdates.map(getPollUpdateIdentity).join(",");
+  return {
+    chatId,
+    ingressKey: `${WHATSAPP_INGRESS_SOURCE_UPDATE}:${chatId}:${messageId}:${pollUpdateIds || "no-poll-updates"}`,
+  };
+}
+
+/**
  * @param {unknown} event
  * @param {number} index
  * @returns {{ chatId: string, ingressKey: string }}
@@ -54,7 +102,7 @@ export function createReactionIngressIdentity(event, index) {
 
 /**
  * @param {unknown} value
- * @returns {value is { kind: "messages.upsert", message: BaileysMessage } | { kind: "messages.reaction", reactions: unknown[] }}
+ * @returns {value is { kind: "messages.upsert", message: BaileysMessage } | { kind: "messages.update", update: import('@whiskeysockets/baileys').WAMessageUpdate } | { kind: "messages.reaction", reactions: unknown[] }}
  */
 export function isWhatsAppIngressPayload(value) {
   if (!isRecord(value) || typeof value.kind !== "string") {
@@ -62,6 +110,9 @@ export function isWhatsAppIngressPayload(value) {
   }
   if (value.kind === WHATSAPP_INGRESS_SOURCE_UPSERT) {
     return isRecord(value.message);
+  }
+  if (value.kind === WHATSAPP_INGRESS_SOURCE_UPDATE) {
+    return isRecord(value.update);
   }
   return value.kind === WHATSAPP_INGRESS_SOURCE_REACTION && Array.isArray(value.reactions);
 }

@@ -92,6 +92,7 @@ export function getPollCreationData(msg) {
  *   createSelectMany: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
  *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
+ *   resolvePollUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
  *   clear: () => void;
  * }} SelectRuntime
@@ -277,6 +278,47 @@ function buildSelectManyResult(selectedIds, cancelIds, hasInteracted) {
 }
 
 /**
+ * @param {readonly Uint8Array[]} selectedOptions
+ * @returns {string[]}
+ */
+function toSelectedOptionHashes(selectedOptions) {
+  return selectedOptions.map((hash) => Buffer.from(hash).toString("hex"));
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WAMessage} pollCreation
+ * @param {readonly Uint8Array[]} selectedOptions
+ * @returns {string[]}
+ */
+function resolveSelectedPollOptionNames(pollCreation, selectedOptions) {
+  const pollData = getPollCreationData(pollCreation.message);
+  const options = pollData?.options ?? [];
+  const selectedHashes = toSelectedOptionHashes(selectedOptions);
+
+  return options
+    .filter((option) => {
+      if (!option.optionName) return false;
+      const optionHash = createHash("sha256").update(option.optionName).digest("hex");
+      return selectedHashes.includes(optionHash);
+    })
+    .map((option) => option.optionName ?? "");
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @returns {Promise<string>}
+ */
+async function normalizePollChatId(sock, chatId) {
+  if (!isLidUser(chatId)) {
+    return chatId;
+  }
+
+  const phoneNumber = await sock.signalRepository.lidMapping.getPNForLID(chatId);
+  return phoneNumber ? jidNormalizedUser(phoneNumber) : chatId;
+}
+
+/**
  * Decrypt a poll vote message and resolve the selected option names.
  * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
  * @param {import('@whiskeysockets/baileys').WAMessage} message
@@ -336,27 +378,42 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
     voterJid,
   });
 
-  const pollData = getPollCreationData(pollCreation.message);
-  const options = pollData?.options ?? [];
-  const selectedHashes = (decrypted.selectedOptions ?? []).map((hash) => Buffer.from(hash).toString("hex"));
-
-  const selectedOptions = options
-    .filter((option) => {
-      if (!option.optionName) return false;
-      const optionHash = createHash("sha256").update(option.optionName).digest("hex");
-      return selectedHashes.includes(optionHash);
-    })
-    .map((option) => option.optionName ?? "");
+  const selectedOptions = resolveSelectedPollOptionNames(pollCreation, decrypted.selectedOptions ?? []);
 
   let chatId = message.key.remoteJid || pollCreation.key?.remoteJid || "";
-  if (isLidUser(chatId)) {
-    const phoneNumber = await sock.signalRepository.lidMapping.getPNForLID(chatId);
-    if (phoneNumber) {
-      chatId = jidNormalizedUser(phoneNumber);
-    }
-  }
+  chatId = await normalizePollChatId(sock, chatId);
 
   return { chatId, pollMsgId: creationKeyId, selectedOptions };
+}
+
+/**
+ * Resolve a decrypted Baileys `messages.update` poll update into a runtime vote.
+ * Baileys decrypts pollUpdateMessage upserts and emits the usable vote in
+ * update.pollUpdates.
+ * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
+ * @param {import('@whiskeysockets/baileys').WAMessageUpdate} update
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {Promise<PollVoteEvent | null>}
+ */
+async function resolveDecryptedPollUpdate(sentPolls, update, sock) {
+  const pollMsgId = update.key?.id;
+  if (!pollMsgId) return null;
+
+  const pollCreation = sentPolls.get(pollMsgId);
+  if (!pollCreation) {
+    log.debug(`Poll creation not found in sentPolls for messages.update id=${pollMsgId}`);
+    return null;
+  }
+
+  const pollUpdates = update.update?.pollUpdates ?? [];
+  const latestVote = [...pollUpdates].reverse().find((pollUpdate) => pollUpdate.vote)?.vote;
+  if (!latestVote) {
+    return null;
+  }
+
+  const selectedOptions = resolveSelectedPollOptionNames(pollCreation, latestVote.selectedOptions ?? []);
+  const chatId = await normalizePollChatId(sock, update.key.remoteJid || pollCreation.key?.remoteJid || "");
+  return { chatId, pollMsgId, selectedOptions };
 }
 
 /**
@@ -618,6 +675,16 @@ export function createSelectRuntime() {
      */
     resolvePollVoteMessage(message, sock) {
       return decryptAndResolvePollVote(sentPolls, message, sock);
+    },
+
+    /**
+     * Resolve a decrypted incoming `messages.update` poll vote.
+     * @param {import('@whiskeysockets/baileys').WAMessageUpdate} update
+     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     * @returns {Promise<PollVoteEvent | null>}
+     */
+    resolvePollUpdate(update, sock) {
+      return resolveDecryptedPollUpdate(sentPolls, update, sock);
     },
 
     get size() {

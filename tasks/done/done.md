@@ -10,3 +10,4 @@ Completed task details are archived here instead of deleted.
 - ACP client handles missing command startup without crashing.
 - ACP Codex command resolution hardening. [details](acp-codex-command-resolution.md)
 - Voice assistant client history merged into `whatsapp-llm-bot`. [details](merge-voice-assistant-client.md)
+- `!s show` poll votes delivered through Baileys `messages.update`. [details](show-settings-poll-no-response.md)

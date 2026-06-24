@@ -1,12 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createSelectRuntime } from "../whatsapp/runtime/select-runtime.js";
 
 /**
  * Create a mock socket that captures poll payloads.
  * @returns {{
  *   sock: {
- *     sendMessage: (chatId: string, message: Record<string, unknown>) => Promise<{ key: { id: string, remoteJid: string } } | null>;
+ *     sendMessage: (chatId: string, message: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
  *   };
  *   sentMessages: Array<{ chatId: string, message: Record<string, unknown> }>;
  * }}
@@ -26,6 +27,13 @@ function createMockSock() {
           key: {
             id: "poll-1",
             remoteJid: chatId,
+          },
+          message: {
+            pollCreationMessageV3: {
+              options: (/** @type {{ poll?: { values?: unknown } }} */ (message).poll?.values ?? [])
+                .filter((value) => typeof value === "string")
+                .map((value) => ({ optionName: value })),
+            },
           },
         };
       },
@@ -206,6 +214,58 @@ describe("createSelectRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 2900));
 
     assert.deepEqual(await selectionPromise, { kind: "unchanged" });
+    assert.deepEqual(sentMessages[sentMessages.length - 1]?.message, {
+      delete: { id: "poll-1", remoteJid: "chat-1" },
+    });
+  });
+
+  it("resolves decrypted poll updates delivered on messages.update", async () => {
+    const registry = createSelectRuntime();
+    const { sock, sentMessages } = createMockSock();
+    const selectMany = registry.createSelectMany(sock, "chat-1");
+
+    const selectionPromise = selectMany(
+      "Pick any",
+      [
+        { id: "commands", label: "commands" },
+        { id: "thinking", label: "thinking" },
+      ],
+      { deleteOnSelect: true },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const pollMessage = sentMessages.find((entry) => "poll" in entry.message);
+    assert.ok(pollMessage, "expected selectMany() to send a poll message");
+
+    const poll = pollMessage.message.poll;
+    assert.ok(poll && typeof poll === "object", "expected poll payload");
+    assert.ok(Array.isArray(poll.values), "expected poll values array");
+    assert.equal(poll.values[0], "commands");
+
+    const selectedOptionHash = createHash("sha256").update(poll.values[0]).digest();
+    const pollVoteEvent = await registry.resolvePollUpdate({
+      key: { id: "poll-1", remoteJid: "chat-1" },
+      update: {
+        pollUpdates: [{
+          pollUpdateMessageKey: {
+            id: "vote-1",
+            remoteJid: "chat-1",
+            participant: "user@s.whatsapp.net",
+          },
+          vote: { selectedOptions: [selectedOptionHash] },
+        }],
+      },
+    }, /** @type {import("@whiskeysockets/baileys").WASocket} */ (sock));
+
+    assert.deepEqual(pollVoteEvent, {
+      chatId: "chat-1",
+      pollMsgId: "poll-1",
+      selectedOptions: ["commands"],
+    });
+    assert.equal(registry.handlePollVote(pollVoteEvent), true);
+
+    assert.deepEqual(await selectionPromise, { kind: "selected", ids: ["commands"] });
     assert.deepEqual(sentMessages[sentMessages.length - 1]?.message, {
       delete: { id: "poll-1", remoteJid: "chat-1" },
     });
