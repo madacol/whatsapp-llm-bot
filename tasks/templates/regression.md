@@ -12,9 +12,13 @@ The exact behavior that must be true when this is fixed. Include visible output,
 
 Captured input, logs, state, persisted rows, screenshots, traces, commits, versions, or other facts used before choosing a fix.
 
-## Highest Seam Reproduction
+## Vertical Reproduction
 
-The broadest practical test/replay that exercises the same behavior path the user cares about.
+A test/replay that starts at the real entry point and follows the behavior to the desired outcome. Note if it is temporary diagnostic scaffolding.
+
+## Failing Seam
+
+Where the vertical reproduction stops or proves the problem is located.
 
 ## Red Proof
 
