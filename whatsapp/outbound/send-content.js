@@ -1456,6 +1456,14 @@ function pinnedStatusContainsOnlyTurnAndActions(state) {
 }
 
 /**
+ * @param {{ entries: Array<{ key: string }> } | undefined} state
+ * @returns {boolean}
+ */
+function pinnedStatusHasTurnEntry(state) {
+  return !!state && state.entries.some((entry) => entry.key === "turn");
+}
+
+/**
  * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
  * @returns {boolean}
  */
@@ -1815,7 +1823,7 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
   }
   /** @type {import('@whiskeysockets/baileys').WAMessageKey[]} */
   let retainedPinnedMessageKeys = [];
-  if (state && presentation.createsStatus && !presentation.closesStatus) {
+  if (state && presentation.createsStatus && !presentation.closesStatus && pinnedStatusHasTurnEntry(state)) {
     await unpinTrackedPinnedStatusMessages(sock, chatId, state, sendOptions.pinnedStatusDeliveryObserver);
     retainedPinnedMessageKeys = [...state.pinnedMessageKeys];
     turnStatusByChat.delete(chatId);
