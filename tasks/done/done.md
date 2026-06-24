@@ -14,3 +14,4 @@ Completed task details are archived here instead of deleted.
 - WhatsApp poll-backed select primitive handles raw LID poll votes. [details](whatsapp-select-primitive-poll-regression.md)
 - Journaled WhatsApp poll votes replay through the full ingress/select/outbound slice. [details](whatsapp-poll-live-participant-alt-regression.md)
 - Pinned turn status cleanup. [details](pinned-status-cleanup.md)
+- Unified pinned lifecycle and tool status path. [details](pinned-status-unified-path.md)
