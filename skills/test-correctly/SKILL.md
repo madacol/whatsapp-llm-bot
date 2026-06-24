@@ -19,13 +19,17 @@ Use testing to prove the user-valued behavior, not the implementation story.
    For regressions, inspect the latest relevant captured input, logs, persisted state, trace, or fixture before production edits. Do not ask the user to retry until existing evidence has been checked.
 
 4. Prove red at the vertical path.
-   The red proof should fail for the observed behavior. If full red proof is impractical, state why and use the strongest available replay.
+   When a real failing artifact exists, base the red proof on that artifact rather than a synthetic case tailored to the current theory. If full red proof is impractical, state why and use the strongest available replay.
 
 5. Do not hide the suspected seam.
    Do not mock, bypass, or unit-test around the boundary most likely to be failing. Narrow tests are support only after the vertical path localizes the seam.
 
 6. Verify green on the same path.
    Green proof must cover the user-valued outcome and any relevant durable/async settlement. For live bugs, also verify the running version or say it was not verified.
+
+If a fix fails in live/manual verification, stop extending the previous hypothesis. Treat the latest failure as the new source of truth, rebuild or adjust the vertical red proof from that evidence, then patch again.
+
+If the same symptom appears through multiple entry points, assume a shared path until disproven. Test the shared path vertically instead of debugging each entry point separately.
 
 Report verification as `red proof`, `green proof`, `support test`, and `live proof` when those labels apply.
 
