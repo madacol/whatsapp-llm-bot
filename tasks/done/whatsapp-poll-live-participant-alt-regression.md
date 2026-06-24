@@ -54,3 +54,10 @@ Investigate and fix live WhatsApp poll-backed select votes that still fail to se
 - `pnpm type-check`: passed after the echo/byte normalization fix.
 - Sandboxed `pnpm test --fast`: blocked by `listen EPERM` on localhost.
 - Host-level `pnpm test --fast`: passed 919 tests after the echo/byte normalization fix.
+
+## Completion
+
+- Fixed in `fc27679`.
+- The live bot reloaded after the fix as pid `2629107`, started at `2026-06-24 18:16:33 UTC`.
+- Journal check after reload showed no `received` rows and no rows with `last_error`; the formerly failing raw vote rows `14364` and `14366` are `done`.
+- The visible old poll may still be stale for user acknowledgement because the vote retries completed after the original select prompt had already timed out.
