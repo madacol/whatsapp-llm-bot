@@ -461,6 +461,107 @@ describe("createSelectRuntime", () => {
     assert.equal(await selectionPromise, "any");
   });
 
+  it("replays a captured raw LID multi-select vote whose sent poll secret is base64 text", async () => {
+    const registry = createSelectRuntime();
+    const {
+      chatId,
+      pollMsgId,
+      botPhoneJid,
+      botLidJid,
+      voterLidJid,
+      voterPhoneJid,
+      pollEncKey,
+      encIv,
+    } = RAW_LID_POLL_FIXTURE;
+    const selectedOption = "⚪ Show pinned tool status";
+    const pollOptions = [
+      { id: "pinned_tool_status", label: selectedOption },
+      { id: "hide_thinking", label: "🟢 Hide thinking" },
+      { id: "hide_file_changes", label: "🟢 Hide file changes" },
+      { id: "hide_sub_agent_output", label: "🟢 Hide sub-agent output" },
+      { id: "hide_all_extras", label: "⚪ Hide all extras" },
+    ];
+    const sock = {
+      user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
+      async sendMessage(targetChatId, message) {
+        if ("react" in message) {
+          return null;
+        }
+        const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
+        return {
+          key: { id: pollMsgId, remoteJid: targetChatId, fromMe: true },
+          message: {
+            messageContextInfo: {
+              messageSecret: pollEncKey.toString("base64"),
+            },
+            pollCreationMessage: {
+              name: "Choose which extra agent progress outputs are shown in chat.",
+              options: values
+                .filter((value) => typeof value === "string")
+                .map((value) => ({ optionName: value })),
+              selectableOptionsCount: 5,
+            },
+          },
+          participant: botPhoneJid,
+        };
+      },
+    };
+    const selectMany = registry.createSelectMany(
+      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
+      chatId,
+    );
+
+    const selectionPromise = selectMany(
+      "Choose which extra agent progress outputs are shown in chat.",
+      pollOptions,
+      { deleteOnSelect: true },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const pollVoteEvent = await registry.resolvePollVoteMessage(
+      /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: "VOTE-LID-CAPTURED-SHAPE-1",
+          participant: voterLidJid,
+          participantAlt: voterPhoneJid,
+          addressingMode: "lid",
+        },
+        messageTimestamp: 1782322727,
+        message: {
+          pollUpdateMessage: {
+            pollCreationMessageKey: {
+              remoteJid: chatId,
+              fromMe: true,
+              id: pollMsgId,
+              participant: botLidJid,
+            },
+            vote: createEncryptedPollVote({
+              pollMsgId,
+              pollCreatorJid: botLidJid,
+              voterJid: voterLidJid,
+              pollEncKey,
+              encIv,
+              selectedOption,
+            }),
+            senderTimestampMs: "1782322728220",
+          },
+        },
+      }),
+      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
+    );
+
+    assert.deepEqual(pollVoteEvent, {
+      chatId,
+      pollMsgId,
+      selectedOptions: [selectedOption],
+    });
+    assert.equal(registry.handlePollVote(pollVoteEvent), true);
+    assert.deepEqual(await selectionPromise, { kind: "selected", ids: ["pinned_tool_status"] });
+  });
+
   it("clear() resolves pending selects without sending cancellation reactions", async () => {
     const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();

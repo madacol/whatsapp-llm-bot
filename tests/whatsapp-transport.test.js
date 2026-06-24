@@ -543,6 +543,168 @@ describe("WhatsApp transport community creation", () => {
     );
   });
 
+  it("replays captured-shape raw LID selectMany poll votes delivered through messages.upsert", async () => {
+    const {
+      chatId,
+      pollMsgId,
+      botPhoneJid,
+      botLidJid,
+      voterLidJid,
+      voterPhoneJid,
+      pollEncKey,
+      encIv,
+    } = RAW_LID_POLL_FIXTURE;
+    const selectedOption = "⚪ Show pinned tool status";
+    const pollOptions = [
+      { id: "pinned_tool_status", label: selectedOption },
+      { id: "hide_thinking", label: "🟢 Hide thinking" },
+      { id: "hide_file_changes", label: "🟢 Hide file changes" },
+      { id: "hide_sub_agent_output", label: "🟢 Hide sub-agent output" },
+      { id: "hide_all_extras", label: "⚪ Hide all extras" },
+    ];
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {(value: unknown) => void} */
+    let resolveReply = () => {};
+    const replyHandled = new Promise((resolve) => {
+      resolveReply = resolve;
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        const id = "poll" in message ? pollMsgId : `sent-${sentMessages.length + 1}`;
+        sentMessages.push({ id, chatId: targetChatId, message });
+        if ("poll" in message) {
+          const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
+          return {
+            key: { id, remoteJid: targetChatId, fromMe: true },
+            message: {
+              messageContextInfo: {
+                messageSecret: pollEncKey.toString("base64"),
+              },
+              pollCreationMessage: {
+                name: "Choose which extra agent progress outputs are shown in chat.",
+                options: values
+                  .filter((value) => typeof value === "string")
+                  .map((value) => ({ optionName: value })),
+                selectableOptionsCount: 5,
+              },
+            },
+            participant: botPhoneJid,
+          };
+        }
+        return { key: { id, remoteJid: targetChatId, fromMe: true } };
+      },
+      sendPresenceUpdate: async () => {},
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+    });
+
+    await transport.start(async (turn) => {
+      const selection = await turn.io.selectMany(
+        "Choose which extra agent progress outputs are shown in chat.",
+        pollOptions,
+        { deleteOnSelect: true },
+      );
+      await turn.io.reply(assistantOutputEvent([{ type: "markdown", text: JSON.stringify(selection) }]));
+      resolveReply(selection);
+    });
+
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({ "connection.update": { connection: "open" } });
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          createWAMessage({ chatId, text: "choose", senderId: "poll-user" }),
+        ],
+      },
+    });
+
+    await waitForCondition(
+      () => sentMessages.some((entry) => "poll" in entry.message),
+      `Expected selectMany to send a poll, got ${JSON.stringify(sentMessages)}`,
+    );
+
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+            key: {
+              remoteJid: chatId,
+              fromMe: false,
+              id: "VOTE-LID-CAPTURED-SHAPE-1",
+              participant: voterLidJid,
+              participantAlt: voterPhoneJid,
+              addressingMode: "lid",
+            },
+            messageTimestamp: 1782322727,
+            message: {
+              pollUpdateMessage: {
+                pollCreationMessageKey: {
+                  remoteJid: chatId,
+                  fromMe: true,
+                  id: pollMsgId,
+                  participant: botLidJid,
+                },
+                vote: createEncryptedPollVote({
+                  pollMsgId,
+                  pollCreatorJid: botLidJid,
+                  voterJid: voterLidJid,
+                  pollEncKey,
+                  encIv,
+                  selectedOption,
+                }),
+                senderTimestampMs: "1782322728220",
+              },
+            },
+          }),
+        ],
+      },
+    });
+
+    const result = await Promise.race([
+      replyHandled,
+      delay(5_000).then(() => "timeout"),
+    ]);
+    assert.deepEqual(result, { kind: "selected", ids: ["pinned_tool_status"] });
+    assert.ok(
+      sentMessages.some((entry) => "delete" in entry.message && /** @type {{ delete?: { id?: string } }} */ (entry.message).delete?.id === pollMsgId),
+      `Expected poll delete settlement, got ${JSON.stringify(sentMessages)}`,
+    );
+    assert.ok(
+      sentMessages.some((entry) => typeof entry.message.text === "string" && entry.message.text.includes("pinned_tool_status")),
+      `Expected selected reply, got ${JSON.stringify(sentMessages)}`,
+    );
+  });
+
   it("replays an inbound message after the app handler fails before acknowledgement", async () => {
     if (!testStore) {
       throw new Error("Expected test store to be initialized");
