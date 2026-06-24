@@ -1,6 +1,7 @@
 import {
   formatIngressError,
   isWhatsAppIngressPayload,
+  WHATSAPP_INGRESS_SOURCE_UPDATE,
   WHATSAPP_INGRESS_SOURCE_UPSERT,
 } from "./ingress-journal.js";
 
@@ -20,6 +21,7 @@ import {
  *   >,
  *   inboundDispatchReady?: Promise<void>,
  *   processUpsertMessage: (message: BaileysMessage) => Promise<WhatsAppIngressDispatchResult>,
+ *   processMessageUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate) => Promise<WhatsAppIngressDispatchResult>,
  *   processReactionEvents: (reactions: unknown[]) => WhatsAppIngressDispatchResult,
  *   log: Pick<ReturnType<typeof import("../../logger.js").createLogger>, "error">,
  * }} input
@@ -29,6 +31,7 @@ export function createWhatsAppIngressDispatcher(input) {
   const {
     store,
     processUpsertMessage,
+    processMessageUpdate,
     processReactionEvents,
     log,
   } = input;
@@ -61,9 +64,14 @@ export function createWhatsAppIngressDispatcher(input) {
         return;
       }
 
-      const result = payload.kind === WHATSAPP_INGRESS_SOURCE_UPSERT
-        ? await processUpsertMessage(payload.message)
-        : processReactionEvents(payload.reactions);
+      let result;
+      if (payload.kind === WHATSAPP_INGRESS_SOURCE_UPSERT) {
+        result = await processUpsertMessage(payload.message);
+      } else if (payload.kind === WHATSAPP_INGRESS_SOURCE_UPDATE) {
+        result = await processMessageUpdate(payload.update);
+      } else {
+        result = processReactionEvents(payload.reactions);
+      }
       if (result === "ignored") {
         await store.markWhatsAppIngressJournalIgnored(row.id);
       } else {

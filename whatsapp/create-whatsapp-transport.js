@@ -5,10 +5,12 @@ import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
 import { createWhatsAppIngressDispatcher } from "./inbound/ingress-dispatcher.js";
 import {
+  createMessageUpdateIngressIdentity,
   createReactionIngressIdentity,
   createUpsertIngressKey,
   getMessageChatId,
   WHATSAPP_INGRESS_SOURCE_REACTION,
+  WHATSAPP_INGRESS_SOURCE_UPDATE,
   WHATSAPP_INGRESS_SOURCE_UPSERT,
 } from "./inbound/ingress-journal.js";
 import { createConfirmRuntime } from "./runtime/confirm-runtime.js";
@@ -496,6 +498,24 @@ export function captureWhatsAppUpsertEvent(event, options = {}) {
     direction: "baileys_to_shell",
     event: "messages.upsert",
     payload: event,
+  });
+}
+
+/**
+ * @param {unknown[]} updates
+ * @param {{ fixtureCapture?: import("../diagnostics/capture.js").FixtureCapture | null }} [options]
+ * @returns {void}
+ */
+export function captureWhatsAppMessageUpdateEvent(updates, options = {}) {
+  const fixtureCapture = options.fixtureCapture === undefined ? getDefaultFixtureCapture() : options.fixtureCapture;
+  if (!fixtureCapture) {
+    return;
+  }
+  fixtureCapture.capture({
+    seam: "whatsapp.inbound",
+    direction: "baileys_to_shell",
+    event: "messages.update",
+    payload: updates,
   });
 }
 
@@ -1063,6 +1083,27 @@ export async function createWhatsAppTransport(options = {}) {
     }
 
     /**
+     * @param {import("@whiskeysockets/baileys").WAMessageUpdate} update
+     * @returns {Promise<"done" | "ignored">}
+     */
+    async function processIncomingMessageUpdate(update) {
+      if (!update.update.pollUpdates || update.update.pollUpdates.length === 0) {
+        return "ignored";
+      }
+
+      const pollVoteEvent = await selectRuntime.resolvePollUpdate(update, sock)
+        ?? await confirmRuntime.resolvePollUpdate(update, sock);
+      if (!pollVoteEvent) {
+        return "ignored";
+      }
+
+      if (!selectRuntime.handlePollVote(pollVoteEvent)) {
+        confirmRuntime.handlePollVote(pollVoteEvent);
+      }
+      return "done";
+    }
+
+    /**
      * @param {unknown[]} reactions
      * @returns {"done" | "ignored"}
      */
@@ -1080,6 +1121,7 @@ export async function createWhatsAppTransport(options = {}) {
           store: outboundStore,
           inboundDispatchReady: options.inboundDispatchReady,
           processUpsertMessage: processIncomingUpsertMessage,
+          processMessageUpdate: processIncomingMessageUpdate,
           processReactionEvents: processIncomingReactionEvents,
           log,
         })
@@ -1126,6 +1168,31 @@ export async function createWhatsAppTransport(options = {}) {
             await processIncomingUpsertMessage(message, { waitForBufferedTurnAcceptance: false });
           } catch (error) {
             log.error("Error processing WhatsApp upsert:", error);
+          }
+        }
+        ingressDispatcher?.scheduleDrain();
+      }
+
+      if (events["messages.update"]) {
+        captureWhatsAppMessageUpdateEvent(events["messages.update"]);
+        for (const update of events["messages.update"]) {
+          if (!update.update.pollUpdates || update.update.pollUpdates.length === 0) {
+            continue;
+          }
+          if (outboundStore) {
+            const identity = createMessageUpdateIngressIdentity(update);
+            await outboundStore.enqueueWhatsAppIngressJournalEntry({
+              ingressKey: identity.ingressKey,
+              sourceEventType: WHATSAPP_INGRESS_SOURCE_UPDATE,
+              chatId: identity.chatId,
+              payloadJson: { kind: WHATSAPP_INGRESS_SOURCE_UPDATE, update },
+            });
+            continue;
+          }
+          try {
+            await processIncomingMessageUpdate(update);
+          } catch (error) {
+            log.error("Error processing WhatsApp message update:", error);
           }
         }
         ingressDispatcher?.scheduleDrain();

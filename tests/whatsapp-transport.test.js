@@ -1,5 +1,6 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -140,6 +141,23 @@ async function waitForTransportBackgroundWork() {
   }
 }
 
+/**
+ * @param {() => boolean} predicate
+ * @param {string} failureMessage
+ * @param {number} [timeoutMs]
+ * @returns {Promise<void>}
+ */
+async function waitForCondition(predicate, failureMessage, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await delay(10);
+  }
+  assert.fail(failureMessage);
+}
+
 describe("WhatsApp transport community creation", () => {
   it("buffers streamed LLM chunks in WhatsApp until completion", async () => {
     const chatId = `stream-buffer-${Date.now()}`;
@@ -238,6 +256,131 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(
       turns[0].content.filter((block) => block.type === "text").map((block) => block.text),
       ["first", "second"],
+    );
+  });
+
+  it("resolves selectMany poll votes delivered through messages.update", async () => {
+    const chatId = `poll-update-select-${Date.now()}@g.us`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {(value: unknown) => void} */
+    let resolveReply = () => {};
+    const replyHandled = new Promise((resolve) => {
+      resolveReply = resolve;
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        const id = `sent-${sentMessages.length + 1}`;
+        sentMessages.push({ id, chatId: targetChatId, message });
+        if ("poll" in message) {
+          const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
+          return {
+            key: { id, remoteJid: targetChatId, fromMe: true },
+            message: {
+              pollCreationMessageV3: {
+                options: values
+                  .filter((value) => typeof value === "string")
+                  .map((value) => ({ optionName: value })),
+              },
+            },
+          };
+        }
+        return { key: { id, remoteJid: targetChatId, fromMe: true } };
+      },
+      sendPresenceUpdate: async () => {},
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+    });
+
+    await transport.start(async (turn) => {
+      const selection = await turn.io.selectMany(
+        "Pick outputs",
+        [{ id: "toolStatus", label: "⚪ Show pinned tool status" }],
+        { deleteOnSelect: true },
+      );
+      await turn.io.reply(assistantOutputEvent([{ type: "markdown", text: JSON.stringify(selection) }]));
+      resolveReply(selection);
+    });
+
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({ "connection.update": { connection: "open" } });
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          createWAMessage({ chatId, text: "choose", senderId: "poll-user" }),
+        ],
+      },
+    });
+
+    await waitForCondition(
+      () => sentMessages.some((entry) => "poll" in entry.message),
+      `Expected selectMany to send a poll, got ${JSON.stringify(sentMessages)}`,
+    );
+    const pollEntry = sentMessages.find((entry) => "poll" in entry.message);
+    assert.ok(pollEntry, "expected poll entry");
+    const poll = pollEntry.message.poll;
+    assert.ok(poll && typeof poll === "object" && Array.isArray(poll.values), "expected poll values");
+    const selectedOption = poll.values[0];
+    assert.equal(selectedOption, "⚪ Show pinned tool status");
+
+    await processEvents({
+      "messages.update": [{
+        key: { id: pollEntry.id, remoteJid: chatId, fromMe: true },
+        update: {
+          pollUpdates: [{
+            pollUpdateMessageKey: {
+              id: "vote-1",
+              remoteJid: chatId,
+              participant: "poll-user@s.whatsapp.net",
+            },
+            vote: {
+              selectedOptions: [createHash("sha256").update(selectedOption).digest()],
+            },
+          }],
+        },
+      }],
+    });
+
+    const result = await Promise.race([
+      replyHandled,
+      delay(5_000).then(() => "timeout"),
+    ]);
+    assert.deepEqual(result, { kind: "selected", ids: ["toolStatus"] });
+    assert.ok(
+      sentMessages.some((entry) => "delete" in entry.message && /** @type {{ delete?: { id?: string } }} */ (entry.message).delete?.id === pollEntry.id),
+      `Expected poll delete settlement, got ${JSON.stringify(sentMessages)}`,
+    );
+    assert.ok(
+      sentMessages.some((entry) => typeof entry.message.text === "string" && entry.message.text.includes("\"toolStatus\"")),
+      `Expected selected reply, got ${JSON.stringify(sentMessages)}`,
     );
   });
 
