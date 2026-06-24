@@ -343,6 +343,24 @@ function addUniqueNormalizedUserJid(values, value) {
 }
 
 /**
+ * Baileys can surface `messageSecret` as bytes on sent-message returns and as
+ * base64 text on echoed/stored messages. Poll vote decryption needs the raw
+ * bytes in both cases.
+ * @param {unknown} value
+ * @returns {Uint8Array | null}
+ */
+function normalizeMessageSecret(value) {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const decoded = Buffer.from(value, "base64");
+    return decoded.length > 0 ? decoded : null;
+  }
+  return null;
+}
+
+/**
  * Poll vote encryption can bind to either PN or LID authors while Baileys
  * exposes both on LID-addressed group events. Try only identities present in
  * the event and keep the original auth failure when none match.
@@ -396,7 +414,7 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
     return null;
   }
 
-  const encKey = pollCreation.message?.messageContextInfo?.messageSecret;
+  const encKey = normalizeMessageSecret(pollCreation.message?.messageContextInfo?.messageSecret);
   if (!encKey || !pollUpdate.vote) {
     log.debug("Poll vote missing encKey or vote payload, skipping");
     return null;
