@@ -319,6 +319,63 @@ async function normalizePollChatId(sock, chatId) {
 }
 
 /**
+ * @param {string[]} values
+ * @param {string | null | undefined} value
+ * @returns {void}
+ */
+function addUniqueJid(values, value) {
+  if (!value || values.includes(value)) {
+    return;
+  }
+  values.push(value);
+}
+
+/**
+ * @param {string[]} values
+ * @param {string | null | undefined} value
+ * @returns {void}
+ */
+function addUniqueNormalizedUserJid(values, value) {
+  if (!value) {
+    return;
+  }
+  addUniqueJid(values, jidNormalizedUser(value));
+}
+
+/**
+ * Poll vote encryption can bind to either PN or LID authors while Baileys
+ * exposes both on LID-addressed group events. Try only identities present in
+ * the event and keep the original auth failure when none match.
+ * @param {Parameters<typeof decryptPollVote>[0]} vote
+ * @param {Uint8Array} pollEncKey
+ * @param {string} pollMsgId
+ * @param {readonly string[]} pollCreatorJids
+ * @param {readonly string[]} voterJids
+ * @returns {ReturnType<typeof decryptPollVote>}
+ */
+function decryptPollVoteWithCandidateAuthors(vote, pollEncKey, pollMsgId, pollCreatorJids, voterJids) {
+  /** @type {unknown} */
+  let firstError;
+
+  for (const pollCreatorJid of pollCreatorJids) {
+    for (const voterJid of voterJids) {
+      try {
+        return decryptPollVote(vote, {
+          pollEncKey,
+          pollCreatorJid,
+          pollMsgId,
+          voterJid,
+        });
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+  }
+
+  throw firstError ?? new Error("No poll vote author candidates available");
+}
+
+/**
  * Decrypt a poll vote message and resolve the selected option names.
  * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
  * @param {import('@whiskeysockets/baileys').WAMessage} message
@@ -352,39 +409,59 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
     || isLidUser(creationKeyParticipant)
     || isLidUser(pollCreationKeyParticipant);
 
-  /** @type {string} */
-  let meId;
-  /** @type {string} */
-  let pollCreatorJid;
-  /** @type {string} */
-  let voterJid;
+  /** @type {string[]} */
+  const selfJidCandidates = [];
+  /** @type {string[]} */
+  const pollCreatorJidCandidates = [];
+  /** @type {string[]} */
+  const voterJidCandidates = [];
 
   if (isLidVote) {
-    meId = sock.user?.lid
-      ? jidNormalizedUser(sock.user.lid)
-      : pollUpdate.pollCreationMessageKey?.fromMe === true && isLidUser(creationKeyParticipant)
-        ? creationKeyParticipant
-        : pollCreation.key?.fromMe === true && isLidUser(pollCreationKeyParticipant)
-          ? pollCreationKeyParticipant
-          : jidNormalizedUser(sock.user?.id ?? "");
-    pollCreatorJid = pollCreation.key?.fromMe
-      ? meId
-      : (pollUpdate.pollCreationMessageKey?.participant || pollCreation.key?.participant || pollCreation.key?.remoteJid || "");
-    voterJid = message.key.fromMe
-      ? meId
-      : (message.key.participant || message.key.remoteJid || "");
+    if (pollUpdate.pollCreationMessageKey?.fromMe === true && isLidUser(creationKeyParticipant)) {
+      addUniqueJid(selfJidCandidates, creationKeyParticipant);
+    }
+    if (pollCreation.key?.fromMe === true && isLidUser(pollCreationKeyParticipant)) {
+      addUniqueJid(selfJidCandidates, pollCreationKeyParticipant);
+    }
+    addUniqueNormalizedUserJid(selfJidCandidates, sock.user?.lid);
+    addUniqueNormalizedUserJid(selfJidCandidates, sock.user?.id);
+
+    if (pollUpdate.pollCreationMessageKey?.fromMe === true || pollCreation.key?.fromMe === true) {
+      for (const selfJid of selfJidCandidates) {
+        addUniqueJid(pollCreatorJidCandidates, selfJid);
+      }
+    } else {
+      const meId = selfJidCandidates[0] ?? jidNormalizedUser(sock.user?.id ?? "");
+      addUniqueJid(pollCreatorJidCandidates, getKeyAuthor(pollUpdate.pollCreationMessageKey, meId));
+      addUniqueJid(pollCreatorJidCandidates, getKeyAuthor(pollCreation.key, meId));
+      addUniqueJid(pollCreatorJidCandidates, pollUpdate.pollCreationMessageKey?.participant);
+      addUniqueJid(pollCreatorJidCandidates, pollCreation.key?.participant);
+      addUniqueJid(pollCreatorJidCandidates, pollCreation.key?.remoteJid);
+    }
+
+    if (message.key.fromMe) {
+      for (const selfJid of selfJidCandidates) {
+        addUniqueJid(voterJidCandidates, selfJid);
+      }
+    } else {
+      const meId = selfJidCandidates[0] ?? jidNormalizedUser(sock.user?.id ?? "");
+      addUniqueJid(voterJidCandidates, getKeyAuthor(message.key, meId));
+      addUniqueJid(voterJidCandidates, message.key.participant);
+      addUniqueJid(voterJidCandidates, message.key.remoteJid);
+    }
   } else {
-    meId = jidNormalizedUser(sock.user?.id ?? "");
-    pollCreatorJid = getKeyAuthor(pollCreation.key, meId);
-    voterJid = getKeyAuthor(message.key, meId);
+    const meId = jidNormalizedUser(sock.user?.id ?? "");
+    addUniqueJid(pollCreatorJidCandidates, getKeyAuthor(pollCreation.key, meId));
+    addUniqueJid(voterJidCandidates, getKeyAuthor(message.key, meId));
   }
 
-  const decrypted = decryptPollVote(pollUpdate.vote, {
-    pollEncKey: encKey,
-    pollCreatorJid,
-    pollMsgId: creationKeyId,
-    voterJid,
-  });
+  const decrypted = decryptPollVoteWithCandidateAuthors(
+    pollUpdate.vote,
+    encKey,
+    creationKeyId,
+    pollCreatorJidCandidates,
+    voterJidCandidates,
+  );
 
   const selectedOptions = resolveSelectedPollOptionNames(pollCreation, decrypted.selectedOptions ?? []);
 

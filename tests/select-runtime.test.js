@@ -368,6 +368,99 @@ describe("createSelectRuntime", () => {
     assert.equal(await selectionPromise, "any");
   });
 
+  it("decrypts raw LID poll votes encrypted for the participantAlt author", async () => {
+    const registry = createSelectRuntime();
+    const {
+      chatId,
+      pollMsgId,
+      botPhoneJid,
+      botLidJid,
+      voterLidJid,
+      voterPhoneJid,
+      selectedOption,
+      pollEncKey,
+      encIv,
+    } = RAW_LID_POLL_FIXTURE;
+    const sock = {
+      user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
+      async sendMessage(targetChatId, message) {
+        if ("react" in message) {
+          return null;
+        }
+        const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
+        return {
+          key: { id: pollMsgId, remoteJid: targetChatId, fromMe: true },
+          message: {
+            messageContextInfo: {
+              messageSecret: pollEncKey,
+            },
+            pollCreationMessageV3: {
+              name: "When should the bot reply in group chats?",
+              options: values
+                .filter((value) => typeof value === "string")
+                .map((value) => ({ optionName: value })),
+              selectableOptionsCount: 1,
+            },
+          },
+        };
+      },
+    };
+    const select = registry.createSelect(
+      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
+      chatId,
+    );
+
+    const selectionPromise = select("When should the bot reply in group chats?", [
+      { id: "any", label: "any" },
+      { id: "mention+reply", label: "mention+reply" },
+      { id: "mention", label: "mention" },
+    ], { currentId: "any", deleteOnSelect: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const pollVoteEvent = await registry.resolvePollVoteMessage(
+      /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: "VOTE-LID-ALT-1",
+          participant: voterLidJid,
+          participantAlt: voterPhoneJid,
+          addressingMode: "lid",
+        },
+        messageTimestamp: 1782320253,
+        message: {
+          pollUpdateMessage: {
+            pollCreationMessageKey: {
+              remoteJid: chatId,
+              fromMe: true,
+              id: pollMsgId,
+              participant: botLidJid,
+            },
+            vote: createEncryptedPollVote({
+              pollMsgId,
+              pollCreatorJid: botLidJid,
+              voterJid: voterPhoneJid,
+              pollEncKey,
+              encIv,
+              selectedOption,
+            }),
+            senderTimestampMs: "1782320253495",
+          },
+        },
+      }),
+      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
+    );
+
+    assert.deepEqual(pollVoteEvent, {
+      chatId,
+      pollMsgId,
+      selectedOptions: [selectedOption],
+    });
+    assert.equal(registry.handlePollVote(pollVoteEvent), true);
+    assert.equal(await selectionPromise, "any");
+  });
+
   it("clear() resolves pending selects without sending cancellation reactions", async () => {
     const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();
