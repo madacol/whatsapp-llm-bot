@@ -408,7 +408,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-      user: { id: botPhoneJid },
+      user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
       ev: {
         process(handler) {
           processEvents = handler;
@@ -515,7 +515,7 @@ describe("WhatsApp transport community creation", () => {
                 vote: createEncryptedPollVote({
                   pollMsgId,
                   pollCreatorJid: botLidJid,
-                  voterJid: voterLidJid,
+                  voterJid: voterPhoneJid,
                   pollEncKey,
                   encIv,
                   selectedOption,
