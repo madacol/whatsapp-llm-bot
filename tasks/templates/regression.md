@@ -1,45 +1,29 @@
-# Regression Task
+# Regression
 
-## User-Visible Failure
+## Outcome
 
-What action failed, what should have happened, and what happened instead.
+User-visible failure and exact desired result, including acknowledgement, durable state, or cleanup if relevant.
 
-## Desired Outcome
+## Evidence
 
-The exact behavior that must be true when this is fixed. Include visible output, durable state, cleanup, acknowledgements, or settlement conditions when relevant.
+Real input, logs, persisted state, trace, fixture, version, or other facts inspected before the fix.
 
-## Real Evidence Inspected
+## Vertical Red Proof
 
-Captured input, logs, state, persisted rows, screenshots, traces, commits, versions, or other facts used before choosing a fix.
-
-## Vertical Reproduction
-
-A test/replay that starts at the real entry point and follows the behavior to the desired outcome. Note if it is temporary diagnostic scaffolding.
+Test/replay from the real entry point toward the desired outcome. Note whether it is temporary diagnostic scaffolding.
 
 ## Failing Seam
 
-Where the vertical reproduction stops or proves the problem is located.
-
-## Red Proof
-
-Command, test, or replay that failed before production edits, with the relevant failure reason.
+Where the vertical proof localizes the problem.
 
 ## Fix
 
-The production change and why it addresses the proven failure.
+Production change and why it addresses the proven failure.
 
-## Green Proof
+## Green/Live Proof
 
-Command, test, or replay that passed after the fix at the same proof seam.
-
-## Support Tests
-
-Narrower tests that help cover edge cases or logic, if any.
-
-## Live/Deploy Proof
-
-Running version, process, deployment, migration, queue/journal, or other live-state verification when applicable.
+Same vertical path passing after the fix; running/deployed version and settled durable/async state when applicable.
 
 ## Remaining Risk
 
-What is still not proven, intentionally skipped, or dependent on external state.
+What is still not proven or was intentionally skipped.
