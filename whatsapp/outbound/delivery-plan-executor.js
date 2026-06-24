@@ -15,7 +15,7 @@ import {
 const log = createLogger("whatsapp:outbound");
 const DEFAULT_ALBUM_RELAY_DELAY_MS = 500;
 const DEFAULT_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
-const TURN_STATUS_PIN_SECONDS = 86400;
+const TURN_STATUS_PIN_SECONDS = 60 * 60;
 
 /**
  * @typedef {{
