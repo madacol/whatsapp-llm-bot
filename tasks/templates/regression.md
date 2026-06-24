@@ -2,28 +2,20 @@
 
 ## Outcome
 
-User-visible failure and exact desired result, including acknowledgement, durable state, or cleanup if relevant.
+What failed and the exact result that must be true when fixed.
 
 ## Evidence
 
-Real input, logs, persisted state, trace, fixture, version, or other facts inspected before the fix. If a prior fix failed, include the latest evidence that invalidated it.
+Real input, logs, state, trace, fixture, version, or latest failed-fix evidence inspected before changing code.
 
-## Vertical Red Proof
+## Vertical Proof
 
-Test/replay from the real entry point toward the desired outcome. Note whether it is temporary diagnostic scaffolding.
-
-## Failing Seam
-
-Where the vertical proof localizes the problem.
+Red before the fix, green after the fix, from the same real entry path to the desired outcome. Note the failing seam if useful.
 
 ## Fix
 
-Production change and why it addresses the proven failure.
+What changed and why it addresses the proven failure.
 
-## Green/Live Proof
+## Optional Notes
 
-Same vertical path passing after the fix; running/deployed version and settled durable/async state when applicable.
-
-## Remaining Risk
-
-What is still not proven or was intentionally skipped.
+Support tests, live/deploy proof, remaining risk, or why full vertical proof was impractical.
