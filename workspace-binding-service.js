@@ -49,6 +49,8 @@ function buildChatWorkspaceName(chatName) {
  *   explicitCwd?: string | null | undefined,
  *   store: {
  *     getProjectByRootPath?: (rootPath: string) => Promise<ProjectRow | null>,
+ *     getProject?: (projectId: string) => Promise<ProjectRow | null>,
+ *     getWorkspaceByChatId?: (chatId: string) => Promise<WorkspaceRow | null>,
  *     getWorkspaceByName?: (projectId: string, name: string) => Promise<WorkspaceRow | null>,
  *     createProject?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<ProjectRow>,
  *     createWorkspace?: (input: {
@@ -68,22 +70,38 @@ function buildChatWorkspaceName(chatName) {
  *       role?: WhatsAppWorkspacePresentationRole,
  *       linkedCommunityChatId?: string | null,
  *     }) => Promise<WhatsAppWorkspacePresentationRow>,
+ *     bindChatToWorkspace?: (chatId: string, workspaceId: string) => Promise<ChatBindingRow>,
  *   },
  * }} input
  * @returns {Promise<{ project: ProjectRow, workspace: WorkspaceRow } | null>}
  */
 async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, store }) {
   const projectLookup = store.getProjectByRootPath;
+  const getProject = store.getProject;
+  const getWorkspaceByChatId = store.getWorkspaceByChatId;
   const createProject = store.createProject;
   const createWorkspace = store.createWorkspace;
   const getWorkspaceByName = store.getWorkspaceByName;
   const saveWhatsAppWorkspacePresentation = store.saveWhatsAppWorkspacePresentation;
+  const bindChatToWorkspace = store.bindChatToWorkspace;
 
-  if (!projectLookup || !createProject || !createWorkspace || !getWorkspaceByName || !saveWhatsAppWorkspacePresentation) {
+  if (!projectLookup || !getProject || !getWorkspaceByChatId || !createProject || !createWorkspace || !getWorkspaceByName || !saveWhatsAppWorkspacePresentation) {
     return null;
   }
 
   const rootPath = getChatWorkDir(chatId, explicitCwd, chatName);
+  const chatWorkspace = await getWorkspaceByChatId(chatId);
+  if (chatWorkspace) {
+    const chatProject = await getProject(chatWorkspace.project_id);
+    if (!chatProject) {
+      throw new Error(`Project ${chatWorkspace.project_id} referenced by chat workspace ${chatWorkspace.workspace_id} does not exist.`);
+    }
+    if (bindChatToWorkspace) {
+      await bindChatToWorkspace(chatId, chatWorkspace.workspace_id);
+    }
+    return { project: chatProject, workspace: chatWorkspace };
+  }
+
   let project = await projectLookup(rootPath);
   if (!project) {
     project = await createProject({
@@ -107,16 +125,48 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
     workspaceChatId: chatId,
     workspaceChatSubject: workspaceName,
   });
-  const workspace = await createWorkspace({
-    workspaceId,
-    projectId: project.project_id,
-    name: workspaceName,
-    branch: project.default_base_branch,
-    baseBranch: project.default_base_branch,
-    worktreePath: rootPath,
-    status: "ready",
-  });
-  return { project, workspace };
+  let workspace;
+  let resolvedProject = project;
+  try {
+    workspace = await createWorkspace({
+      workspaceId,
+      projectId: project.project_id,
+      name: workspaceName,
+      branch: project.default_base_branch,
+      baseBranch: project.default_base_branch,
+      worktreePath: rootPath,
+      status: "ready",
+    });
+  } catch (error) {
+    if (!isSqliteUniqueConstraintError(error)) {
+      throw error;
+    }
+    workspace = await getWorkspaceByChatId(chatId);
+    if (!workspace) {
+      throw error;
+    }
+    const workspaceProject = await getProject(workspace.project_id);
+    if (!workspaceProject) {
+      throw new Error(`Project ${workspace.project_id} referenced by chat workspace ${workspace.workspace_id} does not exist.`);
+    }
+    resolvedProject = workspaceProject;
+    if (bindChatToWorkspace) {
+      await bindChatToWorkspace(chatId, workspace.workspace_id);
+    }
+  }
+  return { project: resolvedProject, workspace };
+}
+
+/**
+ * @param {unknown} error
+ * @returns {error is Error & { code: "ERR_SQLITE_ERROR", errcode: 2067 }}
+ */
+function isSqliteUniqueConstraintError(error) {
+  return error instanceof Error
+    && "code" in error
+    && error.code === "ERR_SQLITE_ERROR"
+    && "errcode" in error
+    && error.errcode === 2067;
 }
 
 /**
@@ -127,6 +177,7 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  *   getProject: (projectId: string) => Promise<ProjectRow | null>,
  *   getWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>,
  *   getProjectByRootPath?: (rootPath: string) => Promise<ProjectRow | null>,
+ *   getWorkspaceByChatId?: (chatId: string) => Promise<WorkspaceRow | null>,
  *   getWorkspaceByWorktreePath?: (worktreePath: string) => Promise<WorkspaceRow | null>,
  *   getWorkspaceByName?: (projectId: string, name: string) => Promise<WorkspaceRow | null>,
  *   createProject?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<ProjectRow>,
@@ -147,6 +198,7 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  *     role?: WhatsAppWorkspacePresentationRole,
  *     linkedCommunityChatId?: string | null,
  *   }) => Promise<WhatsAppWorkspacePresentationRow>,
+ *   bindChatToWorkspace?: (chatId: string, workspaceId: string) => Promise<ChatBindingRow>,
  * }} store
  */
 export function createWorkspaceBindingService(store) {

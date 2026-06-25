@@ -25,6 +25,7 @@ import {
  *   | "getProjectByRootPath"
  *   | "createWorkspace"
  *   | "getWorkspace"
+ *   | "getWorkspaceByChatId"
  *   | "getWorkspaceByName"
  *   | "getWorkspaceByWorktreePath"
  *   | "listActiveWorkspaces"
@@ -79,6 +80,19 @@ export function createProjectStore({
     const { rows: [row] } = await db.sql`
       SELECT * FROM workspaces
       WHERE workspace_id = ${workspaceId}
+      LIMIT 1
+    `;
+    return normalizeWorkspaceRow(row);
+  }
+
+  /**
+   * @param {string} chatId
+   * @returns {Promise<WorkspaceRow | null>}
+   */
+  async function getWorkspaceByChatId(chatId) {
+    const { rows: [row] } = await db.sql`
+      SELECT * FROM workspaces
+      WHERE workspace_chat_id = ${chatId}
       LIMIT 1
     `;
     return normalizeWorkspaceRow(row);
@@ -228,6 +242,8 @@ export function createProjectStore({
      * @returns {Promise<WorkspaceRow | null>}
      */
     getWorkspace,
+
+    getWorkspaceByChatId,
 
     /**
      * @param {string} projectId
