@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — whatsapp-llm-bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { border-style: dashed; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+      .leak-line { color: #dc2626; }
+      .mass-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em; }
+      .thin-interface { height: 24px; }
+      .wide-interface { height: 86px; }
+      .implementation { height: 118px; }
+      .faded { opacity: .42; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-6 py-12 space-y-12">
+      <header class="space-y-5">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500">Architecture review</p>
+          <h1 class="text-4xl font-semibold tracking-tight">whatsapp-llm-bot</h1>
+          <p class="text-sm text-slate-500 mt-2">2026-06-25 · focused on Agent Run Activity, ACP adapter, OutboundEvent, and WhatsApp Presentation</p>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div class="rounded border bg-white p-3"><span class="inline-block h-3 w-8 border border-slate-600 align-middle mr-2"></span>module</div>
+          <div class="rounded border bg-white p-3"><span class="inline-block h-3 w-8 border border-dashed border-slate-600 align-middle mr-2"></span>seam</div>
+          <div class="rounded border bg-white p-3"><span class="leak-line mr-2">→</span>leakage</div>
+          <div class="rounded border bg-white p-3"><span class="inline-block h-3 w-8 deep rounded align-middle mr-2"></span>deep module</div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+        <article id="agent-run-output" class="rounded-xl border border-slate-200 bg-white shadow-sm p-6 space-y-5">
+          <div class="flex flex-wrap gap-2 items-center">
+            <h2 class="text-2xl font-semibold mr-auto">Deepen Agent Run Activity output</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs font-semibold">in-process</span>
+          </div>
+          <div class="font-mono text-sm text-slate-700 grid md:grid-cols-2 gap-1">
+            <div>harnesses/harness-runtime-event-dispatcher.js</div>
+            <div>harnesses/harness-runtime-events.js</div>
+            <div>agent-run-output-port.js</div>
+            <div>outbound-events.js</div>
+            <div>conversation/build-agent-io-hooks.js</div>
+            <div>whatsapp/outbound/send-content.js</div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">Before</p>
+              <div class="space-y-3">
+                <div class="rounded border bg-white p-3">ACP adapter</div>
+                <div class="text-center leak-line">raw/runtime facts →</div>
+                <div class="rounded border bg-white p-3">Agent Run Activity dispatcher</div>
+                <div class="text-center leak-line">runtime_event + HarnessRuntimeTool →</div>
+                <div class="rounded border border-red-300 bg-red-50 p-3">WhatsApp Presentation knows Shell/Read/subagent facts</div>
+              </div>
+            </div>
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">After</p>
+              <div class="space-y-3">
+                <div class="rounded border bg-white p-3">ACP adapter</div>
+                <div class="text-center">provider facts →</div>
+                <div class="rounded-lg deep p-4">
+                  <div class="font-semibold">Agent Run Activity module</div>
+                  <div class="text-sm text-slate-200 mt-1">normalizes tool, reasoning, subagent, file-change facts</div>
+                </div>
+                <div class="text-center">canonical OutboundEvents →</div>
+                <div class="rounded border bg-white p-3">Presentation renders only display policy</div>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The `runtime_event` interface is shallow: callers must understand runtime tool names, arguments, suppression flags, and subagent metadata.</p>
+          <p><strong>Solution.</strong> Deepen Agent Run Activity so it emits semantic OutboundEvents for tool activity, reasoning, subagent activity, and lifecycle state.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">locality: one event seam</li>
+            <li class="rounded bg-slate-50 p-2">leverage: one Presentation input</li>
+            <li class="rounded bg-slate-50 p-2">tests hit one interface</li>
+            <li class="rounded bg-slate-50 p-2">harness vocabulary shrinks</li>
+            <li class="rounded bg-slate-50 p-2">raw facts stop earlier</li>
+            <li class="rounded bg-slate-50 p-2">subagent policy centralizes</li>
+          </ul>
+          <div class="rounded bg-amber-50 border border-amber-200 p-3 text-sm">ADR fit: supports ADR 0001, ADR 0003, and ADR 0004 by replacing runtime pass-through with app-owned OutboundEvent fields.</div>
+        </article>
+
+        <article id="tool-presentation" class="rounded-xl border border-slate-200 bg-white shadow-sm p-6 space-y-5">
+          <div class="flex flex-wrap gap-2 items-center">
+            <h2 class="text-2xl font-semibold mr-auto">Collapse runtime tool summaries into Tool Presentation</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs font-semibold">local-substitutable</span>
+          </div>
+          <div class="font-mono text-sm text-slate-700 grid md:grid-cols-2 gap-1">
+            <div>whatsapp/tool-presentation-model.js</div>
+            <div>whatsapp/tool-presenter.js</div>
+            <div>whatsapp/outbound/event-rendering.js</div>
+            <div>whatsapp/outbound/send-content.js</div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">Before: two shallow paths</p>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <div class="rounded-t border bg-red-50 p-2 wide-interface">send-content.js<br><span class="text-xs">summary rules</span></div>
+                  <div class="rounded-b border border-t-0 bg-white p-2 implementation">state + edits</div>
+                </div>
+                <div>
+                  <div class="rounded-t border bg-red-50 p-2 wide-interface">tool-presentation-model.js<br><span class="text-xs">summary rules</span></div>
+                  <div class="rounded-b border border-t-0 bg-white p-2 implementation">tool model</div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">After: one deep module</p>
+              <div class="mx-auto max-w-sm">
+                <div class="rounded-t border bg-emerald-50 p-2 thin-interface">Tool Presentation interface</div>
+                <div class="rounded-b deep p-5 implementation">
+                  <div>Read/Search/Shell/subagent prefix</div>
+                  <div class="text-slate-300 text-sm mt-2">internal rules, one test surface</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Runtime tool summaries duplicate Tool Presentation logic, so the interface nearly matches the implementation.</p>
+          <p><strong>Solution.</strong> Make Tool Presentation the single module that builds display-neutral tool presentations for both `tool_call` and agent-run tool activity.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">locality: summary bugs concentrate</li>
+            <li class="rounded bg-slate-50 p-2">leverage: one formatter</li>
+            <li class="rounded bg-slate-50 p-2">delete duplicate parsing</li>
+            <li class="rounded bg-slate-50 p-2">smaller WhatsApp interface</li>
+            <li class="rounded bg-slate-50 p-2">better line-range tests</li>
+            <li class="rounded bg-slate-50 p-2">subagent prefix policy isolates</li>
+          </ul>
+        </article>
+
+        <article id="subagent-context" class="rounded-xl border border-slate-200 bg-white shadow-sm p-6 space-y-5">
+          <div class="flex flex-wrap gap-2 items-center">
+            <h2 class="text-2xl font-semibold mr-auto">Localize subagent activity context</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-1 text-xs font-semibold">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs font-semibold">in-process</span>
+          </div>
+          <div class="font-mono text-sm text-slate-700 grid md:grid-cols-2 gap-1">
+            <div>patches/@agentclientprotocol__codex-acp@0.0.44.patch</div>
+            <div>harnesses/acp-runtime-model.js</div>
+            <div>harnesses/harness-runtime-event-dispatcher.js</div>
+            <div>whatsapp/outbound/send-content.js</div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">Before</p>
+              <pre class="mermaid">
+flowchart LR
+  A[Codex ACP patch] --> B[_meta.madabot.subagent]
+  A --> C[prompt-to-label fallback]
+  B --> D[ACP runtime model]
+  D --> E[dispatcher map]
+  E --> F[WhatsApp prefix]
+  C -.leakage.-> F
+classDef leak stroke:#dc2626,stroke-width:2px;
+class C,F leak;
+              </pre>
+            </div>
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">After</p>
+              <pre class="mermaid">
+flowchart LR
+  A[ACP adapter] --> B[threadId parentThreadId prompt]
+  B --> C[Subagent Activity Context]
+  C --> D[canonical actor fields]
+  D --> E[Presentation prefix policy]
+classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+class C deep;
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Subagent identity is split across the ACP patch, runtime model, dispatcher map, and WhatsApp Presentation.</p>
+          <p><strong>Solution.</strong> Add a Subagent Activity Context module inside Agent Run Activity; the ACP adapter supplies neutral facts and the module owns mapping and fallback naming.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">locality: one thread map</li>
+            <li class="rounded bg-slate-50 p-2">leverage: all child tools</li>
+            <li class="rounded bg-slate-50 p-2">patch stays neutral</li>
+            <li class="rounded bg-slate-50 p-2">naming policy explicit</li>
+            <li class="rounded bg-slate-50 p-2">close/wait unify</li>
+            <li class="rounded bg-slate-50 p-2">fixtures shrink</li>
+          </ul>
+        </article>
+
+        <article id="reasoning-trace" class="rounded-xl border border-slate-200 bg-white shadow-sm p-6 space-y-5">
+          <div class="flex flex-wrap gap-2 items-center">
+            <h2 class="text-2xl font-semibold mr-auto">Deepen Reasoning Trace reconciliation</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-1 text-xs font-semibold">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs font-semibold">mock</span>
+          </div>
+          <div class="font-mono text-sm text-slate-700 grid md:grid-cols-2 gap-1">
+            <div>harnesses/acp-runtime-model.js</div>
+            <div>harnesses/harness-runtime-event-dispatcher.js</div>
+            <div>conversation/build-agent-io-hooks.js</div>
+            <div>tasks/investigate-repeated-thoughts.md</div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">Before: reconciliation spread out</p>
+              <div class="space-y-2">
+                <div class="rounded border bg-white p-2">ACP runtime: delta / snapshot</div>
+                <div class="rounded border bg-white p-2">dispatcher: openReasoning state</div>
+                <div class="rounded border bg-white p-2">hooks: handle lifecycle</div>
+                <div class="rounded border bg-white p-2">Presentation: thinking inspect</div>
+              </div>
+            </div>
+            <div class="rounded-lg border bg-stone-50 p-4">
+              <p class="mass-label text-slate-500 mb-3">After: one deep module</p>
+              <div class="rounded-lg deep p-5 min-h-52">
+                <div class="font-semibold">Reasoning Trace module</div>
+                <div class="text-sm text-slate-200 mt-3">accepts chunks, snapshots, encrypted markers</div>
+                <div class="text-sm text-slate-200 mt-3">emits one stable thought lifecycle</div>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Thought repetition can hide in multiple modules because the reasoning interface does not own reconciliation as a single behaviour.</p>
+          <p><strong>Solution.</strong> Deepen a Reasoning Trace module that owns coalescing, snapshot replacement, encrypted content, and completion semantics.</p>
+          <ul class="grid md:grid-cols-3 gap-2 text-sm">
+            <li class="rounded bg-slate-50 p-2">locality: repeats debug once</li>
+            <li class="rounded bg-slate-50 p-2">leverage: provider shapes hidden</li>
+            <li class="rounded bg-slate-50 p-2">interface is test surface</li>
+            <li class="rounded bg-slate-50 p-2">pinned status simplified</li>
+            <li class="rounded bg-slate-50 p-2">encrypted path explicit</li>
+            <li class="rounded bg-slate-50 p-2">fixtures become smaller</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl border border-slate-300 bg-slate-950 text-slate-50 p-6">
+        <p class="text-xs uppercase tracking-wider text-slate-300">Top recommendation</p>
+        <h2 class="text-2xl font-semibold mt-2">Deepen Agent Run Activity output</h2>
+        <p class="mt-3 text-slate-200">It gives the most locality: one interface absorbs provider-derived facts before WhatsApp Presentation, and the other candidates become smaller slices behind that seam.</p>
+        <a class="inline-block mt-4 text-emerald-300 underline" href="#agent-run-output">Open candidate</a>
+      </section>
+    </main>
+  </body>
+</html>
