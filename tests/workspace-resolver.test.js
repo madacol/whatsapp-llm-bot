@@ -84,13 +84,15 @@ async function createWorkspaceFixture(store, {
 }
 
 describe("workspace resolver foundation", () => {
+  /** @type {import("../sqlite-db.js").SqliteDb} */
+  let db;
   /** @type {Awaited<ReturnType<typeof initStore>>} */
   let store;
   /** @type {ReturnType<typeof createWorkspaceBindingService>} */
   let bindingService;
 
   before(async () => {
-    const db = await createTestDb();
+    db = await createTestDb();
     store = await initStore(db);
     bindingService = createWorkspaceBindingService(store);
   });
@@ -270,5 +272,74 @@ describe("workspace resolver foundation", () => {
     assert.ok(presentation);
     assert.equal(presentation?.workspace_id, resolved.workspace.workspace_id);
     assert.equal(presentation?.workspace_chat_subject, chatName);
+  });
+
+  it("reuses an auto-adopted group workspace when its chat binding is missing", async () => {
+    const chatId = "resolver-orphaned-group-chat";
+    const originalChatName = "Orphaned Squad";
+    const renamedChatName = "Renamed Orphaned Squad";
+    const rootPath = getChatWorkDir(chatId, undefined, originalChatName);
+    const project = await store.createProject({
+      name: originalChatName,
+      rootPath,
+      defaultBaseBranch: "master",
+      controlChatId: null,
+    });
+    await store.saveWhatsAppWorkspacePresentation({
+      projectId: project.project_id,
+      workspaceId: chatId,
+      workspaceChatId: chatId,
+      workspaceChatSubject: originalChatName,
+    });
+    const existingWorkspace = await store.createWorkspace({
+      workspaceId: chatId,
+      projectId: project.project_id,
+      name: originalChatName,
+      branch: "master",
+      baseBranch: "master",
+      worktreePath: rootPath,
+      status: "ready",
+    });
+    await db.sql`DELETE FROM chat_bindings WHERE chat_id = ${chatId}`;
+
+    const resolved = await bindingService.resolveChatBinding(chatId, undefined, renamedChatName, true);
+
+    assert.deepEqual(resolved, {
+      kind: "workspace",
+      project,
+      workspace: existingWorkspace,
+    });
+
+    const binding = await store.getChatBinding(chatId);
+    assert.equal(binding?.binding_kind, "workspace");
+    assert.equal(binding?.workspace_id, existingWorkspace.workspace_id);
+  });
+
+  it("recovers when a concurrent group workspace adoption wins the chat insert race", async () => {
+    const chatId = "resolver-raced-group-chat";
+    const chatName = "Raced Squad";
+    /** @type {WorkspaceRow | null} */
+    let racedWorkspace = null;
+    const racingStore = {
+      ...store,
+      async createWorkspace(input) {
+        racedWorkspace = await store.createWorkspace(input);
+        throw Object.assign(new Error("UNIQUE constraint failed: workspaces.workspace_chat_id"), {
+          code: "ERR_SQLITE_ERROR",
+          errcode: 2067,
+          errstr: "constraint failed",
+        });
+      },
+    };
+    const racingBindingService = createWorkspaceBindingService(racingStore);
+
+    const resolved = await racingBindingService.resolveChatBinding(chatId, undefined, chatName, true);
+
+    assert.ok(racedWorkspace);
+    assert.deepEqual(resolved, {
+      kind: "workspace",
+      project: await store.getProject(racedWorkspace.project_id),
+      workspace: racedWorkspace,
+    });
   });
 });

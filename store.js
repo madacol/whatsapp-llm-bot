@@ -146,6 +146,7 @@ export async function getChatOrThrow(_db, chatId) {
  *     status?: WorkspaceStatus,
  *   }) => Promise<WorkspaceRow>;
  *   getWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>;
+ *   getWorkspaceByChatId: (chatId: string) => Promise<WorkspaceRow | null>;
  *   getWorkspaceByName: (projectId: string, name: string) => Promise<WorkspaceRow | null>;
  *   getWorkspaceByWorktreePath: (worktreePath: string) => Promise<WorkspaceRow | null>;
  *   listActiveWorkspaces: (projectId: string) => Promise<WorkspaceRow[]>;

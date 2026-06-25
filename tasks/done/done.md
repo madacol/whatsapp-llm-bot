@@ -15,3 +15,4 @@ Completed task details are archived here instead of deleted.
 - Journaled WhatsApp poll votes replay through the full ingress/select/outbound slice. [details](whatsapp-poll-live-participant-alt-regression.md)
 - Pinned turn status cleanup. [details](pinned-status-cleanup.md)
 - Unified pinned lifecycle and tool status path. [details](pinned-status-unified-path.md)
+- Idempotent chat workspace adoption. [details](chat-workspace-adoption-idempotence.md)
