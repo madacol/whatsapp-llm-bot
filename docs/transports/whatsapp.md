@@ -1,8 +1,13 @@
 # WhatsApp Transport
 
-`whatsapp/` is the concrete WhatsApp Transport. It owns the Baileys adapter details and converts between WhatsApp protocol behavior and app-owned turns, OutboundEvents, prompts, reactions, queues, and workspace surfaces.
+`whatsapp/` is the concrete WhatsApp Transport. It owns the Baileys adapter details and converts between WhatsApp protocol behavior and app-owned ChannelInputs, OutboundEvents, prompts, reactions, queues, and workspace surfaces.
 
 WhatsApp Transport may have internal seams for locality, but callers outside `whatsapp/` should use its public surface rather than reaching into provider-specific internals.
+
+## Vocabulary
+
+- **WhatsApp chat**: A WhatsApp-specific external address, currently represented by Baileys `remoteJid` / `chatId`. This name should stay inside WhatsApp Transport or compatibility edges; app-wide code should use Channel vocabulary.
+- **Baileys**: The WhatsApp socket/protocol library used by this Transport. Baileys payload details should stay inside WhatsApp Transport unless converted into app-owned ChannelInput, OutboundEvent, or prompt concepts.
 
 ## Public Surface
 
@@ -20,7 +25,7 @@ WhatsApp Transport may have internal seams for locality, but callers outside `wh
 
 - `whatsapp/inbound/message-event-classifier.js`: separates normal message upserts, reactions, polls, and ignored WhatsApp events.
 - `whatsapp/inbound/message-content.js`: extracts text, media, quote, sender, and message content facts from Baileys payloads.
-- `whatsapp/inbound/chat-turn.js`: converts normalized WhatsApp message content into app-owned chat turns.
+- `whatsapp/inbound/chat-turn.js`: converts normalized WhatsApp message content into app-owned ChannelInputs. The file still uses the legacy `ChatTurn` name.
 - `whatsapp/inbound/hd-image-lifecycle.js`: tracks HD image parent/child receive behavior.
 - `whatsapp/inbound/ingress-journal.js`: stores inbound events until app processing acknowledges them.
 - `whatsapp/inbound/ingress-dispatcher.js`: replays and dispatches journaled inbound events.
