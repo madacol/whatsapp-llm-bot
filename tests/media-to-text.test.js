@@ -206,7 +206,7 @@ describe("media-to-text", () => {
           architecture: { input_modalities: ["text", "audio"] },
         },
       ], async () => {
-        mockServer.addResponses("The speaker asks what time it is.");
+        mockServer.addResponses("What time is it?");
 
         /** @type {MessageRow[]} */
         const messages = [
@@ -241,12 +241,17 @@ describe("media-to-text", () => {
 
         const translatedAudio = result.messages[0].message_data.content[1];
         assert.equal(translatedAudio.type, "text");
-        assert.equal(translatedAudio.text, "Audio transcript:\nThe speaker asks what time it is.");
+        assert.equal(translatedAudio.text, "Audio transcript:\nWhat time is it?");
         assert.equal(translatedAudio.text.includes("[Audio description:"), false);
 
         const translationRequest = mockServer.getRequests()[requestsBefore];
         const requestText = JSON.stringify(translationRequest.messages);
         assert.ok(requestText.includes("User's message: Please inspect this voice note"));
+        assert.ok(requestText.includes("cleaned transcript"));
+        assert.ok(requestText.includes("speaker's own words"));
+        assert.ok(requestText.includes("Do not rewrite the speech into third-person narration"));
+        assert.ok(!requestText.includes("relevant disfluencies"));
+        assert.ok(!requestText.includes("nonverbal cues"));
       });
     });
 

@@ -17,3 +17,4 @@ Completed task details are archived here instead of deleted.
 - Unified pinned lifecycle and tool status path. [details](pinned-status-unified-path.md)
 - Ambiguous duplicated-item investigation superseded by repeated-thoughts task. [details](investigate-duplicated-item.md)
 - Idempotent chat workspace adoption. [details](chat-workspace-adoption-idempotence.md)
+- Cleaner audio transcription prompt. [details](cleaner-audio-transcriptions.md)
