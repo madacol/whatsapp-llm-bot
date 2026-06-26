@@ -19,7 +19,7 @@ describe("buildLiveInputText", () => {
           create: async (request) => {
             requests.push(request);
             return {
-              choices: [{ message: { content: "The speaker asks for the deployment status." } }],
+              choices: [{ message: { content: "What's the deployment status?" } }],
             };
           },
         },
@@ -44,7 +44,7 @@ describe("buildLiveInputText", () => {
     assert.equal(requests.length, 1);
     assert.match(
       text,
-      /^Please inspect this voice note\nAudio transcript:\nThe speaker asks for the deployment status\./,
+      /^Please inspect this voice note\nAudio transcript:\nWhat's the deployment status\?/,
     );
   });
 });

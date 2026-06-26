@@ -7,6 +7,5 @@
 ## Todo
 
 - Investigate why LLM thought/reasoning text sometimes repeats. [details](investigate-repeated-thoughts.md)
-- Make audio transcriptions cleaner. [details](cleaner-audio-transcriptions.md)
 
 ## Blocked
