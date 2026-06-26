@@ -13,10 +13,10 @@ function parseClearCommandText(text, prefix) {
 }
 
 /**
- * @param {ChatTurn} turn
+ * @param {ChannelInput} turn
  * @param {TextContentBlock} firstBlock
  * @param {"!" | "/"} prefix
- * @returns {{ followUpTurn: ChatTurn | null } | null}
+ * @returns {{ followUpTurn: ChannelInput | null } | null}
  */
 export function buildClearCommandFollowUp(turn, firstBlock, prefix) {
   const parsed = parseClearCommandText(firstBlock.text, prefix);

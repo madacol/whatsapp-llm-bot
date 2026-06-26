@@ -1,6 +1,6 @@
 import { createLogger } from "../logger.js";
 import { getDefaultFixtureCapture } from "../diagnostics/capture.js";
-import { adaptIncomingMessages } from "./inbound/chat-turn.js";
+import { adaptIncomingMessages } from "./inbound/channel-input.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
 import { createWhatsAppIngressDispatcher } from "./inbound/ingress-dispatcher.js";
@@ -1068,7 +1068,7 @@ export async function createWhatsAppTransport(options = {}) {
           }
           return "done";
         }
-        case "turn":
+        case "channel_input":
           if (await albumCoordinator.handle(incomingEvent.message)) {
             return "done";
           }

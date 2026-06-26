@@ -31,7 +31,7 @@ function formatSeedPromptText(seedPrompt) {
  *   workspaceControl: Pick<ReturnType<typeof import("./workspace-control.js").createWorkspaceControl>,
  *     "list" | "create" | "status" | "diff" | "archiveByName" | "archiveCurrent">,
  *   workspacePresentation?: WorkspacePresentationPort,
- *   dispatchTurn: (turn: ChatTurn) => Promise<void>,
+ *   dispatchTurn: (turn: ChannelInput) => Promise<void>,
  * }} input
  */
 export function createWorkspaceLifecycleService({ workspaceControl, workspacePresentation, dispatchTurn }) {

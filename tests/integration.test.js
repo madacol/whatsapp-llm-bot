@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  createChatTurn,
+  createChannelInput,
   createMockLlmServer,
   createTestDb,
   seedChat as seedChat_,
@@ -20,7 +20,7 @@ import { readChatConfig, updateChatConfig } from "../chat-config.js";
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {(msg: ChatTurn) => Promise<void>} */
+/** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
@@ -92,16 +92,16 @@ after(async () => {
   await fs.rm(CACHE_PATH, { force: true });
 });
 
-describe("createChatTurn shape", () => {
+describe("createChannelInput shape", () => {
   it("includes react, select, and confirm in io", () => {
-    const { context } = createChatTurn();
+    const { context } = createChannelInput();
     assert.equal(typeof context.io.react, "function");
     assert.equal(typeof context.io.select, "function");
     assert.equal(typeof context.io.confirm, "function");
   });
 
   it("io helpers record responses", async () => {
-    const { context, responses } = createChatTurn();
+    const { context, responses } = createChannelInput();
     await context.io.react("👍");
     assert.equal(await context.io.select("Vote", ["A", "B"]), "");
     assert.equal(await context.io.confirm("Are you sure?"), true);
@@ -116,14 +116,14 @@ describe("chat settings commands", () => {
   it("master user enables and disables a chat", async () => {
     await seedChat("settings-chat", { enabled: false });
 
-    const enabled = createChatTurn({
+    const enabled = createChannelInput({
       chatId: "settings-chat",
       content: [{ type: "text", text: "!s enabled on" }],
     });
     await handleMessage(enabled.context);
     assert.ok(enabled.responses.some((response) => response.text.toLowerCase().includes("enabled")));
 
-    const disabled = createChatTurn({
+    const disabled = createChannelInput({
       chatId: "settings-chat",
       content: [{ type: "text", text: "!s enabled off" }],
     });
@@ -136,7 +136,7 @@ describe("chat settings commands", () => {
   it("rejects enabled changes from non-master users", async () => {
     await seedChat("non-master-chat", { enabled: false });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "non-master-chat",
       senderIds: ["not-master"],
       content: [{ type: "text", text: "!s enabled on" }],
@@ -151,7 +151,7 @@ describe("chat settings commands", () => {
   it("responds with error for unknown commands", async () => {
     await seedChat("unknown-command-chat", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "unknown-command-chat",
       content: [{ type: "text", text: "!doesnotexist" }],
     });
@@ -165,7 +165,7 @@ describe("ACP conversation routing", () => {
   it("responds to enabled private chat through ACP", async () => {
     await seedAcpChat("private-acp-chat", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "private-acp-chat",
       content: [{ type: "text", text: "hello ACP" }],
     });
@@ -178,7 +178,7 @@ describe("ACP conversation routing", () => {
   it("does not respond in group when not mentioned", async () => {
     await seedAcpChat("group-ignore@g.us", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "group-ignore@g.us",
       facts: { isGroup: true, addressedToBot: false, repliedToBot: false },
       content: [{ type: "text", text: "background chatter" }],
@@ -192,7 +192,7 @@ describe("ACP conversation routing", () => {
   it("responds in group when addressed to bot", async () => {
     await seedAcpChat("group-mention@g.us", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "group-mention@g.us",
       facts: { isGroup: true, addressedToBot: true },
       senderName: "Alice",
@@ -208,15 +208,15 @@ describe("ACP conversation routing", () => {
   it("clear command removes prior messages before the next ACP turn", async () => {
     await seedAcpChat("clear-acp-chat", { enabled: true });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "clear-acp-chat",
       content: [{ type: "text", text: "Remember ALPHA" }],
     }).context);
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "clear-acp-chat",
       content: [{ type: "text", text: "!clear" }],
     }).context);
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "clear-acp-chat",
       content: [{ type: "text", text: "What remains?" }],
     }).context);
@@ -231,7 +231,7 @@ describe("ACP conversation routing", () => {
   it("formats quoted text into ACP message context", async () => {
     await seedAcpChat("quote-acp-chat", { enabled: true });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "quote-acp-chat",
       content: [
         { type: "quote", content: [{ type: "text", text: "Original quoted message" }] },
@@ -264,7 +264,7 @@ describe("media conversion before ACP", () => {
   it("preserves video requests as ACP input text", async () => {
     await seedAcpChat("unsupported-video-chat", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "unsupported-video-chat",
       content: [
         { type: "video", mime_type: "video/mp4", data: "AAAA", encoding: "base64" },

@@ -50,7 +50,7 @@ export function resolveImageArgs(schema, args, mediaRegistry) {
 /**
  * Decide whether the bot should respond to a message.
  * @param {import("./store.js").ChatRow | undefined} chatInfo
- * @param {TurnFacts} facts
+ * @param {ChannelInputFacts} facts
  * @returns {boolean}
  */
 export function shouldRespond(chatInfo, facts) {

@@ -48,7 +48,7 @@ function parseParams(argsText, parameters) {
  *   restartCommandHandler?: ReturnType<typeof createRestartCommandHandler>,
  * }} input
  * @returns {(input: {
- *   turn: ChatTurn,
+ *   turn: ChannelInput,
  *   chatId: string,
  *   senderIds: string[],
  *   content: IncomingContentBlock[],

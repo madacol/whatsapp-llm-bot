@@ -17,7 +17,7 @@ import {
 } from "./helpers.js";
 import { registerAcpTestHarness, ZERO_USAGE } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
-import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
+import { adaptIncomingMessage } from "../whatsapp/inbound/channel-input.js";
 import { createConfirmRuntime } from "../whatsapp/runtime/confirm-runtime.js";
 import { createSelectRuntime } from "../whatsapp/runtime/select-runtime.js";
 import { updateChatConfig } from "../chat-config.js";
@@ -28,7 +28,7 @@ const testUserResponseRegistry = createSelectRuntime();
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {(msg: ChatTurn) => Promise<void>} */
+/** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
@@ -1101,7 +1101,7 @@ describe("group detection", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("quote extraction", () => {
   it("passes current and quoted identity through the adapter", async () => {
-    /** @type {ChatTurn | null} */
+    /** @type {ChannelInput | null} */
     let capturedCtx = null;
     const { sock } = createMockBaileysSocket();
 
@@ -1362,7 +1362,7 @@ describe("timestamp parsing", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("bot mention detection", () => {
   it("marks both phone ID and LID mentions as addressedToBot and strips the prefix", async () => {
-    /** @type {ChatTurn[]} */
+    /** @type {ChannelInput[]} */
     const capturedTurns = [];
     const { sock } = createMockBaileysSocket({ selfId: "bot-123", selfLid: "bot-lid-456" });
 

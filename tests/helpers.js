@@ -63,19 +63,19 @@ export async function withModelsCache(models, fn) {
 }
 
 /**
- * @typedef {Partial<Omit<ChatTurn, "facts" | "io">> & {
+ * @typedef {Partial<Omit<ChannelInput, "facts" | "io">> & {
  *   facts?: Partial<ChannelInputFacts>;
  *   io?: Partial<ChannelInputIO>;
- * }} ChatTurnOverrides
+ * }} ChannelInputOverrides
  */
 
 /**
- * Create a test ChatTurn.
+ * Create a test ChannelInput.
  * Default sender is "master-user" (matches process.env.MASTER_ID in tests).
- * @param {ChatTurnOverrides} [overrides]
- * @returns {{ context: ChatTurn, responses: Array<{type: string, text: string, source?: MessageSource, blockType?: string}> }}
+ * @param {ChannelInputOverrides} [overrides]
+ * @returns {{ context: ChannelInput, responses: Array<{type: string, text: string, source?: MessageSource, blockType?: string}> }}
  */
-export function createChatTurn(overrides = {}) {
+export function createChannelInput(overrides = {}) {
   /** @type {Array<{type: string, text: string, source?: MessageSource, blockType?: string}>} */
   const responses = [];
 
@@ -232,7 +232,7 @@ export function createChatTurn(overrides = {}) {
     ...(quotedSenderId != null && { quotedSenderId }),
   };
 
-  /** @type {ChatTurn} */
+  /** @type {ChannelInput} */
   const context = {
     chatId: overrides.chatId ?? "test-chat",
     senderIds: overrides.senderIds ?? ["master-user"],
@@ -246,6 +246,15 @@ export function createChatTurn(overrides = {}) {
   };
 
   return { context, responses };
+}
+
+/**
+ * @deprecated Use createChannelInput for new tests.
+ * @param {ChannelInputOverrides} [overrides]
+ * @returns {{ context: ChannelInput, responses: Array<{type: string, text: string, source?: MessageSource, blockType?: string}> }}
+ */
+export function createChatTurn(overrides = {}) {
+  return createChannelInput(overrides);
 }
 
 /** @type {import("../sqlite-db.js").SqliteDb | null} */
@@ -497,7 +506,7 @@ export function toolCall(name, args) {
  *
  * @param {{
  *   mockServer: Awaited<ReturnType<typeof createMockLlmServer>>;
- *   handleMessage: (msg: ChatTurn) => Promise<void>;
+ *   handleMessage: (msg: ChannelInput) => Promise<void>;
  *   testDb: import("../sqlite-db.js").SqliteDb;
  * }} deps
  * @returns {{ chat: (chatId: string, config?: ChatConfig) => Promise<TestChat> }}
@@ -581,7 +590,7 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
 
       // 5. Build and call context
       const sender = options?.sender;
-      /** @type {ChatTurnOverrides} */
+      /** @type {ChannelInputOverrides} */
       const overrides = {
         chatId,
         content,
@@ -595,7 +604,7 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
         if (sender.name) overrides.senderName = sender.name;
       }
 
-      const { context, responses } = createChatTurn(overrides);
+      const { context, responses } = createChannelInput(overrides);
 
       if (options?.confirm != null) {
         const userConfirm = options.confirm;

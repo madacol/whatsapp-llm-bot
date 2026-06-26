@@ -163,7 +163,7 @@ function getTopLevelText(content) {
 }
 
 /**
- * @param {ChatTurn} turn
+ * @param {ChannelInput} turn
  * @returns {UserMessage}
  */
 function buildUserMessage(turn) {
@@ -259,11 +259,11 @@ export function createConversationRunner({
   }
 
   /**
-   * @param {ChatTurn} turn
+   * @param {ChannelInput} turn
    * @returns {Promise<void>}
    */
   async function dispatchTurn(turn) {
-    /** @type {ChatTurn | null} */
+    /** @type {ChannelInput | null} */
     let nextTurn = turn;
     while (nextTurn) {
       nextTurn = await handleSingleMessage(nextTurn);
@@ -273,7 +273,7 @@ export function createConversationRunner({
   /**
    * Replay a live-input message as a normal turn if provider steering stays
    * unavailable after the active query already rejected it.
-   * @param {ChatTurn} turn
+   * @param {ChannelInput} turn
    * @param {() => Promise<void>} interruptActiveTurn
    * @returns {void}
    */

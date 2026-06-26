@@ -6,7 +6,7 @@ import { createHarnessRunCoordinator } from "../harnesses/run-coordinator.js";
 /**
  * @param {string} chatId
  * @param {string} text
- * @returns {ChatTurn}
+ * @returns {ChannelInput}
  */
 function createTurn(chatId, text) {
   return {

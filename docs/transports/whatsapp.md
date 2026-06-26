@@ -25,7 +25,7 @@ WhatsApp Transport may have internal seams for locality, but callers outside `wh
 
 - `whatsapp/inbound/message-event-classifier.js`: separates normal message upserts, reactions, polls, and ignored WhatsApp events.
 - `whatsapp/inbound/message-content.js`: extracts text, media, quote, sender, and message content facts from Baileys payloads.
-- `whatsapp/inbound/chat-turn.js`: converts normalized WhatsApp message content into app-owned ChannelInputs. The file name still carries the legacy turn vocabulary.
+- `whatsapp/inbound/channel-input.js`: converts normalized WhatsApp message content into app-owned ChannelInputs.
 - `whatsapp/inbound/hd-image-lifecycle.js`: tracks HD image parent/child receive behavior.
 - `whatsapp/inbound/ingress-journal.js`: stores inbound events until app processing acknowledges them.
 - `whatsapp/inbound/ingress-dispatcher.js`: replays and dispatches journaled inbound events.

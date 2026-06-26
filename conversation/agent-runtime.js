@@ -233,12 +233,12 @@ function materializeRuntimeSelection(selection) {
  *   resolveSelection: (chatInfo: import("../store.js").ChatRow | undefined) => Promise<AgentRuntimeSelection>,
  *   hasSelectedRuntime: (selection: AgentRuntimeSelection) => boolean,
  *   hasPendingRun: (chatId: string) => boolean,
- *   beginRun: (input: { turn: ChatTurn, userText: string, selection: AgentRuntimeSelection, allowLiveInputTarget?: boolean }) => Promise<{ status: "started" | "buffered" | "injected", reason?: "pending-setup" | "active-run" | "live-input-retry" }>,
- *   preparePendingLiveInputReplay: (chatId: string, turn: ChatTurn) => { turn: ChatTurn, text: string } | null,
+ *   beginRun: (input: { turn: ChannelInput, userText: string, selection: AgentRuntimeSelection, allowLiveInputTarget?: boolean }) => Promise<{ status: "started" | "buffered" | "injected", reason?: "pending-setup" | "active-run" | "live-input-retry" }>,
+ *   preparePendingLiveInputReplay: (chatId: string, turn: ChannelInput) => { turn: ChannelInput, text: string } | null,
  *   interruptTurn: (selection: AgentRuntimeSelection, chatId: string) => Promise<boolean>,
- *   finishRun: (chatId: string) => ChatTurn | null,
+ *   finishRun: (chatId: string) => ChannelInput | null,
  *   runStartedTurn: (input: {
- *     turn: ChatTurn,
+ *     turn: ChannelInput,
  *     chatInfo: import("../store.js").ChatRow | undefined,
  *     context: ExecuteActionContext,
  *     message: UserMessage,
@@ -249,7 +249,7 @@ function materializeRuntimeSelection(selection) {
  *       onAudioTranscriptionComplete?: (event: { block: AudioContentBlock, modelId: string, transcription: string }) => void | Promise<void>,
  *       onAudioTranscriptionFailure?: (event: { block: AudioContentBlock, modelId: string, error: unknown }) => void | Promise<void>,
  *     },
- *   }) => Promise<ChatTurn | null>,
+ *   }) => Promise<ChannelInput | null>,
  *   cancelActiveRun: (chatId: string, chatInfo: import("../store.js").ChatRow | undefined) => Promise<boolean>,
  *   clearActiveSession: (chatId: string, chatInfo: import("../store.js").ChatRow | undefined) => Promise<boolean>,
  *   resolveWorkdir: (input: { chatId: string, chatInfo: import("../store.js").ChatRow | undefined, chatName: string | null | undefined, selection: AgentRuntimeSelection, resolvedBinding: ResolvedChatBinding }) => string | undefined,
@@ -438,7 +438,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
 
   /**
    * @param {{
-   *   turn: ChatTurn,
+   *   turn: ChannelInput,
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   context: ExecuteActionContext,
    *   message: UserMessage,
@@ -609,7 +609,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
     }) {
       const { chatId } = turn;
       const agentOutput = createAgentRunOutputPort(context);
-      /** @type {ChatTurn | null} */
+      /** @type {ChannelInput | null} */
       let nextTurn = null;
       try {
         const { result, deliveredContentSignatures } = await runResolvedRuntimeTurn({

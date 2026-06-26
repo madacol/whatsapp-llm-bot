@@ -5,7 +5,7 @@ import { buildClearCommandFollowUp } from "../conversation/clear-command-follow-
 
 describe("clear command follow-up", () => {
   it("turns a clear command with trailing prompt into an addressed follow-up turn", () => {
-    /** @type {ChatTurn} */
+    /** @type {ChannelInput} */
     const turn = {
       chatId: "chat-1",
       senderIds: ["user-1"],
