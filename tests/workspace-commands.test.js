@@ -6,7 +6,7 @@ process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createChannelInput, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
 
 /** @type {PGlite} */
@@ -15,7 +15,7 @@ let db;
 let store;
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {(msg: ChatTurn) => Promise<void>} */
+/** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
 
 before(async () => {
@@ -140,7 +140,7 @@ describe("workspace commands", () => {
       status: "busy",
     });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "ws-main-chat",
       content: [{ type: "text", text: "!list" }],
     });
@@ -175,7 +175,7 @@ describe("workspace commands", () => {
       status: "ready",
     });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "ws-status-chat",
       content: [{ type: "text", text: "!status" }],
     });
@@ -196,7 +196,7 @@ describe("workspace commands", () => {
       controlChatId: "repo-command-chat",
     });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "repo-command-chat",
       content: [{ type: "text", text: "!status" }],
     });
@@ -238,7 +238,7 @@ describe("workspace commands", () => {
       status: "ready",
     });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "ws-archive-main",
       content: [{ type: "text", text: "!archive payments" }],
     });
@@ -271,7 +271,7 @@ describe("workspace commands", () => {
       status: "ready",
     });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "ws-current-archive-chat",
       content: [{ type: "text", text: "!archive" }],
     });
@@ -306,7 +306,7 @@ describe("workspace commands", () => {
     await store.archiveWorkspace(workspace.workspace_id);
 
     const requestCountBefore = mockServer.getRequests().length;
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "ws-archived-chat",
       content: [{ type: "text", text: "implement retry logic" }],
     });

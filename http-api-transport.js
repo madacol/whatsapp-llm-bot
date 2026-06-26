@@ -404,7 +404,7 @@ export async function createHttpApiTransport(options = {}) {
    * @param {string | null} turnId
    * @returns {ChannelInputIO}
    */
-  function createTurnIo(chatId, turnId) {
+  function createChannelInputIo(chatId, turnId) {
     return {
       send: async (event) => {
         appendEvent(chatId, event, turnId);
@@ -429,7 +429,7 @@ export async function createHttpApiTransport(options = {}) {
    * @param {HttpApiTurnRecord} record
    * @returns {ChannelInput}
    */
-  function buildTurn(transportId, payload, record) {
+  function buildChannelInput(transportId, payload, record) {
     void transportId;
     return {
       chatId: payload.chatId,
@@ -439,7 +439,7 @@ export async function createHttpApiTransport(options = {}) {
       content: payload.content,
       timestamp: payload.timestamp,
       facts: payload.facts,
-      io: createTurnIo(payload.chatId, record.turnId),
+      io: createChannelInputIo(payload.chatId, record.turnId),
     };
   }
 
@@ -481,7 +481,7 @@ export async function createHttpApiTransport(options = {}) {
 
     const record = ledgerTurn.record;
 
-    const turn = buildTurn(transportId, payload, record);
+    const turn = buildChannelInput(transportId, payload, record);
     ledger.setActiveTurn(payload.chatId, record.turnId);
 
     const runTurn = async () => {
@@ -580,7 +580,7 @@ export async function createHttpApiTransport(options = {}) {
     }
 
     const record = ledgerTurn.record;
-    const turn = buildTurn(transportId, payload, record);
+    const turn = buildChannelInput(transportId, payload, record);
     ledger.setActiveTurn(payload.chatId, record.turnId);
 
     /** @type {{ path: string, mimeType: string, url: string } | null} */

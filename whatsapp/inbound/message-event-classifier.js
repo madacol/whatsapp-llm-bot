@@ -2,7 +2,7 @@
  * Transport-facing classifier for inbound WhatsApp message events.
  *
  * This keeps platform-only mechanics such as reactions and poll updates out of
- * the chat-turn adapter so callers can reason in terms of semantic event kinds.
+ * the channel-input adapter so callers can reason in terms of semantic event kinds.
  */
 
 /**
@@ -22,11 +22,11 @@
  */
 
 /**
- * @typedef {{ kind: "turn"; message: BaileysMessage }} TurnMessageEvent
+ * @typedef {{ kind: "channel_input"; message: BaileysMessage }} ChannelInputMessageEvent
  */
 
 /**
- * @typedef {IgnoreMessageEvent | ReactionMessageEvent | PollUpdateMessageEvent | TurnMessageEvent} IncomingMessageEvent
+ * @typedef {IgnoreMessageEvent | ReactionMessageEvent | PollUpdateMessageEvent | ChannelInputMessageEvent} IncomingMessageEvent
  */
 
 /**
@@ -113,5 +113,5 @@ export function classifyIncomingMessageEvent(message) {
     return { kind: "poll_update", message };
   }
 
-  return { kind: "turn", message };
+  return { kind: "channel_input", message };
 }

@@ -17,7 +17,7 @@
  *   chatId: string;
  *   text: string;
  *   target: LiveInputTarget;
- *   turn: ChatTurn;
+ *   turn: ChannelInput;
  *   journalId: number | null;
  * }} PendingLiveInput
  */
@@ -25,7 +25,7 @@
 /**
  * @typedef {{
  *   bufferedTexts: string[];
- *   queuedTurns: ChatTurn[];
+ *   queuedTurns: ChannelInput[];
  *   pendingLiveInputs: PendingLiveInput[];
  *   liveInputRetryTimer: ReturnType<typeof setTimeout> | null;
  *   isActive: boolean;
@@ -55,12 +55,12 @@
  * The coordinator does not execute runs itself; it only mediates lifecycle.
  *
  * @returns {{
- *   beginRun: (input: { turn: ChatTurn, userText: string, liveInputTarget?: LiveInputTarget | null, ownerKey?: string | null }) => Promise<HarnessRunDecision>,
+ *   beginRun: (input: { turn: ChannelInput, userText: string, liveInputTarget?: LiveInputTarget | null, ownerKey?: string | null }) => Promise<HarnessRunDecision>,
  *   hasPendingRun: (chatId: string) => boolean,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
- *   preparePendingLiveInputReplay: (chatId: string, turn: ChatTurn) => { turn: ChatTurn, text: string } | null,
- *   finishRun: (chatId: string) => ChatTurn | null,
+ *   preparePendingLiveInputReplay: (chatId: string, turn: ChannelInput) => { turn: ChannelInput, text: string } | null,
+ *   finishRun: (chatId: string) => ChannelInput | null,
  * }}
  * @param {HarnessRunCoordinatorOptions} [options]
  */
@@ -79,7 +79,7 @@ export function createHarnessRunCoordinator(options = {}) {
   }
 
   /**
-   * @param {{ chatId: string, text: string, turn: ChatTurn, target: LiveInputTarget & { injectMessage: NonNullable<LiveInputTarget["injectMessage"]> }, journalId?: number | null }} input
+   * @param {{ chatId: string, text: string, turn: ChannelInput, target: LiveInputTarget & { injectMessage: NonNullable<LiveInputTarget["injectMessage"]> }, journalId?: number | null }} input
    * @returns {Promise<{ accepted: boolean, journalId: number | null }>}
    */
   async function tryInjectLiveInput(input) {
@@ -114,7 +114,7 @@ export function createHarnessRunCoordinator(options = {}) {
   }
 
   /**
-   * @param {ChatTurn} turn
+   * @param {ChannelInput} turn
    * @returns {string}
    */
   function getLiveInputTurnId(turn) {
@@ -128,7 +128,7 @@ export function createHarnessRunCoordinator(options = {}) {
    * @param {string} chatId
    * @param {string} text
    * @param {LiveInputTarget & { injectMessage: NonNullable<LiveInputTarget["injectMessage"]> }} target
-   * @param {ChatTurn} turn
+   * @param {ChannelInput} turn
    * @param {number | null} [journalId]
    * @returns {Promise<{ accepted: boolean, journalId: number | null }>}
    */
@@ -191,7 +191,7 @@ export function createHarnessRunCoordinator(options = {}) {
    * @param {string} chatId
    * @param {PendingRunState} pending
    * @param {string} text
-   * @param {ChatTurn} turn
+   * @param {ChannelInput} turn
    * @param {LiveInputTarget} target
    * @param {number | null} [journalId]
    * @returns {void}

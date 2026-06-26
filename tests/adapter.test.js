@@ -23,14 +23,14 @@ let createSelectRuntime;
 /** @type {typeof import("../whatsapp/runtime/reaction-runtime.js").createReactionRuntime} */
 let createReactionRuntime;
 
-/** @type {typeof import("../whatsapp/inbound/chat-turn.js").adaptIncomingMessage} */
+/** @type {typeof import("../whatsapp/inbound/channel-input.js").adaptIncomingMessage} */
 let adaptIncomingMessage;
-/** @type {typeof import("../whatsapp/inbound/chat-turn.js").adaptIncomingMessages} */
+/** @type {typeof import("../whatsapp/inbound/channel-input.js").adaptIncomingMessages} */
 let adaptIncomingMessages;
-/** @type {typeof import("../whatsapp/inbound/chat-turn.js").createTurnIo} */
-let createTurnIo;
-/** @type {typeof import("../whatsapp/inbound/chat-turn.js").finishTurnIo} */
-let finishTurnIo;
+/** @type {typeof import("../whatsapp/inbound/channel-input.js").createChannelInputIo} */
+let createChannelInputIo;
+/** @type {typeof import("../whatsapp/inbound/channel-input.js").finishChannelInputIo} */
+let finishChannelInputIo;
 
 before(async () => {
   // Seed DB cache so initStore() in index.js uses in-memory DB
@@ -41,7 +41,7 @@ before(async () => {
   ({ createConfirmRuntime } = await import("../whatsapp/runtime/confirm-runtime.js"));
   ({ createSelectRuntime } = await import("../whatsapp/runtime/select-runtime.js"));
   ({ createReactionRuntime } = await import("../whatsapp/runtime/reaction-runtime.js"));
-  ({ adaptIncomingMessage, adaptIncomingMessages, createTurnIo, finishTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
+  ({ adaptIncomingMessage, adaptIncomingMessages, createChannelInputIo, finishChannelInputIo } = await import("../whatsapp/inbound/channel-input.js"));
 });
 
 /**
@@ -175,7 +175,7 @@ function assertNoReactionMarkers(reactions, message) {
  *   pulseIntervalMs: number;
  * }} params
  * @returns {{
- *   io: ReturnType<typeof createTurnIo>;
+ *   io: ReturnType<typeof createChannelInputIo>;
  *   presenceUpdates: Array<{ presence: string, chatId: string }>;
  *   sentMessages: Array<{ chatId: string, msg: Record<string, unknown>, options?: Record<string, unknown> }>;
  *   selectRuntime: ReturnType<typeof createSelectRuntime>;
@@ -189,7 +189,7 @@ function createPresenceTurnIo({ messageId, defaultLeaseTtlMs, pulseIntervalMs })
   const sentMessages = [];
   const selectRuntime = createSelectRuntime();
   const confirmRuntime = createConfirmRuntime();
-  const io = createTurnIo({
+  const io = createChannelInputIo({
     sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       sendMessage: async (chatId, msg, options) => {
         sentMessages.push({ chatId, msg, options });
@@ -273,7 +273,7 @@ describe("getMessageContent", () => {
   it("keeps stable bot answer quotes as reply context", async () => {
     const { sock } = createMockSock();
     sock.user = { id: "bot-123:1@s.whatsapp.net" };
-    /** @type {ChatTurn | null} */
+    /** @type {ChannelInput | null} */
     let capturedTurn = null;
 
     await adaptIncomingMessage(
@@ -303,7 +303,7 @@ describe("getMessageContent", () => {
   it("keeps transient bot thinking quotes out of reply context", async () => {
     const { sock } = createMockSock();
     sock.user = { id: "bot-123:1@s.whatsapp.net" };
-    /** @type {ChatTurn | null} */
+    /** @type {ChannelInput | null} */
     let capturedTurn = null;
 
     await adaptIncomingMessage(
@@ -602,7 +602,7 @@ describe("getMessageContent", () => {
 
     const reattachedImage = { ...firstImage };
     delete reattachedImage.getHd;
-    const io = createTurnIo({
+    const io = createChannelInputIo({
       sock,
       chatId,
       message: createHdImageMessage({ chatId, messageId: "io-message", pairedMediaType: SD_PARENT }),
@@ -661,7 +661,7 @@ describe("adaptIncomingMessages", () => {
     }));
     const confirmRegistry = createConfirmRuntime();
     const selectRegistry = createSelectRuntime();
-    /** @type {ChatTurn[]} */
+    /** @type {ChannelInput[]} */
     const receivedTurns = [];
 
     await adaptIncomingMessages(
@@ -712,7 +712,7 @@ describe("adaptIncomingMessages", () => {
     const confirmRegistry = createConfirmRuntime();
     const selectRegistry = createSelectRuntime();
     const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
-    /** @type {ChatTurn | null} */
+    /** @type {ChannelInput | null} */
     let receivedTurn = null;
 
     await adaptIncomingMessages(
@@ -767,10 +767,10 @@ describe("adaptIncomingMessages", () => {
   });
 });
 
-describe("createTurnIo", () => {
+describe("createChannelInputIo", () => {
   it("sends reply events as plain messages instead of quoted replies", async () => {
     const { sock, registry, sentMessages } = createMockSock();
-    const io = createTurnIo({
+    const io = createChannelInputIo({
       sock,
       chatId: "test-chat",
       message: /** @type {BaileysMessage} */ ({
@@ -802,7 +802,7 @@ describe("createTurnIo", () => {
     /** @type {BaileysSocket | null} */
     let currentSocket = oldSocket.sock;
 
-    const io = createTurnIo({
+    const io = createChannelInputIo({
       sock: oldSocket.sock,
       getSocket: () => currentSocket,
       chatId: "test-chat",
@@ -835,7 +835,7 @@ describe("createTurnIo", () => {
     const db = await createTestDb();
     const store = await initStore(db);
     const { sock, registry } = createMockSock();
-    const io = createTurnIo({
+    const io = createChannelInputIo({
       sock,
       chatId,
       message: /** @type {BaileysMessage} */ ({
@@ -867,7 +867,7 @@ describe("createTurnIo", () => {
   it("queues reply events persistently when the live socket is unavailable", async () => {
     const chatId = `queued-turn-io-${Date.now()}`;
     const db = await createTestDb();
-    const io = createTurnIo({
+    const io = createChannelInputIo({
       sock: createMockSock().sock,
       getSocket: () => null,
       chatId,
@@ -923,7 +923,7 @@ describe("createTurnIo", () => {
       },
       sendPresenceUpdate: async () => {},
     }));
-    const io = createTurnIo({
+    const io = createChannelInputIo({
       sock,
       getSocket: () => sock,
       chatId,
@@ -1030,7 +1030,7 @@ describe("createTurnIo", () => {
       `Expected composing before and after outbound work, got: ${JSON.stringify(presenceUpdates)}`,
     );
 
-    await finishTurnIo(io);
+    await finishChannelInputIo(io);
   });
 
   it("ends the active lease before select prompts", async () => {

@@ -9,7 +9,7 @@ describe("workspace lifecycle service", () => {
     const createCalls = [];
     /** @type {Array<{ workspaceId: string, promptText: string }>} */
     const presentedPrompts = [];
-    /** @type {ChatTurn[]} */
+    /** @type {ChannelInput[]} */
     const dispatchedTurns = [];
     /** @type {Array<{ workspaceId: string, event: OutboundEvent }>} */
     const workspaceEvents = [];

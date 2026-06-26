@@ -11,7 +11,7 @@ process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createChannelInput, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { createAcpTestHarnessState, registerAcpTestHarness } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import { getChatWorkDir } from "../utils.js";
@@ -249,7 +249,7 @@ async function getWorkspaceSurface(workspaceId) {
 
 /**
  * @param {{ transport?: ChatTransport }} [options]
- * @returns {Promise<(msg: ChatTurn) => Promise<void>>}
+ * @returns {Promise<(msg: ChannelInput) => Promise<void>>}
  */
 async function createHandler(options = {}) {
   process.env.BASE_URL = mockServer.url;
@@ -298,7 +298,7 @@ describe("workspace lifecycle", () => {
 
     await seedChat("repo-create-fail-chat", { harnessCwd: repoRoot });
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId: "repo-create-fail-chat",
       content: [{ type: "text", text: "!new asd" }],
     });
@@ -318,7 +318,7 @@ describe("workspace lifecycle", () => {
 
     await seedChat("repo-duplicate-chat", { harnessCwd: repoRoot });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "repo-duplicate-chat",
       chatName: repoChatName,
       content: [{ type: "text", text: "!new payments" }],
@@ -330,7 +330,7 @@ describe("workspace lifecycle", () => {
     assert.ok(originalWorkspace);
     await fs.writeFile(path.join(originalWorkspace.worktree_path, "replace-marker.txt"), "old workspace\n");
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId: "repo-duplicate-chat",
       chatName: repoChatName,
       content: [{ type: "text", text: "!new payments" }],
@@ -372,7 +372,7 @@ describe("workspace lifecycle", () => {
 
     await seedChat("repo-named-chat", { harnessCwd: repoRoot });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "repo-named-chat",
       chatName: "Original Group",
       content: [{ type: "text", text: "!new payments" }],
@@ -406,7 +406,7 @@ describe("workspace lifecycle", () => {
       media_to_text_models: { general: "openai/gpt-4.1-mini", image: "openai/gpt-4.1" },
     }));
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "repo-create-chat",
       content: [{ type: "text", text: "!new payments" }],
     });
@@ -481,7 +481,7 @@ describe("workspace lifecycle", () => {
       "observer@s.whatsapp.net",
     ]);
 
-    const { context } = createChatTurn({
+    const { context } = createChannelInput({
       chatId: "repo-community-chat",
       content: [{ type: "text", text: "!new community bug" }],
     });
@@ -512,7 +512,7 @@ describe("workspace lifecycle", () => {
 
     await seedChat("repo-seeded-chat", { harnessCwd: repoRoot });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "repo-seeded-chat",
       content: [{ type: "text", text: "!new multi word branch: investigate duplicate charges" }],
     });
@@ -580,7 +580,7 @@ describe("workspace lifecycle", () => {
 
     await seedChat("repo-parent-chat", { harnessCwd: repoRoot });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "repo-parent-chat",
       content: [{ type: "text", text: "!new parent branch" }],
     }).context);
@@ -591,7 +591,7 @@ describe("workspace lifecycle", () => {
     assert.ok(parentWorkspace, "parent workspace should exist");
     const parentSurface = await getWorkspaceSurface(parentWorkspace.workspace_id);
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: parentSurface.workspace_chat_id,
       content: [{ type: "text", text: "!new child branch" }],
     });
@@ -610,7 +610,7 @@ describe("workspace lifecycle", () => {
     const chatId = "fresh-group-chat";
     const chatName = "Original Group";
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId,
       chatName,
       content: [{ type: "text", text: "!new payments" }],
@@ -655,7 +655,7 @@ describe("workspace lifecycle", () => {
     const chatId = "primary-workspace-chat";
     const chatName = "Original Group";
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId,
       chatName,
       content: [{ type: "text", text: `!new ${chatName}` }],
@@ -685,7 +685,7 @@ describe("workspace lifecycle", () => {
 
     await seedChat("repo-happy-chat", { harnessCwd: repoRoot });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "repo-happy-chat",
       content: [{ type: "text", text: "!new payments" }],
     }).context);
@@ -697,14 +697,14 @@ describe("workspace lifecycle", () => {
     const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     await writeTrackedFile(workspace.worktree_path, "workspace change");
 
-    let turn = createChatTurn({
+    let turn = createChannelInput({
       chatId: workspaceSurface.workspace_chat_id,
       content: [{ type: "text", text: "!diff" }],
     });
     await handleMessage(turn.context);
     assert.ok(turn.responses.some((response) => response.text.includes("app.txt")));
 
-    turn = createChatTurn({
+    turn = createChannelInput({
       chatId: workspaceSurface.workspace_chat_id,
       content: [{ type: "text", text: "!commit Update app" }],
     });

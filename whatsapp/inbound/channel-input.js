@@ -1,0 +1,820 @@
+import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { normalizeChatId, reattachHdDeferreds } from "../../whatsapp-hd-media.js";
+import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
+import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
+import { getDirectMessageText, getMessageContent } from "./message-content.js";
+import { sendOrQueueWhatsAppEvent } from "../outbound/persistent-queue.js";
+import { createReactionRuntime } from "../runtime/reaction-runtime.js";
+
+const DEFAULT_PRESENCE_LEASE_TTL_MS = 20_000;
+const WHATSAPP_PRESENCE_PULSE_INTERVAL_MS = 8_000;
+const HARD_IGNORE_PREFIX = "//";
+const ASSISTANT_SOURCE_PREFIX = "🤖 ";
+
+/**
+ * Escape a string for safe use inside a RegExp.
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Extract the bot's own IDs without the WhatsApp suffix.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {string[]}
+ */
+function getSelfIds(sock) {
+  /** @type {string[]} */
+  const ids = [];
+  const id = sock.user?.id?.split(":")[0] || sock.user?.id;
+  const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
+  if (id) ids.push(id);
+  if (lid) ids.push(lid);
+  return ids;
+}
+
+/**
+ * Build the bot-mention prefix matcher for the current bot IDs.
+ * @param {string[]} selfIds
+ * @returns {RegExp | null}
+ */
+function createBotMentionPrefix(selfIds) {
+  if (selfIds.length === 0) return null;
+  return new RegExp(`^@(?:${selfIds.map(escapeRegExp).join("|")})\\s*`, "g");
+}
+
+/**
+ * Detect whether any text content block addresses the bot.
+ * @param {IncomingContentBlock[]} content
+ * @param {string[]} selfIds
+ * @returns {boolean}
+ */
+function detectBotMention(content, selfIds) {
+  return content.some((block) => block.type === "text"
+    && selfIds.some((selfId) => block.text.includes(`@${selfId}`)));
+}
+
+/**
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isTransientAssistantReasoningDisplay(text) {
+  if (!text.startsWith(ASSISTANT_SOURCE_PREFIX)) {
+    return false;
+  }
+
+  const body = text.slice(ASSISTANT_SOURCE_PREFIX.length).trim();
+  return body === "Thinking..."
+    || body === "Thought"
+    || body === "*Thinking*"
+    || body === "*Thought*"
+    || body.startsWith("*Thinking*\n\n")
+    || body.startsWith("*Thought*\n\n");
+}
+
+/**
+ * Remove bot-authored transient reasoning UI from quoted prompt context while
+ * keeping stable bot answers and the quoted sender facts intact.
+ * @param {IncomingContentBlock[]} content
+ * @param {boolean} repliedToBot
+ * @returns {IncomingContentBlock[]}
+ */
+function normalizeBotQuotedContent(content, repliedToBot) {
+  if (!repliedToBot) {
+    return content;
+  }
+
+  /** @type {IncomingContentBlock[]} */
+  const normalized = [];
+  for (const block of content) {
+    if (block.type !== "quote") {
+      normalized.push(block);
+      continue;
+    }
+
+    const quoteContent = block.content.filter((quotedBlock) =>
+      quotedBlock.type !== "text" || !isTransientAssistantReasoningDisplay(quotedBlock.text));
+    if (quoteContent.length === 0) {
+      continue;
+    }
+    normalized.push({ ...block, content: quoteContent });
+  }
+  return normalized;
+}
+
+/**
+ * Strip a leading bot mention from the first text block in group chats.
+ * @param {IncomingContentBlock[]} content
+ * @param {string[]} selfIds
+ * @returns {IncomingContentBlock[]}
+ */
+function normalizeContent(content, selfIds) {
+  const prefixPattern = createBotMentionPrefix(selfIds);
+  if (!prefixPattern) return content;
+
+  let firstTextSeen = false;
+  return content.map((block) => {
+    if (block.type !== "text" || firstTextSeen) {
+      return block;
+    }
+    firstTextSeen = true;
+    return {
+      ...block,
+      text: block.text.replace(prefixPattern, ""),
+    };
+  });
+}
+
+/**
+ * Detect transport-level control messages that should never become app turns.
+ * @param {BaileysMessage} baileysMessage
+ * @returns {boolean}
+ */
+function shouldHardIgnoreMessage(baileysMessage) {
+  const directText = getDirectMessageText(baileysMessage);
+  return typeof directText === "string" && directText.startsWith(HARD_IGNORE_PREFIX);
+}
+
+/**
+ * Extract sender identifiers from a Baileys message key.
+ * @param {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} key
+ * @returns {string[]}
+ */
+function extractSenderIds(key) {
+  /** @type {string[]} */
+  const senderIds = [];
+  senderIds.push(String(key.participant || key.remoteJid || "unknown"));
+  senderIds.push(String(
+    key.participantLid
+    || key.participantPid
+    || key.senderLid
+    || key.senderPid
+    || "unknown",
+  ));
+
+  return senderIds.map((senderId) => senderId.split("@")[0]);
+}
+
+/**
+ * Extract full sender JIDs from a Baileys message key.
+ * The first entry is the primary participant/remote JID; later entries are
+ * secondary addressing forms such as LID identifiers.
+ * @param {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} key
+ * @returns {string[]}
+ */
+function extractSenderJids(key) {
+  return [
+    key.participant || key.remoteJid || "unknown@s.whatsapp.net",
+    key.participantLid
+      || key.participantPid
+      || key.senderLid
+      || key.senderPid
+      || null,
+  ].filter(/** @returns {jid is string} */ (jid) => typeof jid === "string");
+}
+
+/**
+ * Normalize sender JIDs so downstream code can safely reuse them for transport
+ * operations like group creation.
+ * @param {ReturnType<typeof extractSenderJids>} senderJids
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {Promise<string[]>}
+ */
+async function normalizeSenderJids(senderJids, sock) {
+  const normalized = await Promise.all(senderJids.map((jid) => normalizeChatId(jid, sock)));
+  return [...new Set(normalized)];
+}
+
+/**
+ * Convert a Baileys timestamp into a Date.
+ * @param {BaileysMessage["messageTimestamp"]} value
+ * @returns {Date}
+ */
+function normalizeTimestamp(value) {
+  if (typeof value === "number") {
+    return new Date(value * 1000);
+  }
+  if (!value) {
+    return new Date();
+  }
+  return new Date(value.toNumber() * 1000);
+}
+
+/**
+ * Resolve a human-readable chat title when one is available.
+ * Groups use the subject; 1:1 chats fall back to the sender display name.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {boolean} isGroup
+ * @param {string} senderName
+ * @returns {Promise<string>}
+ */
+async function resolveChatName(sock, chatId, isGroup, senderName) {
+  if (!isGroup) {
+    return senderName;
+  }
+  if (typeof sock.groupMetadata !== "function") {
+    return "";
+  }
+  try {
+    const metadata = await sock.groupMetadata(chatId);
+    return typeof metadata.subject === "string" ? metadata.subject : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Build a per-chat presence lease controller.
+ * The lease lifecycle is semantic: start, keepAlive, end.
+ * The WhatsApp-specific composing pulse cadence is owned here.
+ * @param {{
+ *   sendPresenceUpdate: (presence: "composing" | "paused", chatId: string) => Promise<void>,
+ *   chatId: string,
+ *   defaultLeaseTtlMs?: number,
+ *   pulseIntervalMs?: number,
+ * }} input
+ * @returns {{
+ *   start: (ttlMs: number) => Promise<void>,
+ *   keepAlive: (ttlMs?: number) => Promise<void>,
+ *   afterOutboundMessage: () => Promise<void>,
+ *   end: () => Promise<void>,
+ * }}
+ */
+function createPresenceLeaseController({
+  sendPresenceUpdate,
+  chatId,
+  defaultLeaseTtlMs = DEFAULT_PRESENCE_LEASE_TTL_MS,
+  pulseIntervalMs = WHATSAPP_PRESENCE_PULSE_INTERVAL_MS,
+}) {
+  let active = false;
+  let leaseTtlMs = defaultLeaseTtlMs;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let leaseTimer = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let pulseTimer = null;
+
+  function clearLeaseTimer() {
+    if (leaseTimer) {
+      clearTimeout(leaseTimer);
+      leaseTimer = null;
+    }
+  }
+
+  function clearPulseTimer() {
+    if (pulseTimer) {
+      clearTimeout(pulseTimer);
+      pulseTimer = null;
+    }
+  }
+
+  function clearTimers() {
+    clearLeaseTimer();
+    clearPulseTimer();
+  }
+
+  /**
+   * @returns {Promise<void>}
+   */
+  async function pauseAndRelease() {
+    if (!active) {
+      leaseTtlMs = defaultLeaseTtlMs;
+      clearTimers();
+      return;
+    }
+    active = false;
+    leaseTtlMs = defaultLeaseTtlMs;
+    clearTimers();
+    await sendPresenceUpdate("paused", chatId);
+  }
+
+  function schedulePulse() {
+    clearPulseTimer();
+    if (!active) {
+      return;
+    }
+    pulseTimer = setTimeout(() => {
+      void (async () => {
+        if (!active) {
+          return;
+        }
+        try {
+          await sendPresenceUpdate("composing", chatId);
+        } catch {
+          return;
+        }
+        schedulePulse();
+      })();
+    }, pulseIntervalMs);
+  }
+
+  /**
+   * @param {number} ttlMs
+   */
+  function scheduleLeaseExpiry(ttlMs) {
+    clearLeaseTimer();
+    leaseTimer = setTimeout(() => {
+      void pauseAndRelease().catch(() => {});
+    }, ttlMs);
+  }
+
+  /**
+   * @param {number} ttlMs
+   * @returns {Promise<void>}
+   */
+  async function activateLease(ttlMs) {
+    active = true;
+    leaseTtlMs = ttlMs;
+    clearTimers();
+    await sendPresenceUpdate("composing", chatId);
+    scheduleLeaseExpiry(ttlMs);
+    schedulePulse();
+  }
+
+  return {
+    start: async (ttlMs) => {
+      await activateLease(ttlMs);
+    },
+    keepAlive: async (ttlMs) => {
+      const nextTtlMs = ttlMs ?? leaseTtlMs;
+      if (!active) {
+        await activateLease(nextTtlMs);
+        return;
+      }
+      leaseTtlMs = nextTtlMs;
+      scheduleLeaseExpiry(nextTtlMs);
+    },
+    afterOutboundMessage: async () => {
+      if (!active) {
+        return;
+      }
+      await sendPresenceUpdate("composing", chatId);
+      schedulePulse();
+    },
+    end: async () => {
+      await pauseAndRelease();
+    },
+  };
+}
+
+/** @type {WeakMap<ChannelInputIO, ReturnType<typeof createPresenceLeaseController>>} */
+const channelInputPresenceControllers = new WeakMap();
+
+/**
+ * End any WhatsApp-owned presence lease attached to a ChannelInput IO object.
+ * Kept out of ChannelInputIO so app/conversation code does not depend on presence.
+ * @param {ChannelInputIO} io
+ * @returns {Promise<void>}
+ */
+export async function finishChannelInputIo(io) {
+  await channelInputPresenceControllers.get(io)?.end();
+}
+
+/**
+ * Create the message-scoped ChannelInputIO functions.
+ * @param {{
+ *   sock: import('@whiskeysockets/baileys').WASocket;
+ *   getSocket?: () => import('@whiskeysockets/baileys').WASocket | null;
+ *   chatId: string;
+ *   message: BaileysMessage;
+ *   senderIds: string[];
+ *   isGroup: boolean;
+ *   selectRuntime: import("../runtime/select-runtime.js").SelectRuntime;
+ *   confirmRuntime: import("../runtime/confirm-runtime.js").ConfirmRuntime;
+ *   reactionRuntime: import("../runtime/reaction-runtime.js").ReactionRuntime;
+ *   outboundStore?: import("../../store.js").Store;
+ *   scheduleQueuedOutboundRetry?: () => void;
+ *   presenceConfig?: {
+ *     defaultLeaseTtlMs?: number,
+ *     pulseIntervalMs?: number,
+ *   };
+ * }} input
+ * @returns {ChannelInputIO}
+ */
+export function createChannelInputIo({
+  sock,
+  getSocket,
+  chatId,
+  message,
+  senderIds,
+  isGroup,
+  selectRuntime,
+  confirmRuntime,
+  reactionRuntime,
+  outboundStore,
+  scheduleQueuedOutboundRetry,
+  presenceConfig,
+}) {
+  /**
+   * Resolve the current live socket for outbound operations.
+   * @returns {import('@whiskeysockets/baileys').WASocket}
+   */
+  function requireSocket() {
+    const activeSocket = getSocket ? getSocket() : sock;
+    if (!activeSocket) {
+      throw new Error("WhatsApp socket is not connected");
+    }
+    return activeSocket;
+  }
+
+  const presence = createPresenceLeaseController({
+    sendPresenceUpdate: async (presenceState, targetChatId) => {
+      await requireSocket().sendPresenceUpdate(presenceState, targetChatId);
+    },
+    chatId,
+    defaultLeaseTtlMs: presenceConfig?.defaultLeaseTtlMs,
+    pulseIntervalMs: presenceConfig?.pulseIntervalMs,
+  });
+
+  /**
+   * Re-assert composing after visible outbound messages without delaying the
+   * next harness step.
+   * @returns {void}
+   */
+  function refreshComposingAfterOutboundMessage() {
+    void presence.afterOutboundMessage().catch(() => {});
+  }
+
+  /**
+   * Ensure WhatsApp shows a working indicator before visible outbound work.
+   * Presence failures are transport hints only; they must not block delivery.
+   * @returns {Promise<void>}
+   */
+  async function markWorkingBeforeOutboundMessage() {
+    await presence.keepAlive().catch(() => {});
+  }
+
+  /**
+   * Resolve the current socket when available, otherwise return null so the
+   * outbound event can be persisted for replay after reconnect.
+   * @returns {import('@whiskeysockets/baileys').WASocket | null}
+   */
+  function getSocketOrNull() {
+    try {
+      return requireSocket();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * @param {MessageHandle | undefined} handle
+   * @returns {void}
+   */
+  function scheduleQueuedReplayIfNeeded(handle) {
+    if (handle?.deliveryStatus === "queued") {
+      scheduleQueuedOutboundRetry?.();
+    }
+  }
+
+  const select = selectRuntime.createSelect(getSocket ?? sock, chatId);
+  const selectMany = selectRuntime.createSelectMany(getSocket ?? sock, chatId);
+  const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
+
+  /**
+   * @param {OutboundEvent} event
+   * @returns {{ quoted?: BaileysMessage } | undefined}
+   */
+  function resolveReplyOptions(event) {
+    if (event.kind === "app_message" && event.replyToTriggeringMessage) {
+      return { quoted: message };
+    }
+    return undefined;
+  }
+
+  /** @type {ChannelInputIO} */
+  const io = {
+    send: async (event) => {
+      await markWorkingBeforeOutboundMessage();
+      const handle = await sendOrQueueWhatsAppEvent({
+        getSocket: getSocketOrNull,
+        chatId,
+        event,
+        reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
+      });
+      scheduleQueuedReplayIfNeeded(handle);
+      refreshComposingAfterOutboundMessage();
+      return handle;
+    },
+    reply: async (event) => {
+      await markWorkingBeforeOutboundMessage();
+      const handle = await sendOrQueueWhatsAppEvent({
+        getSocket: getSocketOrNull,
+        chatId,
+        event,
+        options: resolveReplyOptions(event),
+        reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
+      });
+      scheduleQueuedReplayIfNeeded(handle);
+      refreshComposingAfterOutboundMessage();
+      return handle;
+    },
+    select: async (question, options, config) => {
+      await presence.end().catch(() => {});
+      return select(question, options, config);
+    },
+    selectMany: async (question, options, config) => {
+      await presence.end().catch(() => {});
+      return selectMany(question, options, config);
+    },
+    confirm: async (prompt, hooks) => {
+      await presence.end().catch(() => {});
+      return confirm(prompt, hooks);
+    },
+    react: async (emoji) => {
+      await requireSocket().sendMessage(chatId, {
+        react: { text: emoji, key: message.key },
+      });
+    },
+    prepareMediaRegistry: ({ chatId: registryChatId, mediaRegistry }) => {
+      reattachHdDeferreds(registryChatId, mediaRegistry);
+    },
+    getIsAdmin: async () => {
+      if (!isGroup) return true;
+
+      try {
+        const groupMetadata = await requireSocket().groupMetadata(chatId);
+        const participant = groupMetadata.participants.find((member) => senderIds.includes(member.id.split("@")[0]));
+        return participant?.admin === "admin" || participant?.admin === "superadmin";
+      } catch {
+        return false;
+      }
+    },
+  };
+  channelInputPresenceControllers.set(io, presence);
+  return io;
+}
+
+/**
+ * Normalize a Baileys message into a ChannelInput.
+ * Returns null when the message should be ignored by the app layer.
+ * @param {BaileysMessage} baileysMessage
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
+ * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
+ * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
+ * @returns {Promise<ChannelInput | null>}
+ */
+export async function buildChannelInput(
+  baileysMessage,
+  sock,
+  confirmRuntime,
+  selectRuntime,
+  reactionRuntime = createReactionRuntime(),
+  downloadFn = downloadMediaMessage,
+  ioOptions,
+) {
+  const incomingEvent = classifyIncomingMessageEvent(baileysMessage);
+  if (incomingEvent.kind !== "channel_input") {
+    return null;
+  }
+  const inputMessage = incomingEvent.message;
+  if (shouldHardIgnoreMessage(inputMessage)) {
+    return null;
+  }
+
+  const rawChatId = inputMessage.key.remoteJid || "";
+  const chatId = await normalizeChatId(rawChatId, sock);
+  const {
+    content,
+    quotedSenderId,
+    quotedSenderJid,
+    quotedSenderName,
+    hdLifecycle,
+  } = await getMessageContent(inputMessage, downloadFn);
+  await applyHdInboundLifecycle({ rawChatId, chatId, lifecycle: hdLifecycle });
+
+  if (content.length === 0) {
+    return null;
+  }
+
+  const key = /** @type {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (inputMessage.key);
+  const senderIds = extractSenderIds(key);
+  const senderJids = await normalizeSenderJids(extractSenderJids(key), sock);
+  const isGroup = chatId.endsWith("@g.us");
+  const selfIds = getSelfIds(sock);
+  const addressedToBot = detectBotMention(content, selfIds);
+  const repliedToBot = quotedSenderId ? selfIds.includes(quotedSenderId) : false;
+  const botQuoteNormalizedContent = normalizeBotQuotedContent(content, repliedToBot);
+  if (botQuoteNormalizedContent.length === 0) {
+    return null;
+  }
+  const normalizedContent = isGroup ? normalizeContent(botQuoteNormalizedContent, selfIds) : botQuoteNormalizedContent;
+  const senderName = inputMessage.pushName || "";
+  const chatName = await resolveChatName(sock, chatId, isGroup, senderName);
+  const io = createChannelInputIo({
+    sock,
+    getSocket: ioOptions?.getSocket,
+    chatId,
+    message: inputMessage,
+    senderIds,
+    isGroup,
+    selectRuntime,
+    confirmRuntime,
+    reactionRuntime,
+    outboundStore: ioOptions?.outboundStore,
+    scheduleQueuedOutboundRetry: ioOptions?.scheduleQueuedOutboundRetry,
+  });
+
+  /** @type {ChannelInput} */
+  const channelInput = {
+    chatId,
+    senderIds,
+    senderJids,
+    senderName: inputMessage.pushName || "",
+    chatName,
+    content: normalizedContent,
+    timestamp: normalizeTimestamp(inputMessage.messageTimestamp),
+    facts: {
+      isGroup,
+      addressedToBot,
+      repliedToBot,
+      ...(quotedSenderId && { quotedSenderId }),
+      ...(quotedSenderJid && { quotedSenderJid }),
+      ...(quotedSenderName && { quotedSenderName }),
+    },
+    io,
+  };
+
+  return channelInput;
+}
+
+/**
+ * Adapt a Baileys message and invoke the app-level ChannelInput handler.
+ * @param {BaileysMessage} baileysMessage
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {(message: ChannelInput) => Promise<void>} messageHandler
+ * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
+ * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
+ * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
+ * @returns {Promise<void>}
+ */
+export async function adaptIncomingMessage(
+  baileysMessage,
+  sock,
+  messageHandler,
+  confirmRuntime,
+  selectRuntime,
+  reactionRuntime = createReactionRuntime(),
+  downloadFn = downloadMediaMessage,
+  ioOptions,
+) {
+  const channelInput = await buildChannelInput(
+    baileysMessage,
+    sock,
+    confirmRuntime,
+    selectRuntime,
+    reactionRuntime,
+    downloadFn,
+    ioOptions,
+  );
+
+  if (!channelInput) {
+    return;
+  }
+
+  try {
+    await messageHandler(channelInput);
+  } finally {
+    await finishChannelInputIo(channelInput.io).catch(() => {});
+  }
+}
+
+/**
+ * @param {ChannelInput} channelInput
+ * @returns {string | null}
+ */
+function getFirstText(channelInput) {
+  const firstTextBlock = channelInput.content.find((block) => block.type === "text");
+  return firstTextBlock?.type === "text" ? firstTextBlock.text : null;
+}
+
+/**
+ * Commands must keep their original message boundary. If a Baileys flush
+ * delivers "text, text, !command" together, merging them would hide the
+ * command from the app command router because it only inspects the first text.
+ * @param {ChannelInput} channelInput
+ * @returns {boolean}
+ */
+function isCommandBoundaryChannelInput(channelInput) {
+  const text = getFirstText(channelInput);
+  return !!text && (text.startsWith("!") || text.startsWith("/"));
+}
+
+/**
+ * @param {ChannelInput[]} channelInputs
+ * @returns {ChannelInput}
+ */
+function mergeChannelInputs(channelInputs) {
+  const firstChannelInput = channelInputs[0];
+  if (!firstChannelInput) {
+    throw new Error("Cannot merge an empty ChannelInput batch.");
+  }
+  return {
+    ...firstChannelInput,
+    content: channelInputs.flatMap((channelInput) => channelInput.content),
+    timestamp: new Date(Math.min(...channelInputs.map((channelInput) => channelInput.timestamp.getTime()))),
+    facts: {
+      ...firstChannelInput.facts,
+      addressedToBot: channelInputs.some((channelInput) => channelInput.facts.addressedToBot),
+      repliedToBot: channelInputs.some((channelInput) => channelInput.facts.repliedToBot),
+    },
+  };
+}
+
+/**
+ * @param {ChannelInput[]} channelInputs
+ * @returns {ChannelInput[][]}
+ */
+function splitChannelInputsAtCommandBoundaries(channelInputs) {
+  /** @type {ChannelInput[][]} */
+  const groups = [];
+  /** @type {ChannelInput[]} */
+  let current = [];
+
+  for (const channelInput of channelInputs) {
+    const currentHasCommand = current.some(isCommandBoundaryChannelInput);
+    if (current.length > 0 && (currentHasCommand || isCommandBoundaryChannelInput(channelInput))) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(channelInput);
+  }
+
+  if (current.length > 0) {
+    groups.push(current);
+  }
+  return groups;
+}
+
+/**
+ * Adapt multiple Baileys messages from one transport-level user action and
+ * invoke the app-level ChannelInput handler once with their content merged in arrival
+ * order.
+ * @param {BaileysMessage[]} baileysMessages
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {(message: ChannelInput) => Promise<void>} messageHandler
+ * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
+ * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
+ * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
+ * @returns {Promise<void>}
+ */
+export async function adaptIncomingMessages(
+  baileysMessages,
+  sock,
+  messageHandler,
+  confirmRuntime,
+  selectRuntime,
+  reactionRuntime = createReactionRuntime(),
+  downloadFn = downloadMediaMessage,
+  ioOptions,
+) {
+  /** @type {ChannelInput[]} */
+  const channelInputs = [];
+  for (const baileysMessage of baileysMessages) {
+    const channelInput = await buildChannelInput(
+      baileysMessage,
+      sock,
+      confirmRuntime,
+      selectRuntime,
+      reactionRuntime,
+      downloadFn,
+      ioOptions,
+    );
+    if (channelInput) {
+      channelInputs.push(channelInput);
+    }
+  }
+
+  if (channelInputs.length === 0) {
+    return;
+  }
+
+  if (channelInputs.length === 1) {
+    try {
+      await messageHandler(channelInputs[0]);
+    } finally {
+      await finishChannelInputIo(channelInputs[0].io).catch(() => {});
+    }
+    return;
+  }
+
+  for (const group of splitChannelInputsAtCommandBoundaries(channelInputs)) {
+    const channelInput = group.length === 1 ? group[0] : mergeChannelInputs(group);
+    try {
+      await messageHandler(channelInput);
+    } finally {
+      await finishChannelInputIo(channelInput.io).catch(() => {});
+    }
+  }
+}

@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
 
-import { createChatTurn, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createChannelInput, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
 import { updateChatConfig } from "../chat-config.js";
 
@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 let db;
 /** @type {Awaited<ReturnType<typeof import("../store.js").initStore>>} */
 let store;
-/** @type {(msg: ChatTurn) => Promise<void>} */
+/** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
 /** @type {typeof import("../harnesses/index.js").registerHarnessDriver} */
 let registerHarnessDriver;
@@ -92,7 +92,7 @@ describe("/diff slash command", () => {
 
       /** @type {OutboundEvent[]} */
       const events = [];
-      const { context } = createChatTurn({
+      const { context } = createChannelInput({
         chatId,
         chatName: "Diff Repo",
         content: [{ type: "text", text: "/diff" }],
@@ -137,7 +137,7 @@ describe("/diff slash command", () => {
 
       /** @type {OutboundEvent[]} */
       const events = [];
-      const { context } = createChatTurn({
+      const { context } = createChannelInput({
         chatId,
         chatName: "Diff Repo",
         content: [{ type: "text", text: "/diff 1" }],
@@ -356,7 +356,7 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId: "conv-adapter-session-start",
       content: [{ type: "text", text: "hello" }],
     });
@@ -479,7 +479,7 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId: "conv-semantic-events",
       content: [{ type: "text", text: "hello" }],
       io: {
@@ -608,11 +608,11 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const turnA = createChatTurn({
+    const turnA = createChannelInput({
       chatId: chatA,
       content: [{ type: "text", text: "hello from A" }],
     });
-    const turnB = createChatTurn({
+    const turnB = createChannelInput({
       chatId: chatB,
       content: [{ type: "text", text: "hello from B" }],
     });
@@ -683,7 +683,7 @@ describe("createConversationRunner prompt formatting", () => {
       },
     }));
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId: "conv-codex-runtime-progress",
       content: [{ type: "text", text: "hello" }],
     });
@@ -757,7 +757,7 @@ describe("createConversationRunner prompt formatting", () => {
       },
     });
 
-    const firstTurn = createChatTurn({
+    const firstTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "first" }],
     });
@@ -778,7 +778,7 @@ describe("createConversationRunner prompt formatting", () => {
       },
     }));
 
-    const secondTurn = createChatTurn({
+    const secondTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "second" }],
     });
@@ -791,7 +791,7 @@ describe("createConversationRunner prompt formatting", () => {
     await firstHandled;
     assert.ok(!phases.includes("create:personal"), `did not expect personal instance before a new post-turn message, got ${JSON.stringify(phases)}`);
 
-    const thirdTurn = createChatTurn({
+    const thirdTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "third" }],
     });
@@ -882,14 +882,14 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const firstTurn = createChatTurn({
+    const firstTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "first" }],
     });
     const firstHandled = handleMessage(firstTurn.context);
     await waitUntil(() => phases.includes("send"));
 
-    const secondTurn = createChatTurn({
+    const secondTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "second" }],
     });
@@ -1002,14 +1002,14 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const firstTurn = createChatTurn({
+    const firstTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "first" }],
     });
     const firstHandled = runner.handleMessage(firstTurn.context);
     await waitUntil(() => phases.includes("run:1"));
 
-    const secondTurn = createChatTurn({
+    const secondTurn = createChannelInput({
       chatId,
       content: [{
         type: "audio",
@@ -1121,7 +1121,7 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const firstTurn = createChatTurn({
+    const firstTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "first" }],
     });
@@ -1130,7 +1130,7 @@ describe("createConversationRunner prompt formatting", () => {
 
     /** @type {MessageInspectState[]} */
     const inspectStates = [];
-    const secondTurn = createChatTurn({
+    const secondTurn = createChannelInput({
       chatId,
       content: [{
         type: "audio",
@@ -1266,14 +1266,14 @@ describe("createConversationRunner prompt formatting", () => {
       liveInputFallbackDelayMs: 5,
     });
 
-    const firstTurn = createChatTurn({
+    const firstTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "first" }],
     });
     const firstHandled = runner.handleMessage(firstTurn.context);
     await waitUntil(() => phases.includes("run:1"));
 
-    const secondTurn = createChatTurn({
+    const secondTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "ready" }],
     });
@@ -1392,14 +1392,14 @@ describe("createConversationRunner prompt formatting", () => {
       liveInputFallbackDelayMs: 5,
     });
 
-    const firstTurn = createChatTurn({
+    const firstTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "first" }],
     });
     const firstHandled = runner.handleMessage(firstTurn.context);
     await waitUntil(() => phases.includes("run:1"));
 
-    const secondTurn = createChatTurn({
+    const secondTurn = createChannelInput({
       chatId,
       content: [{
         type: "audio",
@@ -1439,7 +1439,7 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId: "conv-command-after-response",
       content: [{ type: "text", text: "!restart" }],
       io: {
@@ -1568,20 +1568,20 @@ describe("createConversationRunner prompt formatting", () => {
       }),
     });
 
-    const firstTurn = createChatTurn({
+    const firstTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "first" }],
     });
     const firstHandled = runner.handleMessage(firstTurn.context);
     await waitUntil(() => phases.includes("send"));
 
-    const restartTurn = createChatTurn({
+    const restartTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "!restart" }],
     });
     await runner.handleMessage(restartTurn.context);
 
-    const secondTurn = createChatTurn({
+    const secondTurn = createChannelInput({
       chatId,
       content: [{ type: "text", text: "this should inject after restart command" }],
     });
@@ -1629,7 +1629,7 @@ describe("createConversationRunner prompt formatting", () => {
       },
     }));
 
-    const turn = createChatTurn({
+    const turn = createChannelInput({
       chatId: "conv-prompt-group",
       senderName: "Alice",
       content: [{ type: "text", text: "hello" }],

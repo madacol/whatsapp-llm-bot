@@ -97,7 +97,7 @@ describe("http-api transport", () => {
       authToken: TOKEN,
     });
     transports.push(transport);
-    /** @type {ChatTurn[]} */
+    /** @type {ChannelInput[]} */
     const turns = [];
     await transport.start(async (turn) => {
       turns.push(turn);
@@ -248,7 +248,7 @@ describe("http-api transport", () => {
       },
     });
     transports.push(transport);
-    /** @type {ChatTurn[]} */
+    /** @type {ChannelInput[]} */
     const turns = [];
     await transport.start(async (turn) => {
       turns.push(turn);

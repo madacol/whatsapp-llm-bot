@@ -348,7 +348,7 @@ describe("message-event-classifier", () => {
     }
   });
 
-  it("ignores status broadcasts before turn parsing", () => {
+  it("ignores status broadcasts before channel input parsing", () => {
     assert.deepEqual(
       classifyIncomingMessageEvent(/** @type {BaileysMessage} */ ({
         key: {
@@ -364,7 +364,7 @@ describe("message-event-classifier", () => {
     );
   });
 
-  it("ignores non-reaction upserts", () => {
+  it("classifies non-reaction upserts as channel input", () => {
     const event = classifyIncomingMessageEvent(/** @type {BaileysMessage} */ ({
       key: {
         remoteJid: "chat@s.whatsapp.net",
@@ -376,7 +376,7 @@ describe("message-event-classifier", () => {
       },
     }));
 
-    assert.equal(event.kind, "turn");
+    assert.equal(event.kind, "channel_input");
   });
 
   it("normalizes direct reaction events with participantAlt fallback", () => {

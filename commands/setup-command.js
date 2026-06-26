@@ -33,7 +33,7 @@ function getHarnessSelectOptions(chat) {
 
 /**
  * @param {import("../store.js").ChatRow} chat
- * @param {TurnIO["select"]} select
+ * @param {ChannelInputIO["select"]} select
  * @returns {Promise<{ kind: "selected", stagedChanges: Array<{ setting: "trigger" | "harness", value: string }>, notes: string[] } | { kind: "cancelled" }>}
  */
 async function collectSetupSelections(chat, select) {

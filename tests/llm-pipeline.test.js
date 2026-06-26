@@ -6,7 +6,7 @@ process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createChannelInput, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { createAcpTestHarnessState, registerAcpTestHarness } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import { updateChatConfig } from "../chat-config.js";
@@ -17,7 +17,7 @@ let db;
 let store;
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {(msg: ChatTurn) => Promise<void>} */
+/** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
 
 const HARNESS_NAME = "pipeline-acp";
@@ -101,7 +101,7 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("stores a message, sends ACP turn input, and delivers provider response", async () => {
     await seedAcpChat("pipe-1", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-1",
       content: [{ type: "text", text: "Test message" }],
     });
@@ -121,7 +121,7 @@ describe("ACP pipeline via createMessageHandler", () => {
       controlChatId: "pipe-repo-chat",
     });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-repo-chat",
       content: [{ type: "text", text: "implement retry logic" }],
     });
@@ -134,7 +134,7 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("passes explicit chat prompt as ACP external instructions", async () => {
     await seedAcpChat("pipe-prompt", { enabled: true, systemPrompt: "You are a pirate" });
 
-    const { context } = createChatTurn({
+    const { context } = createChannelInput({
       chatId: "pipe-prompt",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -146,7 +146,7 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("sends unknown slash commands through the ACP turn path", async () => {
     await seedAcpChat("pipe-slash-unknown", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-slash-unknown",
       content: [{ type: "text", text: "/status" }],
     });
@@ -159,17 +159,17 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("clear then continue: ACP only sees post-clear messages", async () => {
     await seedAcpChat("pipe-clear-cont", { enabled: true });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "Remember this secret: ALPHA" }],
     }).context);
     await store.saveHarnessSession("pipe-clear-cont", { id: "stale-session", kind: "codex" });
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "!clear" }],
     }).context);
     assert.deepEqual(pipelineHarnessState.stoppedSessions, ["pipe-clear-cont"]);
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "What do you know?" }],
     }).context);
@@ -186,13 +186,13 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("starts a fresh ACP turn from text after !clear", async () => {
     await seedAcpChat("pipe-clear-inline-prompt", { enabled: true });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "pipe-clear-inline-prompt",
       content: [{ type: "text", text: "Remember this secret: BRAVO" }],
     }).context);
     await store.saveHarnessSession("pipe-clear-inline-prompt", { id: "stale-session", kind: "codex" });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-clear-inline-prompt",
       content: [{ type: "text", text: "!clear What remains after clearing?" }],
     });
@@ -215,13 +215,13 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("starts a fresh ACP turn from image and caption prompt after /clear", async () => {
     await seedAcpChat("pipe-slash-clear-image-caption", { enabled: true });
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "pipe-slash-clear-image-caption",
       content: [{ type: "text", text: "Remember this secret: CHARLIE" }],
     }).context);
     await store.saveHarnessSession("pipe-slash-clear-image-caption", { id: "stale-session", kind: "codex" });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-slash-clear-image-caption",
       content: [
         {
@@ -264,7 +264,7 @@ describe("ACP pipeline via createMessageHandler", () => {
     await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
       VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"third msg"}]}', ${oneHourAgo})`;
 
-    await handleMessage(createChatTurn({
+    await handleMessage(createChannelInput({
       chatId: "pipe-order",
       content: [{ type: "text", text: "fourth msg" }],
     }).context);
@@ -283,7 +283,7 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("leaves WhatsApp presence out of the conversation pipeline for ACP responses", async () => {
     await seedAcpChat("pipe-presence", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-presence",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -296,7 +296,7 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("leaves WhatsApp presence out of the conversation pipeline when ACP providers error", async () => {
     await seedAcpChat("pipe-presence-err", { enabled: true });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-presence-err",
       content: [{ type: "text", text: "Trigger provider error" }],
     });
@@ -310,7 +310,7 @@ describe("ACP pipeline via createMessageHandler", () => {
   it("does not send composing when bot decides not to respond", async () => {
     await seedAcpChat("pipe-presence-skip", { enabled: false });
 
-    const { context, responses } = createChatTurn({
+    const { context, responses } = createChannelInput({
       chatId: "pipe-presence-skip",
       content: [{ type: "text", text: "Hello" }],
     });

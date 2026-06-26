@@ -228,7 +228,7 @@ describe("WhatsApp transport community creation", () => {
   it("coalesces rapid same-chat turn messages before invoking the app handler", async () => {
     /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
     let processEvents = null;
-    /** @type {ChatTurn[]} */
+    /** @type {ChannelInput[]} */
     const turns = [];
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
@@ -934,7 +934,7 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `inbound-retry-${Date.now()}@g.us`;
-    /** @type {Array<ChatTurn>} */
+    /** @type {Array<ChannelInput>} */
     const deliveredTurns = [];
     let attempts = 0;
     /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
@@ -1039,7 +1039,7 @@ describe("WhatsApp transport community creation", () => {
     });
     /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
     let processEvents = null;
-    /** @type {Array<ChatTurn>} */
+    /** @type {Array<ChannelInput>} */
     const deliveredTurns = [];
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
