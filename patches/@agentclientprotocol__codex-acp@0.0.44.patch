@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8ed1c8aa7 100755
+index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e257714e4 100755
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -16757,6 +16757,115 @@ function createJsonStream(readable, writable) {
@@ -118,7 +118,47 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
  
  // src/Logger.ts
  import fs from "node:fs";
-@@ -17361,16 +17470,43 @@ function createFuzzyFileSearchComplete(event) {
+@@ -17297,6 +17406,39 @@ async function createMcpToolCallUpdate(item) {
+ async function createDynamicToolCallUpdate(item) {
+   return createExecuteToolCallUpdate(item, item.tool, { arguments: item.arguments });
+ }
++function normalizeCollabAgentToolName(tool) {
++  switch (tool) {
++    case "spawnAgent":
++      return "spawn_agent";
++    case "sendInput":
++      return "send_input";
++    case "wait":
++      return "wait_agent";
++    case "resumeAgent":
++      return "resume_agent";
++    case "closeAgent":
++      return "close_agent";
++  }
++  return tool;
++}
++function createCollabAgentToolCallUpdate(item) {
++  const receiverThreadIds = item.receiverThreadIds ?? item.receiver_thread_ids ?? [];
++  return {
++    sessionUpdate: item.status === "inProgress" ? "tool_call" : "tool_call_update",
++    toolCallId: item.id,
++    kind: "other",
++    title: normalizeCollabAgentToolName(item.tool),
++    status: toAcpStatus(item.status),
++    rawInput: {
++      ...(item.prompt ? { prompt: item.prompt } : {}),
++      ...(item.senderThreadId ? { senderThreadId: item.senderThreadId } : {}),
++      receiverThreadIds,
++      receiver_thread_ids: receiverThreadIds,
++      ...(item.agentsStates ? { agentsStates: item.agentsStates } : {}),
++      status: item.status
++    }
++  };
++}
+ async function createExecuteToolCallUpdate(item, title, rawInput, rawOutput) {
+   return {
+     sessionUpdate: "tool_call",
+@@ -17361,16 +17503,43 @@ function createFuzzyFileSearchComplete(event) {
      status: "completed"
    };
  }
@@ -164,7 +204,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      };
    } else if (commandAction.type === "search") {
      return {
-@@ -17378,16 +17514,22 @@ function createCommandActionEvent(id, status, cwd, commandAction) {
+@@ -17378,16 +17547,22 @@ function createCommandActionEvent(id, status, cwd, commandAction) {
        toolCallId: id,
        status: acpStatus,
        kind: "search",
@@ -189,7 +229,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      };
    }
    return {
-@@ -17419,6 +17561,13 @@ function createSearchTitle(query, path5) {
+@@ -17419,6 +17594,13 @@ function createSearchTitle(query, path5) {
    }
    return "Search";
  }
@@ -203,7 +243,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
  async function createPatchContent(change) {
    if (change.kind.type === "add" && !isUnifiedDiff(change.diff)) {
      return {
-@@ -17449,7 +17598,14 @@ async function createPatchContent(change) {
+@@ -17449,7 +17631,14 @@ async function createPatchContent(change) {
    if (oldContent === null) {
      return null;
    }
@@ -219,7 +259,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    if (newContent === false) {
      return null;
    }
-@@ -17457,9 +17613,10 @@ async function createPatchContent(change) {
+@@ -17457,9 +17646,10 @@ async function createPatchContent(change) {
      type: "diff",
      oldText: change.kind.type === "add" ? null : oldContent,
      newText: newContent,
@@ -232,7 +272,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      }
    };
  }
-@@ -17495,6 +17652,37 @@ function patchToDeletedContent(unifiedDiff) {
+@@ -17495,6 +17685,55 @@ function patchToDeletedContent(unifiedDiff) {
      return null;
    }
  }
@@ -267,10 +307,37 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
 +  const itemId = event && typeof event === "object" && typeof event.itemId === "string" ? event.itemId : "unknown";
 +  return `terminal-interaction:${itemId}`;
 +}
++function mergeNotificationMetaIntoUpdate(update, notification) {
++  const params = notification.params;
++  const notificationMeta = params && typeof params === "object" && isPlainObject(params._meta) ? params._meta : null;
++  if (!notificationMeta) {
++    return update;
++  }
++  const updateMeta = isPlainObject(update._meta) ? update._meta : {};
++  const notificationMadabot = isPlainObject(notificationMeta.madabot) ? notificationMeta.madabot : null;
++  const updateMadabot = isPlainObject(updateMeta.madabot) ? updateMeta.madabot : {};
++  return {
++    ...update,
++    _meta: {
++      ...updateMeta,
++      ...notificationMeta,
++      ...(notificationMadabot ? { madabot: { ...updateMadabot, ...notificationMadabot } } : {})
++    }
++  };
++}
  
  // src/CodexEventHandler.ts
  var CodexEventHandler = class {
-@@ -17563,17 +17751,19 @@ var CodexEventHandler = class {
+@@ -17513,7 +17752,7 @@ var CodexEventHandler = class {
+     const session = new ACPSessionConnection(this.connection, this.sessionState.sessionId);
+     const updateEvent = await this.createUpdateEvent(notification);
+     if (updateEvent) {
+-      await session.update(updateEvent);
++      await session.update(mergeNotificationMetaIntoUpdate(updateEvent, notification));
+     }
+   }
+   async createUpdateEvent(notification) {
+@@ -17563,17 +17802,19 @@ var CodexEventHandler = class {
          return this.handleFuzzyFileSearchSessionUpdated(notification.params);
        case "fuzzyFileSearch/sessionCompleted":
          return this.handleFuzzyFileSearchSessionCompleted(notification.params);
@@ -294,7 +361,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
        case "item/fileChange/outputDelta":
        case "item/fileChange/patchUpdated":
        case "account/updated":
-@@ -17667,6 +17857,69 @@ ${event.details}` : "";
+@@ -17667,6 +17908,69 @@ ${event.details}` : "";
        }
      };
    }
@@ -364,13 +431,14 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    async createItemEvent(event) {
      switch (event.item.type) {
        case "fileChange":
-@@ -17677,18 +17930,19 @@ ${event.details}` : "";
+@@ -17677,18 +17981,20 @@ ${event.details}` : "";
          return await createMcpToolCallUpdate(event.item);
        case "dynamicToolCall":
          return await createDynamicToolCallUpdate(event.item);
 +      case "webSearch":
 +        return this.createWebSearchItemUpdate(event.item);
        case "collabAgentToolCall":
++        return createCollabAgentToolCallUpdate(event.item);
        case "userMessage":
        case "hookPrompt":
        case "agentMessage":
@@ -386,7 +454,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
          return null;
      }
    }
-@@ -17711,21 +17965,26 @@ ${event.details}` : "";
+@@ -17711,21 +18017,27 @@ ${event.details}` : "";
          };
        case "commandExecution":
          return this.completeCommandExecutionEvent(event.item);
@@ -414,6 +482,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
 +          summary
 +        });
        case "collabAgentToolCall":
++        return createCollabAgentToolCallUpdate(event.item);
        case "userMessage":
        case "hookPrompt":
        case "agentMessage":
@@ -421,7 +490,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -19025,6 +19284,10 @@ var package_default = {
+@@ -19025,6 +19337,10 @@ var package_default = {
  };
  
  // src/CodexAcpClient.ts
@@ -432,7 +501,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
  var CodexAcpClient = class {
    codexClient;
    config;
-@@ -19201,6 +19464,28 @@ var CodexAcpClient = class {
+@@ -19201,6 +19517,28 @@ var CodexAcpClient = class {
        thread: response.thread
      };
    }
@@ -461,7 +530,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    async newSession(request) {
      await this.refreshSkills(request.cwd, request._meta);
      const response = await this.codexClient.threadStart({
-@@ -19327,13 +19612,28 @@ var CodexAcpClient = class {
+@@ -19327,13 +19665,28 @@ var CodexAcpClient = class {
        input,
        approvalPolicy: agentMode.approvalPolicy,
        sandboxPolicy: agentMode.sandboxPolicy,
@@ -491,7 +560,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    async listSkills(params) {
      return this.codexClient.listSkills(params ?? {});
    }
-@@ -19443,6 +19743,9 @@ var CodexAcpClient = class {
+@@ -19443,6 +19796,9 @@ var CodexAcpClient = class {
        turnId: params.turnId
      });
    }
@@ -501,7 +570,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    async fetchAvailableModels() {
      const models = [];
      let cursor = null;
-@@ -19900,7 +20203,9 @@ var CodexAcpServer = class {
+@@ -19900,7 +20256,9 @@ var CodexAcpServer = class {
          },
          sessionCapabilities: {
            resume: {},
@@ -512,7 +581,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
          },
          mcpCapabilities: {
            http: true,
-@@ -19912,6 +20217,26 @@ var CodexAcpServer = class {
+@@ -19912,6 +20270,26 @@ var CodexAcpServer = class {
    }
    async extMethod(method, params) {
      const methodRequest = { method, params };
@@ -539,7 +608,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      if (!isExtMethodRequest(methodRequest)) {
        return {};
      }
-@@ -19967,6 +20292,7 @@ var CodexAcpServer = class {
+@@ -19967,6 +20345,7 @@ var CodexAcpServer = class {
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -547,7 +616,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -19982,7 +20308,8 @@ var CodexAcpServer = class {
+@@ -19982,7 +20361,8 @@ var CodexAcpServer = class {
      this.publishAvailableCommandsAsync(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -557,7 +626,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    }
    async getActiveAccount() {
      if (this.codexAcpClient.getModelProvider()) {
-@@ -19997,6 +20324,7 @@ var CodexAcpServer = class {
+@@ -19997,6 +20377,7 @@ var CodexAcpServer = class {
        sessionId,
        modelState,
        modeState,
@@ -565,7 +634,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
        thread
      } = await this.getOrCreateSessionWithHistory(params);
      await this.streamThreadHistory(sessionId, thread);
-@@ -20007,12 +20335,13 @@ var CodexAcpServer = class {
+@@ -20007,12 +20388,13 @@ var CodexAcpServer = class {
      });
      return {
        models: modelState,
@@ -581,7 +650,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      logger.log("Session resumed", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20020,7 +20349,30 @@ var CodexAcpServer = class {
+@@ -20020,7 +20402,30 @@ var CodexAcpServer = class {
      });
      return {
        models: modelState,
@@ -613,7 +682,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      };
    }
    async listSessions(params) {
-@@ -20030,7 +20382,7 @@ var CodexAcpServer = class {
+@@ -20030,7 +20435,7 @@ var CodexAcpServer = class {
    }
    async newSession(params) {
      logger.log("Starting new session...");
@@ -622,7 +691,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      logger.log("New session created", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20039,7 +20391,8 @@ var CodexAcpServer = class {
+@@ -20039,7 +20444,8 @@ var CodexAcpServer = class {
      return {
        sessionId,
        models: modelState,
@@ -632,7 +701,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
      };
    }
    async authenticate(_params) {
-@@ -20102,6 +20455,42 @@ var CodexAcpServer = class {
+@@ -20102,6 +20508,42 @@ var CodexAcpServer = class {
      sessionState.supportedInputModalities = model.inputModalities;
      return {};
    }
@@ -675,23 +744,31 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    publishAvailableCommandsAsync(sessionId) {
      void this.availableCommands.publish(sessionId);
    }
-@@ -20145,6 +20534,7 @@ var CodexAcpServer = class {
+@@ -20145,6 +20587,55 @@ var CodexAcpServer = class {
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
 +      fastMode: false,
-       account,
-       cwd: request.cwd,
-       sessionMcpServers
-@@ -20160,10 +20550,60 @@ var CodexAcpServer = class {
-     await this.availableCommands.publish(sessionId);
-     const sessionModelState = this.createModelState(models, currentModelId);
-     const sessionModeState = sessionState.agentMode.toSessionModeState();
++      account,
++      cwd: request.cwd,
++      sessionMcpServers
++    };
++    this.sessions.set(sessionId, sessionState);
++    if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
++      this.pendingMcpStartupSessions.set(sessionId, {
++        requestedServers: new Set(requestedMcpServers.map((server) => server.name)),
++        afterVersion: mcpServerStartupVersion
++      });
++      this.publishMcpStartupStatusAsync(sessionId);
++    }
++    await this.availableCommands.publish(sessionId);
++    const sessionModelState = this.createModelState(models, currentModelId);
++    const sessionModeState = sessionState.agentMode.toSessionModeState();
 +    const configOptions = this.createConfigOptions(sessionState);
-     return {
-       sessionId,
-       modelState: sessionModelState,
-       modeState: sessionModeState,
++    return {
++      sessionId,
++      modelState: sessionModelState,
++      modeState: sessionModeState,
 +      configOptions,
 +      thread
 +    };
@@ -720,31 +797,23 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
 +      modelContextWindow: null,
 +      rateLimits: null,
 +      fastMode: false,
-+      account,
-+      cwd: request.cwd,
-+      sessionMcpServers
-+    };
-+    this.sessions.set(sessionId, sessionState);
-+    if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
-+      this.pendingMcpStartupSessions.set(sessionId, {
-+        requestedServers: new Set(requestedMcpServers.map((server) => server.name)),
-+        afterVersion: mcpServerStartupVersion
-+      });
-+      this.publishMcpStartupStatusAsync(sessionId);
-+    }
-+    await this.availableCommands.publish(sessionId);
-+    const sessionModelState = this.createModelState(models, currentModelId);
-+    const sessionModeState = sessionState.agentMode.toSessionModeState();
+       account,
+       cwd: request.cwd,
+       sessionMcpServers
+@@ -20160,10 +20651,12 @@ var CodexAcpServer = class {
+     await this.availableCommands.publish(sessionId);
+     const sessionModelState = this.createModelState(models, currentModelId);
+     const sessionModeState = sessionState.agentMode.toSessionModeState();
 +    const configOptions = this.createConfigOptions(sessionState);
-+    return {
-+      sessionId,
-+      modelState: sessionModelState,
-+      modeState: sessionModeState,
+     return {
+       sessionId,
+       modelState: sessionModelState,
+       modeState: sessionModeState,
 +      configOptions,
        thread
      };
    }
-@@ -20259,7 +20699,7 @@ var CodexAcpServer = class {
+@@ -20259,7 +20752,7 @@ var CodexAcpServer = class {
        toolCallId: item.id,
        kind: "search",
        title: this.formatWebSearchTitle(item),
@@ -753,7 +822,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
        rawInput: {
          query: item.query,
          action: item.action
-@@ -20449,20 +20889,28 @@ ${item.text}`
+@@ -20449,20 +20942,28 @@ ${item.text}`
        }
        const modelId = ModelId.fromString(sessionState.currentModelId);
        const modelLacksReasoning = sessionState.supportedReasoningEfforts.length > 0 && sessionState.supportedReasoningEfforts.every((e) => e.reasoningEffort === "none");
@@ -787,7 +856,89 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
        if (turnCompleted.turn.status === "interrupted") {
          await this.connection.sessionUpdate({
            sessionId: params.sessionId,
-@@ -20650,12 +21098,18 @@ var CodexAppServerClient = class {
+@@ -20566,6 +21067,81 @@ var import_node2 = __toESM(require_node(), 1);
+ var CommandExecutionApprovalRequest = new import_node2.RequestType("item/commandExecution/requestApproval");
+ var FileChangeApprovalRequest = new import_node2.RequestType("item/fileChange/requestApproval");
+ var McpServerElicitationRequest = new import_node2.RequestType("mcpServer/elicitation/request");
++var CHILD_TOOL_ITEM_TYPES = /* @__PURE__ */ new Set([
++  "commandExecution",
++  "mcpToolCall",
++  "dynamicToolCall",
++  "fileChange",
++  "webSearch"
++]);
++function readCollabAgentReceiverThreadIds(notification) {
++  const params = notification.params;
++  const item = params && typeof params === "object" ? params.item : null;
++  if (!item || typeof item !== "object" || item.type !== "collabAgentToolCall") {
++    return [];
++  }
++  const ids = item.receiverThreadIds ?? item.receiver_thread_ids;
++  return Array.isArray(ids) ? ids.filter((id) => typeof id === "string" && id.length > 0) : [];
++}
++function readCollabAgentPrompt(notification) {
++  const params = notification.params;
++  const item = params && typeof params === "object" ? params.item : null;
++  if (!item || typeof item !== "object" || item.type !== "collabAgentToolCall") {
++    return null;
++  }
++  return typeof item.prompt === "string" && item.prompt.trim().length > 0 ? item.prompt.trim() : null;
++}
++function deriveCollabAgentDisplayName(prompt) {
++  if (!prompt) {
++    return null;
++  }
++  const firstLine = prompt.split(/\r?\n/)[0]?.trim() ?? "";
++  if (!firstLine) {
++    return null;
++  }
++  const sentenceMatch = /^(.+?)[.!?](?:\s|$)/.exec(firstLine);
++  const label = (sentenceMatch?.[1] ?? firstLine).replace(/\s+/g, " ").trim();
++  return label.length > 80 ? `${label.slice(0, 77).trimEnd()}...` : label;
++}
++function addSubagentMetadataToNotification(notification, metadata) {
++  const params = notification.params;
++  if (!params || typeof params !== "object") {
++    return notification;
++  }
++  const existingMeta = isPlainObject(params._meta) ? params._meta : {};
++  const existingMadabot = isPlainObject(existingMeta.madabot) ? existingMeta.madabot : {};
++  const existingSubagent = isPlainObject(existingMadabot.subagent) ? existingMadabot.subagent : {};
++  return {
++    ...notification,
++    params: {
++      ...params,
++      _meta: {
++        ...existingMeta,
++        madabot: {
++          ...existingMadabot,
++          subagent: {
++            ...existingSubagent,
++            ...metadata
++          }
++        }
++      }
++    }
++  };
++}
++function isChildThreadToolNotification(notification) {
++  switch (notification.method) {
++    case "item/commandExecution/outputDelta":
++    case "item/commandExecution/terminalInteraction":
++    case "item/mcpToolCall/progress":
++      return true;
++    case "item/started":
++    case "item/completed": {
++      const item = notification.params && typeof notification.params === "object" ? notification.params.item : null;
++      return !!item && typeof item === "object" && CHILD_TOOL_ITEM_TYPES.has(item.type);
++    }
++  }
++  return false;
++}
+ var CodexAppServerClient = class {
+   connection;
+   approvalHandlers = /* @__PURE__ */ new Map();
+@@ -20650,12 +21226,18 @@ var CodexAppServerClient = class {
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }
@@ -806,7 +957,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    async threadList(params) {
      return await this.sendRequest({ method: "thread/list", params });
    }
-@@ -20665,6 +21119,9 @@ var CodexAppServerClient = class {
+@@ -20665,6 +21247,9 @@ var CodexAppServerClient = class {
    async threadRead(params) {
      return await this.sendRequest({ method: "thread/read", params });
    }
@@ -816,7 +967,54 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..4702e02729301615a9ed9b82ef3a1ae8
    async listMcpServerStatus(params) {
      return await this.sendRequest({ method: "mcpServerStatus/list", params });
    }
-@@ -20987,16 +21444,21 @@ function startAcpServer() {
+@@ -20725,12 +21310,46 @@ var CodexAppServerClient = class {
+     this.codexEventHandlers.push(callback);
+   }
+   notificationHandlers = /* @__PURE__ */ new Map();
++  childNotificationHandlers = /* @__PURE__ */ new Map();
++  childThreadMetadata = /* @__PURE__ */ new Map();
++  rememberChildThreadHandlers(notification, parentThreadId) {
++    const notificationHandler = this.notificationHandlers.get(parentThreadId);
++    if (!notificationHandler) {
++      return;
++    }
++    const approvalHandler = this.approvalHandlers.get(parentThreadId);
++    const elicitationHandler = this.elicitationHandlers.get(parentThreadId);
++    const agentNickname = deriveCollabAgentDisplayName(readCollabAgentPrompt(notification));
++    for (const childThreadId of readCollabAgentReceiverThreadIds(notification)) {
++      this.childThreadMetadata.set(childThreadId, {
++        threadId: childThreadId,
++        parentThreadId,
++        ...(agentNickname ? { agentNickname } : {})
++      });
++      if (!this.notificationHandlers.has(childThreadId)) {
++        this.childNotificationHandlers.set(childThreadId, notificationHandler);
++      }
++      if (approvalHandler && !this.approvalHandlers.has(childThreadId)) {
++        this.approvalHandlers.set(childThreadId, approvalHandler);
++      }
++      if (elicitationHandler && !this.elicitationHandlers.has(childThreadId)) {
++        this.elicitationHandlers.set(childThreadId, elicitationHandler);
++      }
++    }
++  }
+   notify(notification) {
+     const threadId = extractThreadId(notification);
+     if (threadId !== null) {
+       const handler = this.notificationHandlers.get(threadId);
+       if (handler) {
+         handler(notification);
++        this.rememberChildThreadHandlers(notification, threadId);
++        return;
++      }
++      const childHandler = this.childNotificationHandlers.get(threadId);
++      if (childHandler && isChildThreadToolNotification(notification)) {
++        const metadata = this.childThreadMetadata.get(threadId) ?? { threadId };
++        childHandler(addSubagentMetadataToNotification(notification, metadata));
+       }
+       return;
+     }
+@@ -20987,16 +21606,21 @@ function startAcpServer() {
      defaultAuthRequest: defaultAuthRequest ?? null
    });
    const codexConnection = startCodexConnection(codexPath);

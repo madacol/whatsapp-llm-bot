@@ -25,6 +25,7 @@ import { extractApplyPatchText } from "./apply-patch-parser.js";
  *   locations?: unknown,
  *   meta?: unknown,
  *   content?: unknown,
+ *   subagent?: LlmResponseMetadata,
  * }} AcpToolCallState
  */
 
@@ -492,6 +493,7 @@ export function mergeAcpToolCallState(previous, next) {
     locations: next.locations ?? previous?.locations,
     meta: next.meta ?? previous?.meta,
     content: next.content ?? previous?.content,
+    subagent: next.subagent ?? previous?.subagent,
   };
 }
 
@@ -505,6 +507,7 @@ function readToolCallState(update) {
     : update.sessionUpdate === "tool_call"
       ? "in_progress"
       : undefined;
+  const subagent = extractMadabotSubagentMetadata(update);
   return {
     id: stringOrNull(update.toolCallId) ?? `acp-tool:${Date.now()}`,
     ...(typeof update.title === "string" ? { title: update.title } : {}),
@@ -515,6 +518,7 @@ function readToolCallState(update) {
     ...("locations" in update ? { locations: update.locations } : {}),
     ...("_meta" in update ? { meta: update._meta } : {}),
     ...("content" in update ? { content: update.content } : {}),
+    ...(subagent ? { subagent } : {}),
   };
 }
 
@@ -660,10 +664,12 @@ function makeToolEvents(toolCall, diagnosticRaw, options = {}) {
       : status === "started" && !options.wasActive
         ? "tool.started"
         : "tool.updated";
+  const runtimeTool = makeRuntimeTool(toolCall);
+  const tool = toolCall.subagent ? { ...runtimeTool, subagent: toolCall.subagent } : runtimeTool;
   const events = /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]} */ ([{
     type,
     provider: "acp",
-    tool: makeRuntimeTool(toolCall),
+    tool,
     diagnosticRaw,
   }]);
   if (status === "completed") {

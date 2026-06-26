@@ -60,6 +60,7 @@
  *   outputBlocks?: ToolContentBlock[],
  *   permissions?: PermissionFlags,
  *   suppressProgress?: boolean,
+ *   subagent?: LlmResponseMetadata,
  * }} HarnessRuntimeTool
  */
 
