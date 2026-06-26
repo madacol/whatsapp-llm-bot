@@ -11,6 +11,7 @@ import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { sendEvent } from "../whatsapp/outbound/send-content.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
+import { codexAcpEntryPoint, fakeCodexPath } from "./codex-acp-patch-fixture.js";
 
 process.env.TESTING = "1";
 
@@ -240,6 +241,87 @@ async function runAcpMockProcessToWhatsApp() {
       chatId,
       input: "Run the mock",
       messages: [{ role: "user", content: [{ type: "text", text: "Run the mock" }] }],
+      runConfig: { workdir },
+    });
+    await eventQueue;
+    return {
+      result,
+      sent,
+      relayed,
+      trace: { adapterEvents, outboundEvents, pinnedStatusDelivery },
+    };
+  } finally {
+    unsubscribe?.();
+    await adapter.stopAll();
+    await fs.rm(workdir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * @returns {Promise<{
+ *   result: AgentResult,
+ *   sent: Array<{ chatId: string, msg: Record<string, unknown> }>,
+ *   relayed: Array<{ chatId: string, msg: Record<string, unknown>, opts: Record<string, unknown> }>,
+ *   trace: {
+ *     adapterEvents: Array<{ type: string, provider: string } & Record<string, unknown>>,
+ *     outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *     pinnedStatusDelivery: Array<Record<string, unknown>>,
+ *   },
+ * }>}
+ */
+async function runFakeCodexSubagentChildToolsToWhatsApp() {
+  const chatId = "codex-subagent-child-tools@s.whatsapp.net";
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-subagent-child-tools-"));
+  const { sock, sent, relayed } = createMockSock();
+  /** @type {Array<{ type: string, provider: string } & Record<string, unknown>>} */
+  const adapterEvents = [];
+  /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
+  const outboundEvents = [];
+  /** @type {Array<Record<string, unknown>>} */
+  const pinnedStatusDelivery = [];
+  const hooks = buildObservedWhatsAppHooks({
+    sock,
+    chatId,
+    cwd: workdir,
+    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true, usage: true, subagents: true },
+    outboundEvents,
+    pinnedStatusDelivery,
+  });
+  const dispatcher = createHarnessRuntimeEventDispatcher({
+    provider: "acp",
+    messages: [],
+    hooks,
+    workdir,
+  });
+  let eventQueue = Promise.resolve();
+  const harness = createAcpHarness({
+    name: "codex-subagent-child-tools",
+    config: {
+      command: process.execPath,
+      args: [codexAcpEntryPoint],
+      env: {
+        CODEX_PATH: fakeCodexPath,
+      },
+    },
+  });
+  const adapter = harness.createAdapter?.({
+    name: "codex-subagent-child-tools",
+    instanceId: "smoke",
+    continuationKey: "codex-subagent-child-tools:smoke",
+  });
+  assert.ok(adapter);
+  const unsubscribe = adapter.subscribeEvents?.((event) => {
+    adapterEvents.push(event);
+    eventQueue = eventQueue.then(() => dispatcher.handleEvent(
+      /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ (event),
+    ));
+  });
+  try {
+    await adapter.startSession({ chatId, runConfig: { workdir } });
+    const result = await adapter.sendTurn({
+      chatId,
+      input: "subagent child tools",
+      messages: [{ role: "user", content: [{ type: "text", text: "subagent child tools" }] }],
       runConfig: { workdir },
     });
     await eventQueue;
@@ -1778,5 +1860,48 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.ok(texts.some((text) => text.includes("Subagent result.")), `Expected subagent socket output, got ${JSON.stringify(sent)}`);
     assert.ok(texts.some((text) => text.includes("mock.txt")), `Expected file-change socket output, got ${JSON.stringify(sent)}`);
     assert.ok(texts.some((text) => text.includes("Cost:")), `Expected usage socket output, got ${JSON.stringify(sent)}`);
+  });
+
+  it("routes Codex sub-agent child tool calls through ACP into WhatsApp tool output", async () => {
+    const { result, sent, trace } = await runFakeCodexSubagentChildToolsToWhatsApp();
+    const spawnAgentEvents = trace.adapterEvents.filter((event) => event.type.startsWith("tool.")
+      && event.tool && typeof event.tool === "object"
+      && "id" in event.tool
+      && event.tool.id === "spawn-child-1");
+    const closeAgentEvents = trace.adapterEvents.filter((event) => event.type.startsWith("tool.")
+      && event.tool && typeof event.tool === "object"
+      && "id" in event.tool
+      && event.tool.id === "close-child-1");
+    const childToolEvents = trace.adapterEvents.filter((event) => event.type.startsWith("tool.")
+      && event.tool && typeof event.tool === "object"
+      && "id" in event.tool
+      && event.tool.id === "child-command-1");
+    const texts = sent.map((entry) => typeof entry.msg.text === "string" ? entry.msg.text : "");
+
+    assert.deepEqual(result.response, [{ type: "markdown", text: "Parent result." }]);
+    assert.ok(
+      spawnAgentEvents.some((event) => event.type === "tool.started")
+        && spawnAgentEvents.some((event) => event.type === "tool.completed"),
+      `Expected parent spawn_agent tool events, got ${JSON.stringify(trace.adapterEvents)}`,
+    );
+    assert.ok(
+      closeAgentEvents.some((event) => event.type === "tool.started")
+        && closeAgentEvents.some((event) => event.type === "tool.completed"),
+      `Expected parent close_agent tool events, got ${JSON.stringify(trace.adapterEvents)}`,
+    );
+    assert.ok(
+      childToolEvents.some((event) => event.type === "tool.started"),
+      `Expected child tool.started, got ${JSON.stringify(trace.adapterEvents)}`,
+    );
+    assert.ok(
+      childToolEvents.some((event) => event.type === "tool.completed"),
+      `Expected child tool.completed, got ${JSON.stringify(trace.adapterEvents)}`,
+    );
+    assert.ok(
+      texts.some((text) => text.includes("*Child Probe Agent*") && text.includes("*Shell*") && text.includes("echo subagent-child-ok")),
+      `Expected prefixed child shell output in WhatsApp messages, got ${JSON.stringify(sent)}`,
+    );
+    assert.ok(texts.some((text) => text.includes("*Start Agent*")), `Expected start-agent WhatsApp message, got ${JSON.stringify(sent)}`);
+    assert.ok(texts.some((text) => text.includes("*Close Agent*")), `Expected close-agent WhatsApp message, got ${JSON.stringify(sent)}`);
   });
 });

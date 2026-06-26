@@ -271,6 +271,133 @@ function notifyRenamePatchFixture(threadId, cwd) {
 }
 
 /**
+ * @param {unknown} parentThreadId
+ * @param {string} cwd
+ */
+function notifySubagentChildToolsFixture(parentThreadId, cwd) {
+  const parentTurnId = "fake-turn-1";
+  const childThreadId = "fake-child-thread-1";
+  const childTurnId = "fake-child-turn-1";
+  const spawnItem = {
+    id: "spawn-child-1",
+    type: "collabAgentToolCall",
+    tool: "spawnAgent",
+    status: "completed",
+    senderThreadId: parentThreadId,
+    receiverThreadIds: [childThreadId],
+    prompt: "Child Probe Agent. Run a child tool visibility probe.",
+    model: "fake-model",
+    reasoningEffort: "none",
+    agentsStates: {
+      [childThreadId]: { status: "pendingInit", message: null },
+    },
+  };
+
+  notify("item/started", {
+    threadId: parentThreadId,
+    turnId: parentTurnId,
+    item: { ...spawnItem, status: "inProgress", receiverThreadIds: [], agentsStates: {} },
+  });
+  notify("item/completed", {
+    threadId: parentThreadId,
+    turnId: parentTurnId,
+    item: spawnItem,
+  });
+  notify("thread/status/changed", {
+    threadId: childThreadId,
+    status: { type: "active", activeFlags: [] },
+  });
+  notify("turn/started", {
+    threadId: childThreadId,
+    turn: { id: childTurnId, items: [], status: "inProgress" },
+  });
+  notify("item/started", {
+    threadId: childThreadId,
+    turnId: childTurnId,
+    item: {
+      id: "child-command-1",
+      type: "commandExecution",
+      status: "inProgress",
+      command: "/bin/zsh -lc 'echo subagent-child-ok'",
+      cwd,
+      aggregatedOutput: null,
+      commandActions: [],
+    },
+  });
+  notify("item/commandExecution/outputDelta", {
+    threadId: childThreadId,
+    turnId: childTurnId,
+    itemId: "child-command-1",
+    delta: "subagent-child-ok\n",
+  });
+  notify("item/completed", {
+    threadId: childThreadId,
+    turnId: childTurnId,
+    item: {
+      id: "child-command-1",
+      type: "commandExecution",
+      status: "completed",
+      command: "/bin/zsh -lc 'echo subagent-child-ok'",
+      cwd,
+      aggregatedOutput: "subagent-child-ok\n",
+      exitCode: 0,
+      commandActions: [],
+    },
+  });
+  notify("turn/completed", {
+    threadId: childThreadId,
+    turn: { id: childTurnId, status: "completed" },
+  });
+  notify("item/started", {
+    threadId: parentThreadId,
+    turnId: parentTurnId,
+    item: {
+      id: "close-child-1",
+      type: "collabAgentToolCall",
+      tool: "closeAgent",
+      status: "inProgress",
+      senderThreadId: parentThreadId,
+      receiverThreadIds: [childThreadId],
+      prompt: null,
+      model: null,
+      reasoningEffort: null,
+      agentsStates: {},
+    },
+  });
+  notify("item/completed", {
+    threadId: parentThreadId,
+    turnId: parentTurnId,
+    item: {
+      id: "close-child-1",
+      type: "collabAgentToolCall",
+      tool: "closeAgent",
+      status: "completed",
+      senderThreadId: parentThreadId,
+      receiverThreadIds: [childThreadId],
+      prompt: null,
+      model: null,
+      reasoningEffort: null,
+      agentsStates: {
+        [childThreadId]: {
+          status: "completed",
+          message: "Child final result.",
+        },
+      },
+    },
+  });
+  notify("item/agentMessage/delta", {
+    threadId: parentThreadId,
+    turnId: parentTurnId,
+    itemId: "agent-message-1",
+    delta: "Parent result.",
+  });
+  notify("turn/completed", {
+    threadId: parentThreadId,
+    turn: { id: parentTurnId, status: "completed" },
+  });
+}
+
+/**
  * @param {unknown} parsed
  */
 async function handleMessage(parsed) {
@@ -514,6 +641,9 @@ async function handleMessage(parsed) {
       } else if (firstTextInput(params.input) === "rename patch fixture") {
         const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
         notifyRenamePatchFixture(params.threadId, cwd);
+      } else if (firstTextInput(params.input) === "subagent child tools") {
+        const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
+        notifySubagentChildToolsFixture(params.threadId, cwd);
       }
       notify("thread/tokenUsage/updated", {
         threadId: params.threadId,

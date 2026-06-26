@@ -137,6 +137,43 @@ function cleanCompletedReasoningParts(parts) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {Record<string, unknown>} args
+ * @returns {string[]}
+ */
+function readReceiverThreadIds(args) {
+  const value = Array.isArray(args.receiverThreadIds) ? args.receiverThreadIds : args.receiver_thread_ids;
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0) : [];
+}
+
+/**
+ * @param {unknown} prompt
+ * @returns {string | null}
+ */
+function deriveSubagentNicknameFromPrompt(prompt) {
+  if (typeof prompt !== "string") {
+    return null;
+  }
+  const firstLine = prompt.trim().split(/\r?\n/)[0]?.trim() ?? "";
+  if (!firstLine) {
+    return null;
+  }
+  const sentenceMatch = /^(.+?)[.!?](?:\s|$)/.exec(firstLine);
+  const nickname = (sentenceMatch?.[1] ?? firstLine).replace(/\s+/g, " ").trim();
+  if (!nickname) {
+    return null;
+  }
+  return nickname.length > 80 ? `${nickname.slice(0, 77).trimEnd()}...` : nickname;
+}
+
+/**
  * Create the app-facing dispatcher for canonical harness runtime events.
  * Provider-specific runners should normalize raw SDK/RPC messages before this
  * point; this layer owns presentation hooks and accumulated `AgentResult`.
@@ -203,7 +240,22 @@ export function createHarnessRuntimeEventDispatcher(input) {
    * @returns {void}
    */
   function rememberSpawnedSubagent(tool) {
-    if (tool.name !== "spawn_agent" || typeof tool.output !== "string") {
+    if (tool.name !== "spawn_agent") {
+      return;
+    }
+    const receiverThreadIds = readReceiverThreadIds(tool.arguments);
+    if (receiverThreadIds.length > 0) {
+      const agentNickname = deriveSubagentNicknameFromPrompt(tool.arguments.prompt);
+      for (const threadId of receiverThreadIds) {
+        subagentThreads.set(threadId, {
+          source: "subagent",
+          threadId,
+          ...(agentNickname ? { agentNickname } : {}),
+        });
+      }
+      return;
+    }
+    if (typeof tool.output !== "string") {
       return;
     }
     let parsed;
@@ -212,21 +264,53 @@ export function createHarnessRuntimeEventDispatcher(input) {
     } catch {
       return;
     }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       return;
     }
-    const record = /** @type {Record<string, unknown>} */ (parsed);
-    const threadId = typeof record.agent_id === "string"
-      ? record.agent_id
-      : typeof record.threadId === "string" ? record.threadId : null;
+    const threadId = typeof parsed.agent_id === "string"
+      ? parsed.agent_id
+      : typeof parsed.threadId === "string" ? parsed.threadId : null;
     if (!threadId) {
       return;
     }
     subagentThreads.set(threadId, {
       source: "subagent",
       threadId,
-      ...(typeof record.nickname === "string" ? { agentNickname: record.nickname } : {}),
+      ...(typeof parsed.nickname === "string" ? { agentNickname: parsed.nickname } : {}),
     });
+  }
+
+  /**
+   * @param {HarnessRuntimeEvent} event
+   * @returns {HarnessRuntimeEvent}
+   */
+  function enrichSubagentToolEvent(event) {
+    if (
+      event.type !== "tool.started"
+      && event.type !== "tool.updated"
+      && event.type !== "tool.completed"
+      && event.type !== "tool.failed"
+    ) {
+      return event;
+    }
+    const threadId = event.tool.subagent?.threadId;
+    const remembered = threadId ? subagentThreads.get(threadId) : null;
+    if (!remembered) {
+      return event;
+    }
+    return {
+      ...event,
+      tool: {
+        ...event.tool,
+        subagent: {
+          ...remembered,
+          ...(event.tool.subagent ?? {}),
+          ...(event.tool.subagent?.agentNickname
+            ? { agentNickname: event.tool.subagent.agentNickname }
+            : remembered.agentNickname ? { agentNickname: remembered.agentNickname } : {}),
+        },
+      },
+    };
   }
 
   /**
@@ -368,7 +452,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
       return;
     }
     if (shouldEmitAsRuntimeProgress(normalizedEvent)) {
-      await emitRuntimeEvent(attachRuntimeBoundaryFacts(normalizedEvent, input.workdir));
+      await emitRuntimeEvent(attachRuntimeBoundaryFacts(enrichSubagentToolEvent(normalizedEvent), input.workdir));
       if (normalizedEvent.type === "tool.completed") {
         rememberSpawnedSubagent(normalizedEvent.tool);
         if (normalizedEvent.tool.outputBlocks) {

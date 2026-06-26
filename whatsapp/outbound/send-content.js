@@ -863,6 +863,25 @@ function formatRuntimeToolSummary(tool, cwd) {
 
 /**
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @returns {string | null}
+ */
+function getRuntimeToolSubagentName(tool) {
+  const name = tool.subagent?.agentNickname ?? tool.subagent?.threadId;
+  return typeof name === "string" && name.trim().length > 0 ? name.trim() : null;
+}
+
+/**
+ * @param {string} summary
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @returns {string}
+ */
+function formatSubagentRuntimeToolSummary(summary, tool) {
+  const subagentName = getRuntimeToolSubagentName(tool);
+  return subagentName ? formatRuntimeProgressEntry(subagentName, summary) : summary;
+}
+
+/**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
  * @param {string | null | undefined} cwd
  * @returns {{ handled: true, summary: string | null } | { handled: false }}
  */
@@ -1276,11 +1295,12 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
     return undefined;
   }
-  const summary = formatRuntimeToolSummary(displayTool, event.cwd);
+  const baseSummary = formatRuntimeToolSummary(displayTool, event.cwd);
   const readRange = getRuntimeToolReadLineRange(displayTool);
-  if (!summary) {
+  if (!baseSummary) {
     return undefined;
   }
+  const summary = formatSubagentRuntimeToolSummary(baseSummary, displayTool);
 
   if (status === "started") {
     const text = formatRuntimeToolText(status, summary);
@@ -1565,10 +1585,11 @@ function formatPinnedRuntimeStatusPresentation(event, state, options) {
     }
     const key = `tool:${displayTool.id}`;
     const previousSummary = state?.entries.find((entry) => entry.key === key)?.summary;
-    const summary = formatRuntimeToolSummary(displayTool, event.cwd);
-    if (!summary) {
+    const baseSummary = formatRuntimeToolSummary(displayTool, event.cwd);
+    if (!baseSummary) {
       return null;
     }
+    const summary = formatSubagentRuntimeToolSummary(baseSummary, displayTool);
     const summaryBase = previousSummary && shouldPreserveRuntimeSummary(previousSummary, summary)
       ? previousSummary
       : summary;
