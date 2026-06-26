@@ -458,7 +458,7 @@ type ConfirmHooks = {
   onResolved?: (msgKey: { id: string; remoteJid: string }, confirmed: boolean) => Promise<void>;
 };
 
-type TurnIO = {
+type ChannelInputIO = {
   send: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
   reply: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
@@ -472,6 +472,8 @@ type TurnIO = {
     mediaRegistry: MediaRegistry;
   }) => void | Promise<void>;
 };
+/** @deprecated Use ChannelInputIO for new app-owned input seams. */
+type TurnIO = ChannelInputIO;
 
 type WorkspaceStatus = "ready" | "busy" | "conflicted" | "archived";
 type WhatsAppWorkspacePresentationRole = "workspace" | "main";
@@ -525,7 +527,7 @@ type ResolvedChatBinding =
   | { kind: "project"; project: ProjectRow }
   | { kind: "workspace"; project: ProjectRow; workspace: WorkspaceRow };
 
-type TurnFacts = {
+type ChannelInputFacts = {
   isGroup: boolean;
   addressedToBot: boolean;
   repliedToBot: boolean;
@@ -533,6 +535,8 @@ type TurnFacts = {
   quotedSenderJid?: string;
   quotedSenderName?: string;
 };
+/** @deprecated Use ChannelInputFacts for new app-owned input seams. */
+type TurnFacts = ChannelInputFacts;
 
 type ChatTransport = {
   start: (onInput: (input: ChannelInput) => Promise<void>) => Promise<void>;
@@ -593,8 +597,8 @@ type ChannelInput = {
   chatName?: string;
   content: IncomingContentBlock[];
   timestamp: Date;
-  facts: TurnFacts;
-  io: TurnIO;
+  facts: ChannelInputFacts;
+  io: ChannelInputIO;
 };
 /** @deprecated Use ChannelInput for new app-owned input seams. */
 type ChatTurn = ChannelInput;

@@ -64,8 +64,8 @@ export async function withModelsCache(models, fn) {
 
 /**
  * @typedef {Partial<Omit<ChatTurn, "facts" | "io">> & {
- *   facts?: Partial<TurnFacts>;
- *   io?: Partial<TurnIO>;
+ *   facts?: Partial<ChannelInputFacts>;
+ *   io?: Partial<ChannelInputIO>;
  * }} ChatTurnOverrides
  */
 
@@ -193,7 +193,7 @@ export function createChatTurn(overrides = {}) {
     return handle;
   };
 
-  /** @type {TurnIO} */
+  /** @type {ChannelInputIO} */
   const io = {
     getIsAdmin: async () => true,
     react: async (emoji) => {
@@ -211,7 +211,7 @@ export function createChatTurn(overrides = {}) {
     },
   };
 
-  /** @type {TurnIO} */
+  /** @type {ChannelInputIO} */
   const finalIo = {
     ...io,
     ...(overrides.io ?? {}),
@@ -224,7 +224,7 @@ export function createChatTurn(overrides = {}) {
     && testBotIds.some((selfId) => block.text.includes(`@${selfId}`)));
   const repliedToBot = quotedSenderId != null && testBotIds.includes(quotedSenderId);
 
-  /** @type {TurnFacts} */
+  /** @type {ChannelInputFacts} */
   const facts = {
     isGroup: overrides.facts?.isGroup ?? false,
     addressedToBot: overrides.facts?.addressedToBot ?? addressedToBot,

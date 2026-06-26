@@ -617,7 +617,7 @@ describe("getMessageContent", () => {
       messages: [],
       mediaRegistry: new Map([["stored-parent", reattachedImage]]),
     });
-    assert.ok(reattachedImage.getHd instanceof Promise, "WhatsApp TurnIO should reattach pending HD promises");
+    assert.ok(reattachedImage.getHd instanceof Promise, "WhatsApp ChannelInputIO should reattach pending HD promises");
 
     await adaptIncomingMessage(
       createHdImageMessage({

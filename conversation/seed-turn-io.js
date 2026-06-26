@@ -1,11 +1,12 @@
 /**
- * Create TurnIO for synthetic seeded turns. Prefer semantic event transport so
- * seeded runs share the same rendering/edit pipeline as real chat turns.
+ * Create ChannelInputIO for synthetic seeded inputs. Prefer semantic event
+ * transport so seeded runs share the same rendering/edit pipeline as real
+ * channel inputs.
  * The presenter owns how those events are realized on the adapter surface.
  * @param {{
  *   sendEvent: (event: OutboundEvent) => Promise<MessageHandle | undefined>,
  * }} input
- * @returns {TurnIO}
+ * @returns {ChannelInputIO}
  */
 export function createSeedTurnIo({ sendEvent }) {
   return {

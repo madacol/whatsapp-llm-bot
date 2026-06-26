@@ -38,7 +38,7 @@ const CORS_ALLOWED_HEADERS = "authorization,content-type,last-event-id,x-request
  *   senderName: string;
  *   timestamp: Date;
  *   content: [TextContentBlock] | [AudioContentBlock];
- *   facts: TurnFacts;
+ *   facts: ChannelInputFacts;
  * }} HttpApiTurnPayload
  *
  * @typedef {{
@@ -111,7 +111,7 @@ function normalizeTimestamp(value) {
 
 /**
  * @param {unknown} value
- * @returns {TurnFacts}
+ * @returns {ChannelInputFacts}
  */
 function normalizeFacts(value) {
   if (!isRecord(value)) {
@@ -402,7 +402,7 @@ export async function createHttpApiTransport(options = {}) {
   /**
    * @param {string} chatId
    * @param {string | null} turnId
-   * @returns {TurnIO}
+   * @returns {ChannelInputIO}
    */
   function createTurnIo(chatId, turnId) {
     return {
