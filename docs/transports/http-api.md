@@ -1,6 +1,6 @@
 # HTTP API Transport
 
-The HTTP API transport lets a non-WhatsApp client submit text turns to the normal bot runtime and receive structured outbound events. It is intended for clients such as the Bluetooth voice assistant, where audio capture, transcription, and speech output live outside this repo.
+The HTTP API transport lets a non-WhatsApp client submit text inputs to the normal bot runtime and receive structured outbound events. It is intended for clients such as the Bluetooth voice assistant, where audio capture, transcription, and speech output live outside this repo.
 
 The transport is disabled by default. It starts only when `API_TRANSPORT_TOKEN` is set.
 

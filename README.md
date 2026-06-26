@@ -32,7 +32,7 @@ If no command is given, the AI will handle the response.
 
 ## HTTP API Transport
 
-An optional HTTP API transport lets non-WhatsApp clients submit text turns to the same bot runtime and receive raw structured outbound events.
+An optional HTTP API transport lets non-WhatsApp clients submit text inputs to the same bot runtime and receive raw structured outbound events.
 
 It is disabled by default. Set `API_TRANSPORT_TOKEN` to enable it:
 
@@ -42,4 +42,4 @@ API_TRANSPORT_HOST=127.0.0.1
 API_TRANSPORT_PORT=3200
 ```
 
-See [docs/api-transport.md](docs/api-transport.md) for endpoints, payloads, idempotency, `wait=true`, status lookup, and event streaming.
+See [docs/transports/http-api.md](docs/transports/http-api.md) for endpoints, payloads, idempotency, `wait=true`, status lookup, and event streaming.
