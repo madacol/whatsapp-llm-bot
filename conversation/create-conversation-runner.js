@@ -11,7 +11,7 @@ import { buildLiveInputText } from "./live-input-text.js";
 import { createBangCommandRouter } from "../commands/bang-command-router.js";
 import { runClearConversationCommand } from "../commands/clear-conversation-command.js";
 import { handleSlashDiffCommand } from "../slash-diff-command.js";
-import { decideTurnRoute } from "./turn-routing.js";
+import { decideChannelInputRoute } from "./channel-input-routing.js";
 import { buildClearCommandFollowUp } from "./clear-command-follow-up.js";
 import { createAgentRuntime } from "./agent-runtime.js";
 
@@ -390,7 +390,7 @@ export function createConversationRunner({
   }
 
   /**
-   * Handle one normalized chat turn from the transport.
+   * Handle one normalized ChannelInput from the transport.
    * @param {ChatTurn} turn
    * @returns {Promise<ChatTurn | null>}
    */
@@ -411,7 +411,7 @@ export function createConversationRunner({
       turn.facts.isGroup,
     );
     const firstBlock = content.find(isTextBlock);
-    const route = decideTurnRoute({
+    const route = decideChannelInputRoute({
       chatInfo,
       resolvedBinding,
       firstText: firstBlock?.text ?? null,
@@ -420,8 +420,8 @@ export function createConversationRunner({
     });
     const routeShouldLogInfo = hasNonTextContent(content)
       || agentRuntime.hasPendingRun(chatId)
-      || route.type !== "harness-run";
-    logInfoWhen(routeShouldLogInfo, "Turn route decision", {
+      || route.type !== "agent-invocation";
+    logInfoWhen(routeShouldLogInfo, "ChannelInput route decision", {
       chatId,
       route: route.type,
       shouldRespond: "shouldRespond" in route ? route.shouldRespond : shouldRespond(chatInfo, turn.facts),

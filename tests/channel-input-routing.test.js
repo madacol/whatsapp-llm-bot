@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { decideTurnRoute } from "../conversation/turn-routing.js";
+import { decideChannelInputRoute } from "../conversation/channel-input-routing.js";
 
 const enabledChat = Object.freeze({ is_enabled: true });
 const disabledChat = Object.freeze({ is_enabled: false });
@@ -10,10 +10,10 @@ const archivedWorkspaceBinding = Object.freeze({
   workspace: { status: "archived" },
 });
 
-describe("decideTurnRoute", () => {
+describe("decideChannelInputRoute", () => {
   it("routes bang commands before archived workspace coding rejection", () => {
     assert.deepEqual(
-      decideTurnRoute({
+      decideChannelInputRoute({
         chatInfo: enabledChat,
         resolvedBinding: archivedWorkspaceBinding,
         firstText: "!status",
@@ -26,7 +26,7 @@ describe("decideTurnRoute", () => {
 
   it("rejects normal coding requests in archived workspaces", () => {
     assert.deepEqual(
-      decideTurnRoute({
+      decideChannelInputRoute({
         chatInfo: enabledChat,
         resolvedBinding: archivedWorkspaceBinding,
         firstText: "fix the checkout bug",
@@ -37,9 +37,9 @@ describe("decideTurnRoute", () => {
     );
   });
 
-  it("turns disabled slash commands into an explicit route", () => {
+  it("routes disabled slash commands into an explicit route", () => {
     assert.deepEqual(
-      decideTurnRoute({
+      decideChannelInputRoute({
         chatInfo: disabledChat,
         resolvedBinding: readyBinding,
         firstText: "/status",
@@ -52,7 +52,7 @@ describe("decideTurnRoute", () => {
 
   it("keeps pending follow-up persistence separate from response policy", () => {
     assert.deepEqual(
-      decideTurnRoute({
+      decideChannelInputRoute({
         chatInfo: enabledChat,
         resolvedBinding: readyBinding,
         firstText: "background context",
@@ -65,7 +65,7 @@ describe("decideTurnRoute", () => {
 
   it("routes normal ignored messages as persist-only", () => {
     assert.deepEqual(
-      decideTurnRoute({
+      decideChannelInputRoute({
         chatInfo: enabledChat,
         resolvedBinding: readyBinding,
         firstText: "not addressed to bot",
@@ -76,9 +76,9 @@ describe("decideTurnRoute", () => {
     );
   });
 
-  it("routes unhandled slash commands through the harness path", () => {
+  it("routes unhandled slash commands through the slash-command path", () => {
     assert.deepEqual(
-      decideTurnRoute({
+      decideChannelInputRoute({
         chatInfo: enabledChat,
         resolvedBinding: readyBinding,
         firstText: "/unknown",
@@ -89,16 +89,16 @@ describe("decideTurnRoute", () => {
     );
   });
 
-  it("routes normal responding messages through the harness path", () => {
+  it("routes normal responding messages into an agent invocation", () => {
     assert.deepEqual(
-      decideTurnRoute({
+      decideChannelInputRoute({
         chatInfo: enabledChat,
         resolvedBinding: readyBinding,
         firstText: "please investigate",
         hasPendingRun: false,
         shouldRespond: true,
       }),
-      { type: "harness-run" },
+      { type: "agent-invocation" },
     );
   });
 });
