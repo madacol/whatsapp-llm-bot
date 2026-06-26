@@ -535,7 +535,7 @@ type TurnFacts = {
 };
 
 type ChatTransport = {
-  start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
+  start: (onInput: (input: ChannelInput) => Promise<void>) => Promise<void>;
   stop: () => Promise<void>;
   sendText: (chatId: string, text: string) => Promise<void>;
   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
@@ -585,7 +585,7 @@ type WorkspacePresentationPort = {
   }) => Promise<void>;
 };
 
-type ChatTurn = {
+type ChannelInput = {
   chatId: string;
   senderIds: string[];
   senderJids?: string[];
@@ -596,6 +596,8 @@ type ChatTurn = {
   facts: TurnFacts;
   io: TurnIO;
 };
+/** @deprecated Use ChannelInput for new app-owned input seams. */
+type ChatTurn = ChannelInput;
 
 // Unified context for message handling
 type ExecuteActionContext = {

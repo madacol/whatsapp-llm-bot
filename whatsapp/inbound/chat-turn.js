@@ -550,7 +550,7 @@ export function createTurnIo({
 }
 
 /**
- * Normalize a Baileys message into a ChatTurn.
+ * Normalize a Baileys message into a ChannelInput.
  * Returns null when the message should be ignored by the app layer.
  * @param {BaileysMessage} baileysMessage
  * @param {import('@whiskeysockets/baileys').WASocket} sock
@@ -559,7 +559,7 @@ export function createTurnIo({
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
  * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
- * @returns {Promise<ChatTurn | null>}
+ * @returns {Promise<ChannelInput | null>}
  */
 export async function buildIncomingTurn(
   baileysMessage,
@@ -622,7 +622,7 @@ export async function buildIncomingTurn(
     scheduleQueuedOutboundRetry: ioOptions?.scheduleQueuedOutboundRetry,
   });
 
-  /** @type {ChatTurn} */
+  /** @type {ChannelInput} */
   const turn = {
     chatId,
     senderIds,
@@ -649,7 +649,7 @@ export async function buildIncomingTurn(
  * Adapt a Baileys message and invoke the app-level turn handler.
  * @param {BaileysMessage} baileysMessage
  * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @param {(message: ChatTurn) => Promise<void>} messageHandler
+ * @param {(message: ChannelInput) => Promise<void>} messageHandler
  * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
@@ -689,7 +689,7 @@ export async function adaptIncomingMessage(
 }
 
 /**
- * @param {ChatTurn} turn
+ * @param {ChannelInput} turn
  * @returns {string | null}
  */
 function getFirstText(turn) {
@@ -701,7 +701,7 @@ function getFirstText(turn) {
  * Commands must keep their original message boundary. If a Baileys flush
  * delivers "text, text, !command" together, merging them would hide the
  * command from the app command router because it only inspects the first text.
- * @param {ChatTurn} turn
+ * @param {ChannelInput} turn
  * @returns {boolean}
  */
 function isCommandBoundaryTurn(turn) {
@@ -710,8 +710,8 @@ function isCommandBoundaryTurn(turn) {
 }
 
 /**
- * @param {ChatTurn[]} turns
- * @returns {ChatTurn}
+ * @param {ChannelInput[]} turns
+ * @returns {ChannelInput}
  */
 function mergeTurns(turns) {
   const firstTurn = turns[0];
@@ -731,13 +731,13 @@ function mergeTurns(turns) {
 }
 
 /**
- * @param {ChatTurn[]} turns
- * @returns {ChatTurn[][]}
+ * @param {ChannelInput[]} turns
+ * @returns {ChannelInput[][]}
  */
 function splitTurnsAtCommandBoundaries(turns) {
-  /** @type {ChatTurn[][]} */
+  /** @type {ChannelInput[][]} */
   const groups = [];
-  /** @type {ChatTurn[]} */
+  /** @type {ChannelInput[]} */
   let current = [];
 
   for (const turn of turns) {
@@ -761,7 +761,7 @@ function splitTurnsAtCommandBoundaries(turns) {
  * order.
  * @param {BaileysMessage[]} baileysMessages
  * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @param {(message: ChatTurn) => Promise<void>} messageHandler
+ * @param {(message: ChannelInput) => Promise<void>} messageHandler
  * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
@@ -779,7 +779,7 @@ export async function adaptIncomingMessages(
   downloadFn = downloadMediaMessage,
   ioOptions,
 ) {
-  /** @type {ChatTurn[]} */
+  /** @type {ChannelInput[]} */
   const turns = [];
   for (const baileysMessage of baileysMessages) {
     const turn = await buildIncomingTurn(

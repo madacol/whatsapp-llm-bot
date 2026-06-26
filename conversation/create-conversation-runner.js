@@ -192,7 +192,7 @@ function buildUserMessage(turn) {
 /**
  * Create the conversation runner that owns command dispatch and runtime orchestration.
  * @param {ConversationRunnerDeps} deps
- * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
+ * @returns {{ handleMessage: (input: ChannelInput) => Promise<void> }}
  */
 export function createConversationRunner({
   store,
@@ -300,7 +300,7 @@ export function createConversationRunner({
   /**
    * Handle a `!command` message.
    * @param {{
-   *   turn: ChatTurn,
+   *   turn: ChannelInput,
    *   chatId: string,
    *   senderIds: string[],
    *   content: IncomingContentBlock[],
@@ -309,7 +309,7 @@ export function createConversationRunner({
    *   context: ExecuteActionContext,
    *   resolvedBinding: ResolvedChatBinding,
    * }} input
-   * @returns {Promise<ChatTurn | null>}
+   * @returns {Promise<ChannelInput | null>}
    */
   async function handleCommandMessage({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, resolvedBinding }) {
     const clearFollowUp = buildClearCommandFollowUp(turn, firstBlock, "!");
@@ -320,14 +320,14 @@ export function createConversationRunner({
   /**
    * Handle a regular (non-command) message by delegating to the selected runtime.
    * @param {{
-   *   turn: ChatTurn,
+   *   turn: ChannelInput,
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   context: ExecuteActionContext,
    *   runtimeSelection: AgentRuntimeSelection,
    *   resolvedBinding: ResolvedChatBinding,
    *   audioTranscriptionObserver?: ReturnType<typeof createAudioTranscriptionStatusObserver>,
    * }} input
-   * @returns {Promise<ChatTurn | null>}
+   * @returns {Promise<ChannelInput | null>}
    */
   async function handleLlmMessage({
     turn,
@@ -391,8 +391,8 @@ export function createConversationRunner({
 
   /**
    * Handle one normalized ChannelInput from the transport.
-   * @param {ChatTurn} turn
-   * @returns {Promise<ChatTurn | null>}
+   * @param {ChannelInput} turn
+   * @returns {Promise<ChannelInput | null>}
    */
   async function handleSingleMessage(turn) {
     const { chatId, senderIds, content } = turn;

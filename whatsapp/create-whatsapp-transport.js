@@ -729,7 +729,7 @@ function serializeTransportError(error) {
 
 /**
  * @typedef {{
- *   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
+ *   start: (onInput: (input: ChannelInput) => Promise<void>) => Promise<void>;
  *   stop: () => Promise<void>;
  *   sendText: (chatId: string, text: string) => Promise<void>;
  *   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
@@ -777,7 +777,7 @@ export async function createWhatsAppTransport(options = {}) {
   const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
   const outboundStore = options.outboundStore;
 
-  /** @type {(turn: ChatTurn) => Promise<void>} */
+  /** @type {(input: ChannelInput) => Promise<void>} */
   let onTurn = async () => {};
   /** @type {import('@whiskeysockets/baileys').WASocket | null} */
   let currentSocket = null;
@@ -1402,7 +1402,7 @@ export async function createWhatsAppTransport(options = {}) {
 
 /**
  * Compatibility wrapper for the previous adapter API.
- * @param {(message: ChatTurn) => Promise<void>} onMessage
+ * @param {(message: ChannelInput) => Promise<void>} onMessage
  * @returns {Promise<{ closeWhatsapp: () => Promise<void>, sendToChat: (chatId: string, text: string) => Promise<void> }>}
  */
 export async function connectToWhatsApp(onMessage) {
