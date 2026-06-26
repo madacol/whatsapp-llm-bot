@@ -3,8 +3,8 @@
  */
 
 /**
- * Create an ExecuteActionContext from a normalized chat turn.
- * @param {ChatTurn} turn
+ * Create an ExecuteActionContext from a normalized ChannelInput.
+ * @param {ChannelInput} turn
  * @returns {ExecuteActionContext}
  */
 export function createMessageActionContext(turn) {

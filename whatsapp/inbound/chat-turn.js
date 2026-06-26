@@ -359,13 +359,13 @@ function createPresenceLeaseController({
   };
 }
 
-/** @type {WeakMap<TurnIO, ReturnType<typeof createPresenceLeaseController>>} */
+/** @type {WeakMap<ChannelInputIO, ReturnType<typeof createPresenceLeaseController>>} */
 const turnPresenceControllers = new WeakMap();
 
 /**
  * End any WhatsApp-owned presence lease attached to a turn IO object.
- * Kept out of TurnIO so app/conversation code does not depend on presence.
- * @param {TurnIO} io
+ * Kept out of ChannelInputIO so app/conversation code does not depend on presence.
+ * @param {ChannelInputIO} io
  * @returns {Promise<void>}
  */
 export async function finishTurnIo(io) {
@@ -373,7 +373,7 @@ export async function finishTurnIo(io) {
 }
 
 /**
- * Create the message-scoped TurnIO functions.
+ * Create the message-scoped ChannelInputIO functions.
  * @param {{
  *   sock: import('@whiskeysockets/baileys').WASocket;
  *   getSocket?: () => import('@whiskeysockets/baileys').WASocket | null;
@@ -391,7 +391,7 @@ export async function finishTurnIo(io) {
  *     pulseIntervalMs?: number,
  *   };
  * }} input
- * @returns {TurnIO}
+ * @returns {ChannelInputIO}
  */
 export function createTurnIo({
   sock,
@@ -484,7 +484,7 @@ export function createTurnIo({
     return undefined;
   }
 
-  /** @type {TurnIO} */
+  /** @type {ChannelInputIO} */
   const io = {
     send: async (event) => {
       await markWorkingBeforeOutboundMessage();
