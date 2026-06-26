@@ -13,8 +13,8 @@
  * } | {
  *   type: "persist-only"
  * } | {
- *   type: "harness-run"
- * }} TurnRouteDecision
+ *   type: "agent-invocation"
+ * }} ChannelInputRouteDecision
  */
 
 /**
@@ -31,10 +31,10 @@ function isArchivedWorkspaceCodingRequest(binding, firstText) {
 }
 
 /**
- * Decide the semantic route for one normalized chat turn.
+ * Decide the semantic route for one normalized ChannelInput.
  *
  * This module intentionally owns only policy vocabulary. Persistence, command
- * execution, and harness execution stay in the runner.
+ * execution, and agent invocation execution stay in the runner.
  * @param {{
  *   chatInfo: Pick<import("../store.js").ChatRow, "is_enabled"> | undefined,
  *   resolvedBinding: ResolvedChatBinding,
@@ -42,9 +42,9 @@ function isArchivedWorkspaceCodingRequest(binding, firstText) {
  *   hasPendingRun: boolean,
  *   shouldRespond: boolean,
  * }} input
- * @returns {TurnRouteDecision}
+ * @returns {ChannelInputRouteDecision}
  */
-export function decideTurnRoute({
+export function decideChannelInputRoute({
   chatInfo,
   resolvedBinding,
   firstText,
@@ -76,5 +76,5 @@ export function decideTurnRoute({
     return { type: "persist-only" };
   }
 
-  return { type: "harness-run" };
+  return { type: "agent-invocation" };
 }
