@@ -342,7 +342,7 @@ export async function createHttpApiTransport(options = {}) {
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
   const maxAudioBytes = options.maxAudioBytes ?? DEFAULT_MAX_AUDIO_BYTES;
   const synthesizeSpeech = options.synthesizeSpeech ?? synthesizeSpeechForHttpApi;
-  /** @type {(turn: ChatTurn) => Promise<void>} */
+  /** @type {(input: ChannelInput) => Promise<void>} */
   let onTurn = async () => {};
   /** @type {import("node:http").Server | null} */
   let server = null;
@@ -427,7 +427,7 @@ export async function createHttpApiTransport(options = {}) {
    * @param {string} transportId
    * @param {HttpApiTurnPayload} payload
    * @param {HttpApiTurnRecord} record
-   * @returns {ChatTurn}
+   * @returns {ChannelInput}
    */
   function buildTurn(transportId, payload, record) {
     void transportId;

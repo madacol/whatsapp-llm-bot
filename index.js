@@ -38,7 +38,7 @@ const SHUTDOWN_FORCE_EXIT_MS = 10_000;
 /**
  * Create a message handler with injected dependencies.
  * @param {MessageHandlerDeps} deps
- * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
+ * @returns {{ handleMessage: (input: ChannelInput) => Promise<void> }}
  */
 export function createMessageHandler(deps) {
   const { store, llmClient, restartCommandHandler, transport, workspacePresentation } = deps;
