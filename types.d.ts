@@ -590,6 +590,7 @@ type WorkspacePresentationPort = {
 };
 
 type ChannelInput = {
+  channelId?: string;
   chatId: string;
   senderIds: string[];
   senderJids?: string[];
@@ -605,6 +606,7 @@ type ChatTurn = ChannelInput;
 
 // Unified context for message handling
 type ExecuteActionContext = {
+  channelId?: string;
   chatId: string;
   chatName?: string;
   senderIds: string[];

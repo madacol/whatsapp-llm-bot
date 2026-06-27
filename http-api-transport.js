@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { createLogger } from "./logger.js";
 import { createHttpApiTurnFlow } from "./http-api-turn-flow.js";
+import { createHttpApiTurnIntake } from "./http-api-turn-intake.js";
 import { mediaPathToMimeType, readMediaBuffer, validateMediaPath, writeMedia } from "./media-store.js";
 import { synthesizeSpeechForHttpApi } from "./http-api-speech.js";
 
@@ -350,6 +351,11 @@ export async function createHttpApiTransport(options = {}) {
   let assignedPort = null;
   let started = false;
   const turnFlow = createHttpApiTurnFlow({ maxEvents });
+  const turnIntake = createHttpApiTurnIntake({
+    turnFlow,
+    getBaseUrl: () => transport.baseUrl,
+    log,
+  });
 
   /**
    * @param {import("node:http").IncomingMessage} req
@@ -360,15 +366,6 @@ export async function createHttpApiTransport(options = {}) {
       return true;
     }
     return req.headers.authorization === `Bearer ${authToken}`;
-  }
-
-  /**
-   * @param {HttpApiTurnRecord} record
-   * @param {HttpApiTurnRecord["status"]} status
-   * @returns {void}
-   */
-  function updateTurnStatus(record, status) {
-    turnFlow.updateTurnStatus(record, status);
   }
 
   /**
@@ -388,35 +385,6 @@ export async function createHttpApiTransport(options = {}) {
    */
   function listEvents(chatId, after) {
     return turnFlow.listEvents(chatId, after);
-  }
-
-  /**
-   * @param {string} chatId
-   * @param {string | null} turnId
-   * @returns {ChannelInputIO}
-   */
-  function createChannelInputIo(chatId, turnId) {
-    return turnFlow.createChannelInputIo(chatId, turnId);
-  }
-
-  /**
-   * @param {string} transportId
-   * @param {HttpApiTurnPayload} payload
-   * @param {HttpApiTurnRecord} record
-   * @returns {ChannelInput}
-   */
-  function buildChannelInput(transportId, payload, record) {
-    void transportId;
-    return {
-      chatId: payload.chatId,
-      senderIds: payload.senderIds,
-      senderName: payload.senderName,
-      chatName: payload.chatId,
-      content: payload.content,
-      timestamp: payload.timestamp,
-      facts: payload.facts,
-      io: createChannelInputIo(payload.chatId, record.turnId),
-    };
   }
 
   /**
@@ -443,62 +411,13 @@ export async function createHttpApiTransport(options = {}) {
       return;
     }
 
-    const ledgerTurn = turnFlow.createOrGetTurn(transportId, payload);
-    if (!ledgerTurn.created) {
-      const existing = ledgerTurn.record;
-      sendJson(res, waitForCompletion && existing.status === "completed" ? 200 : 202, {
-        turnId: existing.turnId,
-        requestId: existing.requestId,
-        status: existing.status === "completed" && waitForCompletion ? "completed" : "accepted",
-        ...(waitForCompletion && existing.status === "completed" ? { text: existing.text } : {}),
-      });
-      return;
-    }
-
-    const record = ledgerTurn.record;
-
-    const turn = buildChannelInput(transportId, payload, record);
-    turnFlow.setActiveTurn(payload.chatId, record.turnId);
-
-    const runTurn = async () => {
-      try {
-        updateTurnStatus(record, "running");
-        await onTurn(turn);
-        updateTurnStatus(record, "completed");
-      } catch (error) {
-        updateTurnStatus(record, "failed");
-        log.error("HTTP API transport turn handler failed:", error);
-      } finally {
-        turnFlow.clearActiveTurn(payload.chatId, record.turnId);
-      }
-    };
-
-    if (!waitForCompletion) {
-      sendJson(res, 202, {
-        turnId: record.turnId,
-        requestId: record.requestId,
-        status: "accepted",
-      });
-      void runTurn();
-      return;
-    }
-
-    await runTurn();
-    if (record.status === "failed") {
-      sendJson(res, 500, {
-        turnId: record.turnId,
-        requestId: record.requestId,
-        status: "failed",
-      });
-      return;
-    }
-
-    sendJson(res, 200, {
-      turnId: record.turnId,
-      requestId: record.requestId,
-      status: record.status,
-      text: record.text,
+    const response = await turnIntake.submitTurn({
+      transportId,
+      payload,
+      waitForCompletion,
+      runTurn: onTurn,
     });
+    sendJson(res, response.statusCode, response.body);
   }
 
   /**
@@ -543,28 +462,12 @@ export async function createHttpApiTransport(options = {}) {
       return;
     }
 
-    const ledgerTurn = turnFlow.createOrGetTurn(transportId, payload);
-    if (!ledgerTurn.created) {
-      const existing = ledgerTurn.record;
-      sendJson(res, waitForCompletion && existing.status === "completed" ? 200 : 202, {
-        turnId: existing.turnId,
-        requestId: existing.requestId,
-        status: existing.status === "completed" && waitForCompletion ? "completed" : "accepted",
-        ...(waitForCompletion && existing.status === "completed" ? { text: existing.text } : {}),
-      });
-      return;
-    }
-
-    const record = ledgerTurn.record;
-    const turn = buildChannelInput(transportId, payload, record);
-    turnFlow.setActiveTurn(payload.chatId, record.turnId);
-
-    /** @type {{ path: string, mimeType: string, url: string } | null} */
-    let audio = null;
-    const runTurn = async () => {
-      try {
-        updateTurnStatus(record, "running");
-        await onTurn(turn);
+    const response = await turnIntake.submitTurn({
+      transportId,
+      payload,
+      waitForCompletion,
+      runTurn: onTurn,
+      afterTurnCompleted: async ({ record }) => {
         if (record.text.trim()) {
           const speech = await synthesizeSpeech({
             text: record.text,
@@ -582,45 +485,13 @@ export async function createHttpApiTransport(options = {}) {
               kind: "assistant_output",
               content: [audioEventBlock],
             }, record.turnId);
-            audio = buildAudioResponse(transport.baseUrl, outputPath, speech.mimeType);
+            return { audio: buildAudioResponse(transport.baseUrl, outputPath, speech.mimeType) };
           }
         }
-        updateTurnStatus(record, "completed");
-      } catch (error) {
-        updateTurnStatus(record, "failed");
-        log.error("HTTP API transport audio turn handler failed:", error);
-      } finally {
-        turnFlow.clearActiveTurn(payload.chatId, record.turnId);
-      }
-    };
-
-    if (!waitForCompletion) {
-      sendJson(res, 202, {
-        turnId: record.turnId,
-        requestId: record.requestId,
-        status: "accepted",
-      });
-      void runTurn();
-      return;
-    }
-
-    await runTurn();
-    if (record.status === "failed") {
-      sendJson(res, 500, {
-        turnId: record.turnId,
-        requestId: record.requestId,
-        status: "failed",
-      });
-      return;
-    }
-
-    sendJson(res, 200, {
-      turnId: record.turnId,
-      requestId: record.requestId,
-      status: record.status,
-      text: record.text,
-      ...(audio ? { audio } : {}),
+        return null;
+      },
     });
+    sendJson(res, response.statusCode, response.body);
   }
 
   /**

@@ -9,6 +9,7 @@
  */
 export function createMessageActionContext(turn) {
   return {
+    channelId: turn.channelId ?? turn.chatId,
     chatId: turn.chatId,
     chatName: turn.chatName,
     senderIds: turn.senderIds,
@@ -37,6 +38,7 @@ export function createMessageActionContext(turn) {
  */
 export function createSilentActionContext(chatId, senderIds) {
   return {
+    channelId: chatId,
     chatId,
     senderIds,
     senderJids: [],

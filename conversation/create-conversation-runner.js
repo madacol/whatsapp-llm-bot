@@ -1,4 +1,3 @@
-import { formatChatSettingsCommand } from "../chat-commands.js";
 import { createAppOutputPort } from "../app-output-port.js";
 import { shouldRespond } from "../message-formatting.js";
 import { createMessageActionContext } from "../execute-action-context.js";
@@ -8,12 +7,9 @@ import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
 import { buildLiveInputText } from "./live-input-text.js";
-import { createBangCommandRouter } from "../commands/bang-command-router.js";
-import { runClearConversationCommand } from "../commands/clear-conversation-command.js";
-import { handleSlashDiffCommand } from "../slash-diff-command.js";
 import { decideChannelInputRoute } from "./channel-input-routing.js";
-import { buildClearCommandFollowUp } from "./clear-command-follow-up.js";
 import { createAgentRuntime } from "./agent-runtime.js";
+import { createCommandOrchestration } from "./command-orchestration.js";
 
 const log = createLogger("conversation:runner");
 const DEFAULT_LIVE_INPUT_FALLBACK_DELAY_MS = 1500;
@@ -216,12 +212,11 @@ export function createConversationRunner({
     dispatchTurn,
   });
 
-  const bangCommandRouter = createBangCommandRouter({
+  const commandOrchestration = createCommandOrchestration({
     workspaceControl: workspaceLifecycle,
     addMessage,
     restartCommandHandler,
-    cancelActiveRun: agentRuntime.cancelActiveRun,
-    clearActiveSession: agentRuntime.clearActiveSession,
+    agentRuntime,
   });
 
   /**
@@ -295,26 +290,6 @@ export function createConversationRunner({
       });
     }, liveInputFallbackDelayMs);
     timer.unref?.();
-  }
-
-  /**
-   * Handle a `!command` message.
-   * @param {{
-   *   turn: ChannelInput,
-   *   chatId: string,
-   *   senderIds: string[],
-   *   content: IncomingContentBlock[],
-   *   firstBlock: TextContentBlock,
-   *   chatInfo: import("../store.js").ChatRow | undefined,
-   *   context: ExecuteActionContext,
-   *   resolvedBinding: ResolvedChatBinding,
-   * }} input
-   * @returns {Promise<ChannelInput | null>}
-   */
-  async function handleCommandMessage({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, resolvedBinding }) {
-    const clearFollowUp = buildClearCommandFollowUp(turn, firstBlock, "!");
-    await bangCommandRouter({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, resolvedBinding });
-    return clearFollowUp?.followUpTurn ?? null;
   }
 
   /**
@@ -438,16 +413,14 @@ export function createConversationRunner({
     }
 
     if (route.type === "bang-command" && firstBlock) {
-      return handleCommandMessage({
+      const result = await commandOrchestration.handleCommand({
+        route,
         turn,
-        chatId,
-        senderIds,
-        content,
-        firstBlock,
         chatInfo,
         context,
         resolvedBinding,
       });
+      return result.kind === "handled" ? result.followUpTurn : null;
     }
 
     if (route.type === "pending-followup") {
@@ -524,66 +497,32 @@ export function createConversationRunner({
     }
 
     if (route.type === "disabled-slash-command") {
-      await appOutput.replyWithError(`Bot is not enabled in this chat. Use ${formatChatSettingsCommand("enabled on")}`);
+      await commandOrchestration.handleCommand({
+        route,
+        turn,
+        chatInfo,
+        context,
+        resolvedBinding,
+      });
       return null;
     }
 
-    const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
-
     if (route.type === "slash-command" && firstBlock) {
-      const clearFollowUp = buildClearCommandFollowUp(turn, firstBlock, "/");
-      const slashCommand = clearFollowUp
-        ? "clear"
-        : firstBlock.text.slice(1).trim().toLowerCase();
-      if (slashCommand === "diff" || slashCommand.startsWith("diff ")) {
-        const slashWorkdir = agentRuntime.resolveWorkdir({
-          chatId,
-          chatInfo,
-          chatName: turn.chatName,
-          selection: runtimeSelection,
-          resolvedBinding,
-        });
-        if (!slashWorkdir) {
-          await appOutput.replyWithError("Could not resolve a workdir for `/diff`.");
-          return null;
-        }
-        const handledSlashDiff = await handleSlashDiffCommand({
-          command: slashCommand,
-          workdir: slashWorkdir,
-          context,
-        });
-        if (handledSlashDiff) {
-          return null;
-        }
-      }
-      const handled = await agentRuntime.handleCommand({
-        selection: runtimeSelection,
-        chatId,
+      const result = await commandOrchestration.handleCommand({
+        route,
+        turn,
         chatInfo,
         context,
-        command: slashCommand,
+        resolvedBinding,
       });
-      if (handled) {
-        if (clearFollowUp) {
-          await runClearConversationCommand(context);
-        }
-        return clearFollowUp?.followUpTurn ?? null;
+      if (result.kind === "handled") {
+        return result.followUpTurn;
       }
 
-      if (clearFollowUp) {
-        await agentRuntime.clearActiveSession(chatId, chatInfo);
-        const result = await runClearConversationCommand(context);
-        if (result !== "Conversation history cleared.") {
-          await appOutput.replyWithToolResult(result);
-          return null;
-        }
-        await appOutput.replyWithToolResult("Session cleared\n\nNext message starts fresh.");
-        return clearFollowUp.followUpTurn;
-      }
-
-      log.debug("Slash command not handled by agent runtime; continuing through normal LLM path", slashCommand);
+      log.debug("Slash command not handled by command orchestration; continuing through normal LLM path", firstBlock.text);
     }
 
+    const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
     return handleLlmMessage({
       turn,
       chatInfo,
