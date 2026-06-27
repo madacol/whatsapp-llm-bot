@@ -36,9 +36,11 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 
 ## Current Status
 
-Active. First implementation slice is a complete-clip POC: Android records a full utterance after wake-word detection, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
+Blocked. First implementation slice is a complete-clip POC: Android records a full utterance after wake-word detection, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
 
 Android SDK setup/build is blocked until disk space is increased. The target is at least 4 GB free, preferably 6 GB.
+
+There is no recorded evidence that this task is blocked specifically by connecting the Android phone to the Pi. If the backend is running on the Pi, the Android device eventually needs network reachability to the bot API, but the durable blocker recorded here is local Android build/tooling capacity plus later physical-device APK testing.
 
 ## Progress
 

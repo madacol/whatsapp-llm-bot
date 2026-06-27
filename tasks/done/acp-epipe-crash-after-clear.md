@@ -91,3 +91,23 @@ Inferred:
 - `pnpm type-check` passes.
 - Relevant ACP tests pass, including an ACP client/runner regression test and any existing ACP adapter tests.
 - Manual or automated reproduction of `/clear` followed immediately by a normal Codex request no longer exits the Node process.
+
+## Completion Notes
+
+- Added ACP client stdin failure handling in `harnesses/acp-client.js`.
+- `proc.stdin` error events now become controlled ACP connection write failures that reject pending requests, log the pending request list, end the notification queue, and terminate the child process for cleanup.
+- `sendRequest` now removes and rejects the just-registered pending request when a closed/destroyed/non-writable stdin path fails before the request is sent.
+- `sendNotification` now logs a controlled send failure instead of letting a notification write throw through the caller.
+- Added a regression test that emits `EPIPE` on child stdin while an `initialize` request is pending and asserts the request rejects with a controlled ACP write failure instead of surfacing an uncaught stream error.
+
+## Verification
+
+- Red: `pnpm test tests/acp-client.test.js` failed on the new regression because `proc.stdin.emit("error", EPIPE)` threw `write EPIPE` and the pending request later rejected from process shutdown.
+- Green: `pnpm test tests/acp-client.test.js`
+- Green: `pnpm type-check`
+- Green: `pnpm test tests/acp-client.test.js tests/acp-harness.test.js tests/conversation-clear-follow-up.test.js tests/llm-pipeline.test.js tests/harness-session-binding.test.js` passed 59 tests with 0 failures. The first sandboxed attempt failed with `listen EPERM 127.0.0.1`; the green run used elevated permissions for localhost binding.
+- Green: `pnpm test` passed 965 tests with 0 failures.
+
+## Status
+
+Done.
