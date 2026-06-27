@@ -15,6 +15,8 @@ Use testing to prove the user-valued behavior, not the implementation story.
 2. Start vertical.
    Default to a test or replay that enters through the real entry point and follows the path to the user-valued outcome. It may be temporary diagnostic scaffolding if the failing seam is unknown.
 
+   For new vertical slice and end-to-end tests in this repo, use the scenario-runner pattern in `tests/scenario-runner.js`: plain JavaScript step arrays, composite modules for repeated setup, real capture records from logs or smoke-generated capture output, and plain assertions over scenario context. Existing long tests should stay in their current form until several useful new scenario tests prove that migration will improve readability and maintenance.
+
 3. Use real evidence before theory.
    For regressions, inspect the latest relevant captured input, logs, persisted state, trace, or fixture before production edits. Do not ask the user to retry until existing evidence has been checked.
 
