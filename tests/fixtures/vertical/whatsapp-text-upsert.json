@@ -1,0 +1,22 @@
+[
+  {
+    "messages.upsert": {
+      "type": "notify",
+      "messages": [
+        {
+          "key": {
+            "remoteJid": "vertical-user@s.whatsapp.net",
+            "fromMe": false,
+            "id": "vertical-inbound-1",
+            "senderLid": "vertical-user-lid@lid"
+          },
+          "pushName": "Vertical User",
+          "messageTimestamp": 1782556800,
+          "message": {
+            "conversation": "hello vertical slice"
+          }
+        }
+      ]
+    }
+  }
+]

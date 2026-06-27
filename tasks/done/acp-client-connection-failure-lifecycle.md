@@ -61,3 +61,22 @@ The public ACP client interface should stay small.
 - Existing ACP client failure tests remain green.
 - Add or retain coverage for startup failure, runtime exit with pending requests, timeout, stdin `EPIPE`, and closed/unwritable send.
 - `pnpm type-check` and ACP client tests pass.
+
+## Completion Notes
+
+- Added `harnesses/acp-client-connection-lifecycle.js` as the owner for ACP connection failure state.
+- Moved closed/close-requested/process-error state, stderr tail context, pending request registration/rejection, timeout errors, process error handling, process exit handling, and stdin/write failure handling behind the lifecycle object.
+- Kept `harnesses/acp-client.js` responsible for child process setup, JSON-RPC send/receive, protocol capture, request/notification routing, and close orchestration.
+- Added `tests/acp-client-connection-lifecycle.test.js` to prove stdin failure rejects pending requests, ends notifications, records useful context, and kills the child.
+- Existing `tests/acp-client.test.js` coverage still proves startup failure, runtime exit with pending requests, timeout context, stdin `EPIPE`, fixture capture, and timeout refresh behavior.
+
+## Verification
+
+- Red: `pnpm test tests/acp-client-connection-lifecycle.test.js` failed with `ERR_MODULE_NOT_FOUND` before the lifecycle module existed.
+- Green: `pnpm test tests/acp-client-connection-lifecycle.test.js tests/acp-client.test.js`.
+- Green: `pnpm type-check`.
+- Green with sandbox escalation: `pnpm test --test-name-pattern "runs an ACP stdio agent" tests/acp-harness.test.js`.
+
+## Status
+
+Done.

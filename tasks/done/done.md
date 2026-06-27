@@ -3,6 +3,12 @@
 Completed task details are archived here instead of deleted.
 
 - ACP EPIPE crash after `/clear` follow-up fixed. [details](acp-epipe-crash-after-clear.md)
+- Architecture review status index cleanup. [details](architecture-review-status-index-cleanup.md)
+- Sandboxed child-process stdio investigation. [details](investigate-sandboxed-stdio-tests.md)
+- ACP client connection failure lifecycle extracted. [details](acp-client-connection-failure-lifecycle.md)
+- Repeated LLM thought investigation resolved by thinking coalescing fix. [details](investigate-repeated-thoughts.md)
+- Declarative vertical-slice test helper first slice. [details](declarative-vertical-slice-tests.md)
+- Deepened Agent Run Activity reasoning/subagent output. [details](agent-run-activity-reasoning-subagent-output.md)
 - Command and intake architecture. [details](command-intake-architecture.md)
 - Deepened outbound durability and state seams. [details](outbound-state-architecture.md)
 - ACP apply_patch escalation. [details](acp-apply-patch-escalation.md)

@@ -7,12 +7,12 @@ import { fileURLToPath } from "node:url";
 import { createLogger } from "../logger.js";
 import { getDefaultRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import { getDefaultFixtureCapture } from "../diagnostics/capture.js";
+import { createAcpConnectionFailureLifecycle } from "./acp-client-connection-lifecycle.js";
 
 const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const requireFromHere = createRequire(import.meta.url);
-const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
 const ACP_COMMAND_PACKAGES = new Map([
   ["codex-acp", "@agentclientprotocol/codex-acp"],
 ]);
@@ -130,38 +130,6 @@ function jsonRpcErrorCode(error) {
 }
 
 /**
- * @param {string} method
- * @param {number} timeoutMs
- * @param {{
- *   command: string,
- *   pid?: number,
- *   cwd?: string | null,
- *   pendingRequests: string[],
- *   stderrTail?: string,
- * }} details
- * @returns {Error}
- */
-function createRequestTimeoutError(method, timeoutMs, details) {
-  const parts = [
-    `ACP request timed out after ${timeoutMs}ms: ${method}`,
-    `command=${details.command}`,
-  ];
-  if (typeof details.pid === "number") {
-    parts.push(`pid=${details.pid}`);
-  }
-  if (details.cwd) {
-    parts.push(`cwd=${details.cwd}`);
-  }
-  if (details.pendingRequests.length > 0) {
-    parts.push(`pending=${details.pendingRequests.join(",")}`);
-  }
-  if (details.stderrTail) {
-    parts.push(`stderrTail=${details.stderrTail}`);
-  }
-  return new Error(parts.join(" "));
-}
-
-/**
  * @param {NodeJS.ProcessEnv | undefined} env
  * @returns {NodeJS.ProcessEnv | undefined}
  */
@@ -175,16 +143,6 @@ function buildChildEnvironment(env) {
  */
 function isRecord(value) {
   return typeof value === "object" && value !== null;
-}
-
-/**
- * @param {unknown} error
- * @returns {string | null}
- */
-function getErrorCode(error) {
-  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
-    ? error.code
-    : null;
 }
 
 /**
@@ -312,90 +270,6 @@ export function resolveAcpCommandPath(command) {
 }
 
 /**
- * @param {{ phase: "startup" | "runtime", command: string, resolvedCommand: string, cwd?: string | null, error: unknown }} input
- * @returns {Error}
- */
-function createAcpProcessError(input) {
-  const parts = [
-    input.phase === "startup"
-      ? `Failed to start ACP command "${input.command}".`
-      : `ACP command process error "${input.command}".`,
-    `resolved=${input.resolvedCommand}`,
-  ];
-  if (input.cwd) {
-    parts.push(`cwd=${input.cwd}`);
-  }
-  const code = getErrorCode(input.error);
-  if (code) {
-    parts.push(`code=${code}`);
-  }
-  parts.push(getErrorMessage(input.error));
-  return new Error(parts.join(" "), { cause: input.error });
-}
-
-/**
- * @param {{
- *   command: string,
- *   resolvedCommand: string,
- *   cwd?: string | null,
- *   error: unknown,
- *   pendingRequests: string[],
- *   stderrTail?: string,
- * }} input
- * @returns {Error}
- */
-function createAcpConnectionWriteError(input) {
-  const parts = [
-    "ACP connection write failed.",
-    `command=${input.command}`,
-    `resolved=${input.resolvedCommand}`,
-  ];
-  if (input.cwd) {
-    parts.push(`cwd=${input.cwd}`);
-  }
-  const code = getErrorCode(input.error);
-  if (code) {
-    parts.push(`code=${code}`);
-  }
-  if (input.pendingRequests.length > 0) {
-    parts.push(`pending=${input.pendingRequests.join(",")}`);
-  }
-  if (input.stderrTail) {
-    parts.push(`stderrTail=${input.stderrTail}`);
-  }
-  parts.push(getErrorMessage(input.error));
-  return new Error(parts.join(" "), { cause: input.error });
-}
-
-/**
- * @param {{
- *   command: string,
- *   resolvedCommand: string,
- *   cwd?: string | null,
- *   pendingRequests: string[],
- *   stderrTail?: string,
- * }} input
- * @returns {Error}
- */
-function createAcpConnectionUnavailableError(input) {
-  const parts = [
-    "ACP connection is not writable.",
-    `command=${input.command}`,
-    `resolved=${input.resolvedCommand}`,
-  ];
-  if (input.cwd) {
-    parts.push(`cwd=${input.cwd}`);
-  }
-  if (input.pendingRequests.length > 0) {
-    parts.push(`pending=${input.pendingRequests.join(",")}`);
-  }
-  if (input.stderrTail) {
-    parts.push(`stderrTail=${input.stderrTail}`);
-  }
-  return new Error(parts.join(" "));
-}
-
-/**
  * @param {import("node:child_process").ChildProcess} proc
  * @param {number} timeoutMs
  * @returns {Promise<void>}
@@ -426,24 +300,6 @@ function waitForProcessExit(proc, timeoutMs) {
  */
 function shouldLogAcpChildStderr() {
   return getDefaultRuntimeDiagnosticsState().isAcpStderrLogEnabled();
-}
-
-/**
- * @param {string} current
- * @param {string} chunk
- * @returns {string}
- */
-function appendStderrTail(current, chunk) {
-  const next = `${current}${chunk}`;
-  return next.length > ACP_STDERR_TAIL_MAX_CHARS ? next.slice(-ACP_STDERR_TAIL_MAX_CHARS) : next;
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-function cleanStderrTail(value) {
-  return value.trim();
 }
 
 /**
@@ -480,34 +336,6 @@ function captureAcpProtocolMessage(fixtureCapture, direction, message) {
 }
 
 /**
- * @param {Map<number, PendingRequest>} pendingRequests
- * @returns {string[]}
- */
-function pendingRequestSummaries(pendingRequests) {
-  return [...pendingRequests].map(([id, pending]) => `${pending.method}#${id}`);
-}
-
-/**
- * @param {{
- *   exitCode: number | null,
- *   signal: NodeJS.Signals | null,
- *   pendingRequests: string[],
- * }} details
- * @returns {string}
- */
-function formatConnectionClosedMessage(details) {
-  const parts = [
-    "ACP connection closed.",
-    `exitCode=${details.exitCode === null ? "null" : details.exitCode}`,
-    `signal=${details.signal === null ? "null" : details.signal}`,
-  ];
-  if (details.pendingRequests.length > 0) {
-    parts.push(`pending=${details.pendingRequests.join(",")}`);
-  }
-  return parts.join(" ");
-}
-
-/**
  * @param {OpenAcpConnectionOptions} options
  * @returns {Promise<AcpConnection>}
  */
@@ -523,58 +351,23 @@ export async function openAcpConnection(options) {
   });
 
   const queue = createNotificationQueue();
-  /** @type {Map<number, PendingRequest>} */
-  const pendingRequests = new Map();
   let nextRequestId = 1;
-  let closed = false;
-  let closeRequested = false;
-  let stderrTail = "";
-  let processError = /** @type {Error | null} */ (null);
   let startupSettled = false;
-
-  /**
-   * @param {Error} error
-   * @returns {void}
-   */
-  function failConnection(error) {
-    if (!processError) {
-      processError = error;
-    }
-    closed = true;
-    queue.end();
-    for (const [id, pending] of [...pendingRequests]) {
-      pendingRequests.delete(id);
-      pending.reject(processError);
-    }
-  }
-
-  /**
-   * @param {unknown} error
-   * @returns {Error}
-   */
-  function createWriteFailure(error) {
-    return createAcpConnectionWriteError({
-      command: options.command,
-      resolvedCommand,
-      ...(options.cwd ? { cwd: options.cwd } : {}),
-      error,
-      pendingRequests: pendingRequestSummaries(pendingRequests),
-      ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
-    });
-  }
-
-  /**
-   * @returns {Error}
-   */
-  function createUnavailableFailure() {
-    return processError ?? createAcpConnectionUnavailableError({
-      command: options.command,
-      resolvedCommand,
-      ...(options.cwd ? { cwd: options.cwd } : {}),
-      pendingRequests: pendingRequestSummaries(pendingRequests),
-      ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
-    });
-  }
+  const lifecycle = createAcpConnectionFailureLifecycle({
+    command: options.command,
+    resolvedCommand,
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    getPid: () => proc.pid,
+    endNotifications: queue.end,
+    kill: () => {
+      try {
+        proc.kill();
+      } catch {
+        // best-effort cleanup
+      }
+    },
+    logger: log,
+  });
 
   const startup = new Promise((resolve, reject) => {
     proc.once("spawn", () => {
@@ -583,30 +376,10 @@ export async function openAcpConnection(options) {
     });
     proc.once("error", (error) => {
       const phase = startupSettled ? "runtime" : "startup";
-      processError = createAcpProcessError({
+      const processError = lifecycle.handleProcessError({
         phase,
-        command: options.command,
-        resolvedCommand,
-        ...(options.cwd ? { cwd: options.cwd } : {}),
         error,
       });
-      closed = true;
-      queue.end();
-      const pendingRequestList = pendingRequestSummaries(pendingRequests);
-      for (const [id, pending] of [...pendingRequests]) {
-        pendingRequests.delete(id);
-        pending.reject(processError);
-      }
-      if (!closeRequested) {
-        log.warn(phase === "startup" ? "ACP child process failed to start." : "ACP child process error.", {
-          command: options.command,
-          resolvedCommand,
-          ...(options.cwd ? { cwd: options.cwd } : {}),
-          code: getErrorCode(error),
-          message: getErrorMessage(error),
-          pendingRequests: pendingRequestList,
-        });
-      }
       if (phase === "startup") {
         reject(processError);
       }
@@ -614,30 +387,12 @@ export async function openAcpConnection(options) {
   });
 
   proc.stdin.on("error", (error) => {
-    const pendingRequestList = pendingRequestSummaries(pendingRequests);
-    const writeError = createWriteFailure(error);
-    failConnection(writeError);
-    if (!closeRequested) {
-      log.warn("ACP child stdin failed.", {
-        command: options.command,
-        resolvedCommand,
-        ...(options.cwd ? { cwd: options.cwd } : {}),
-        code: getErrorCode(error),
-        message: getErrorMessage(error),
-        pendingRequests: pendingRequestList,
-        ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
-      });
-    }
-    try {
-      proc.kill();
-    } catch {
-      // best-effort cleanup
-    }
+    lifecycle.handleStdinError(error);
   });
 
   proc.stderr.setEncoding("utf8");
   proc.stderr.on("data", (chunk) => {
-    stderrTail = appendStderrTail(stderrTail, String(chunk));
+    lifecycle.appendStderr(String(chunk));
     if (!shouldLogAcpChildStderr()) {
       return;
     }
@@ -658,15 +413,13 @@ export async function openAcpConnection(options) {
   function send(message) {
     const jsonRpcMessage = { jsonrpc: "2.0", ...message };
     captureAcpProtocolMessage(fixtureCapture, "client_to_agent", jsonRpcMessage);
-    if (closed || proc.stdin.destroyed || proc.stdin.writableEnded || !proc.stdin.writable) {
-      throw createUnavailableFailure();
+    if (lifecycle.isClosed() || proc.stdin.destroyed || proc.stdin.writableEnded || !proc.stdin.writable) {
+      throw lifecycle.createUnavailableFailure();
     }
     try {
       proc.stdin.write(`${JSON.stringify(jsonRpcMessage)}\n`);
     } catch (error) {
-      const writeError = createWriteFailure(error);
-      failConnection(writeError);
-      throw writeError;
+      throw lifecycle.failWrite(error);
     }
   }
 
@@ -676,7 +429,7 @@ export async function openAcpConnection(options) {
    * @returns {void}
    */
   function logOutboundWriteFailure(message, error) {
-    if (closeRequested) {
+    if (lifecycle.isCloseRequested()) {
       return;
     }
     log.warn(message, {
@@ -707,12 +460,7 @@ export async function openAcpConnection(options) {
    * @param {unknown} result
    */
   function resolveRequest(id, result) {
-    const pending = pendingRequests.get(id);
-    if (!pending) {
-      return;
-    }
-    pendingRequests.delete(id);
-    pending.resolve(result);
+    lifecycle.resolveRequest(id, result);
   }
 
   /**
@@ -720,21 +468,14 @@ export async function openAcpConnection(options) {
    * @param {string} message
    */
   function rejectRequest(id, message) {
-    const pending = pendingRequests.get(id);
-    if (!pending) {
-      return;
-    }
-    pendingRequests.delete(id);
-    pending.reject(new Error(message));
+    lifecycle.rejectRequest(id, message);
   }
 
   /**
    * @returns {void}
    */
   function refreshActivityTimeouts() {
-    for (const pending of pendingRequests.values()) {
-      pending.refreshTimeout?.();
-    }
+    lifecycle.refreshActivityTimeouts();
   }
 
   const readLoop = (async () => {
@@ -785,28 +526,7 @@ export async function openAcpConnection(options) {
   })();
 
   proc.once("exit", (exitCode, signal) => {
-    if (processError) {
-      return;
-    }
-    closed = true;
-    queue.end();
-    const pendingRequestList = pendingRequestSummaries(pendingRequests);
-    const details = {
-      command: options.command,
-      pid: proc.pid,
-      ...(options.cwd ? { cwd: options.cwd } : {}),
-      exitCode,
-      signal,
-      pendingRequests: pendingRequestList,
-      ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
-    };
-    if (!closeRequested && (pendingRequestList.length > 0 || exitCode !== 0 || signal)) {
-      log.warn("ACP child process closed unexpectedly.", details);
-    }
-    const message = formatConnectionClosedMessage({ exitCode, signal, pendingRequests: pendingRequestList });
-    for (const [id] of pendingRequests) {
-      rejectRequest(id, message);
-    }
+    lifecycle.handleExit({ exitCode, signal });
   });
 
   await startup;
@@ -834,19 +554,7 @@ export async function openAcpConnection(options) {
           }
           clearRequestTimer();
           timer = setTimeout(() => {
-            const pendingRequestList = pendingRequestSummaries(pendingRequests);
-            if (!pendingRequests.delete(id)) {
-              return;
-            }
-            const timeoutDetails = {
-              command: options.command,
-              pid: proc.pid,
-              ...(options.cwd ? { cwd: options.cwd } : {}),
-              pendingRequests: pendingRequestList,
-              ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
-            };
-            log.warn("ACP request timed out.", timeoutDetails);
-            reject(createRequestTimeoutError(method, timeoutMs, timeoutDetails));
+            lifecycle.timeoutRequest(id, method, timeoutMs);
           }, timeoutMs);
           timer.unref?.();
         };
@@ -863,12 +571,12 @@ export async function openAcpConnection(options) {
           },
           ...(requestOptions.refreshOnActivity ? { refreshTimeout: armRequestTimer } : {}),
         };
-        pendingRequests.set(id, pending);
+        lifecycle.addPendingRequest(id, pending);
         armRequestTimer();
         try {
           send({ id, method, params });
         } catch (error) {
-          if (pendingRequests.delete(id)) {
+          if (lifecycle.deletePendingRequest(id)) {
             pending.reject(error instanceof Error ? error : new Error(String(error)));
           }
         }
@@ -879,17 +587,14 @@ export async function openAcpConnection(options) {
     },
     notifications: queue.iterate(),
     async close() {
-      if (closed) {
+      if (!lifecycle.beginClose()) {
         return;
       }
-      closed = true;
-      closeRequested = true;
       try {
         proc.kill();
       } catch {
         // best-effort cleanup
       }
-      queue.end();
       await waitForProcessExit(proc, 2_000);
       await readLoop.catch(() => {});
     },
