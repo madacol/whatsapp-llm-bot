@@ -2,6 +2,7 @@
 
 Completed task details are archived here instead of deleted.
 
+- Command and intake architecture. [details](command-intake-architecture.md)
 - Deepened outbound durability and state seams. [details](outbound-state-architecture.md)
 - ACP apply_patch escalation. [details](acp-apply-patch-escalation.md)
 - Codex apply_patch delete+add rewrite diff. [details](codex-apply-patch-delete-add-diff.md)

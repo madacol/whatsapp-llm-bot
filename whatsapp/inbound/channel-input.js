@@ -1,5 +1,6 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { normalizeChatId, reattachHdDeferreds } from "../../whatsapp-hd-media.js";
+import { withChannelIdentity } from "../../conversation/channel-identity.js";
 import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
 import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
 import { getDirectMessageText, getMessageContent } from "./message-content.js";
@@ -623,7 +624,7 @@ export async function buildChannelInput(
   });
 
   /** @type {ChannelInput} */
-  const channelInput = {
+  const channelInput = withChannelIdentity({
     chatId,
     senderIds,
     senderJids,
@@ -640,7 +641,7 @@ export async function buildChannelInput(
       ...(quotedSenderName && { quotedSenderName }),
     },
     io,
-  };
+  });
 
   return channelInput;
 }
