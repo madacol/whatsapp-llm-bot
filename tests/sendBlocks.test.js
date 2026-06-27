@@ -3295,13 +3295,14 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     );
   });
 
-  it("truncates long plain-text inspect output after 👁 reactions", async () => {
+  it("reveals long plain-text inspect output in full after user 👁 reactions", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();
     const longInspectText = Array.from(
-      { length: 220 },
+      { length: 500 },
       (_, index) => `🔧 *Shell*  \`command ${String(index).padStart(3, "0")}\``,
     ).join("\n");
+    assert.ok(longInspectText.length > 10_000, "test fixture should exceed the old and proposed inspect caps");
 
     const handle = await sendBlocks(
       sock,
@@ -3327,20 +3328,18 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     await waitFor(() => sentTextMessages(calls).length >= 2);
     const inspectMsg = sentTextMessages(calls)[1];
     assert.equal(typeof inspectMsg.text, "string");
-    assert.ok(inspectMsg.text.startsWith("🔧 *Shell*  `command 000`"));
-    assert.ok(inspectMsg.text.includes("_… truncated ("));
-    assert.ok(inspectMsg.text.length < longInspectText.length);
+    assert.equal(inspectMsg.text, longInspectText);
 
+    const updatedInspectText = `${longInspectText}\n🔧 *Shell*  \`command 500\``;
     handle.setInspect({
       kind: "text",
-      text: `${longInspectText}\n🔧 *Shell*  \`command 220\``,
+      text: updatedInspectText,
     });
 
     await waitFor(() => sentTextMessages(calls).length >= 3);
     const persistedEditMsg = sentTextMessages(calls)[2];
     assert.equal(typeof persistedEditMsg.text, "string");
-    assert.ok(persistedEditMsg.text.includes("_… truncated ("));
-    assert.ok(persistedEditMsg.text.length < longInspectText.length);
+    assert.equal(persistedEditMsg.text, updatedInspectText);
   });
 
   it("formats reasoning inspect text when the user reacts with 👁", async () => {

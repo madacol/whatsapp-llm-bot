@@ -1940,16 +1940,13 @@ async function sendTextDeliveryPlan(sock, chatId, text, options, planOptions = {
 }
 
 /**
- * Format inspect text for editing into a WhatsApp message with truncation.
+ * Format inspect text for editing into a WhatsApp message.
  * @param {string} summary
  * @param {string} text
  * @returns {string}
  */
 function formatInspectEditText(summary, text) {
-  const MAX = 3000;
-  const display = text.length <= MAX ? text
-    : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
-  return summary ? `${summary}\n\n${display}` : display;
+  return summary ? `${summary}\n\n${text}` : text;
 }
 
 /**
