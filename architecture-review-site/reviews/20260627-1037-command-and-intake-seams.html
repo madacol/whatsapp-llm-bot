@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review - command and intake seams</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        letter-spacing: 0;
+      }
+
+      .module-box {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+      }
+
+      .seam-box {
+        border: 1px dashed #94a3b8;
+      }
+
+      .deep-module {
+        background: #0f172a;
+        color: #f8fafc;
+      }
+
+      .leak {
+        color: #dc2626;
+      }
+
+      .mini-label {
+        color: #64748b;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .thin-interface {
+        min-height: 2.1rem;
+      }
+
+      .wide-interface {
+        min-height: 5.7rem;
+      }
+
+      .implementation {
+        min-height: 9.25rem;
+      }
+
+      code {
+        font-size: 0.88em;
+      }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="mx-auto max-w-6xl px-6 py-10 space-y-10">
+      <header class="space-y-5">
+        <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p class="mini-label">Architecture Review</p>
+            <h1 class="mt-2 text-4xl font-semibold">Command And Intake Seams</h1>
+            <p class="mt-2 text-sm text-slate-500">whatsapp-llm-bot - 2026-06-27 10:37 UTC</p>
+          </div>
+          <div class="grid gap-2 text-xs text-slate-600 md:w-96 md:grid-cols-2">
+            <div class="module-box rounded-lg p-2">solid box = module</div>
+            <div class="seam-box rounded-lg bg-white p-2">dashed box = seam</div>
+            <div class="module-box rounded-lg p-2"><span class="leak">red text</span> = leakage</div>
+            <div class="deep-module rounded-lg p-2">dark box = deep module</div>
+          </div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-8" aria-label="Architecture candidates">
+        <article id="command-orchestration" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="mr-auto text-2xl font-semibold">Deepen Command Orchestration</h2>
+            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">in-process</span>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-[0.95fr_1.35fr]">
+            <div>
+              <p class="mini-label mb-2">Files</p>
+              <ul class="space-y-1 font-mono text-sm text-slate-700">
+                <li>conversation/create-conversation-runner.js</li>
+                <li>conversation/channel-input-routing.js</li>
+                <li>conversation/clear-command-follow-up.js</li>
+                <li>commands/bang-command-router.js</li>
+                <li>workspace-command-router.js</li>
+                <li>commands/chat-settings-command.js</li>
+                <li>commands/clear-conversation-command.js</li>
+                <li>slash-diff-command.js</li>
+              </ul>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">Before</p>
+                <pre class="mermaid">
+flowchart TB
+  T[ChannelInput]
+  R[Input Orchestration]
+  C[channel-input-routing]
+  B[bang-command-router]
+  W[workspace-command-router]
+  S[slash /diff]
+  A[Agent Runtime commands]
+  P[addMessage / clear follow-up / AppOutputPort]
+  T --> R
+  R --> C
+  C --> R
+  R --> B
+  B --> W
+  R --> S
+  R --> A
+  R -.leakage.-> P
+classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+class R,P leak;
+                </pre>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">After</p>
+                <div class="space-y-3 text-sm">
+                  <div class="module-box rounded-lg p-3">Input Orchestration receives ChannelInput</div>
+                  <div class="seam-box rounded-lg bg-white p-3">command route seam</div>
+                  <div class="deep-module rounded-lg p-4">
+                    <p class="font-semibold">Command Orchestration module</p>
+                    <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-200">
+                      <div class="rounded bg-white/10 p-2">parse commands</div>
+                      <div class="rounded bg-white/10 p-2">persist command turns</div>
+                      <div class="rounded bg-white/10 p-2">workspace policy</div>
+                      <div class="rounded bg-white/10 p-2">Agent Runtime commands</div>
+                      <div class="rounded bg-white/10 p-2">clear follow-ups</div>
+                      <div class="rounded bg-white/10 p-2">AppOutputPort replies</div>
+                    </div>
+                  </div>
+                  <div class="module-box rounded-lg p-3">Input Orchestration continues or stops</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="mini-label">Problem</p>
+              <p class="mt-1 text-sm">
+                The command path is shallow: Input Orchestration must know bang commands, slash commands, workspace commands,
+                clear follow-ups, persistence timing, Agent Runtime command handling, and AppOutputPort replies.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Solution</p>
+              <p class="mt-1 text-sm">
+                Move command parsing, execution policy, persistence, clear follow-ups, and command output creation behind one
+                app-owned Command Orchestration module. Keep ChannelInput routing focused on route policy.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Wins</p>
+              <ul class="mt-1 space-y-1 text-sm">
+                <li>Locality: command bugs concentrate.</li>
+                <li>Leverage: one command test surface.</li>
+                <li>Input Orchestration interface shrinks.</li>
+                <li>Clear flow stops leaking.</li>
+                <li>Output ports stay ownership-specific.</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article id="http-turn-intake" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="mr-auto text-2xl font-semibold">Deepen HTTP API Transport turn intake</h2>
+            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">concrete Transport</span>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-[0.95fr_1.35fr]">
+            <div>
+              <p class="mini-label mb-2">Files</p>
+              <ul class="space-y-1 font-mono text-sm text-slate-700">
+                <li>http-api-transport.js</li>
+                <li>http-api-turn-flow.js</li>
+                <li>http-api-transport-ledger.js</li>
+                <li>http-api-speech.js</li>
+                <li>media-store.js</li>
+                <li>tests/http-api-transport.test.js</li>
+                <li>docs/transports/http-api.md</li>
+              </ul>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">Before</p>
+                <div class="space-y-2 text-sm">
+                  <div class="module-box rounded-lg p-2">HTTP route/auth/body module</div>
+                  <div class="rounded-lg border border-red-300 bg-red-50 p-2">text turn lifecycle</div>
+                  <div class="rounded-lg border border-red-300 bg-red-50 p-2">audio turn lifecycle</div>
+                  <div class="module-box rounded-lg p-2">turn-flow ledger</div>
+                  <div class="module-box rounded-lg p-2">speech synthesis and media append</div>
+                  <div class="leak text-center text-xs font-semibold">wait/idempotency/failure policy duplicated</div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">After</p>
+                <pre class="mermaid">
+flowchart TB
+  H[HTTP wire module]
+  I[HTTP turn intake module]
+  L[turn ledger and stream fanout]
+  S[speech and media post-processing]
+  C[ChannelInput handler]
+  H --> I
+  I --> L
+  I --> C
+  I --> S
+classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+class I deep;
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="mini-label">Problem</p>
+              <p class="mt-1 text-sm">
+                The HTTP wire module owns repeated turn lifecycle behaviour for text and audio, so idempotency, wait mode,
+                active-turn correlation, failure status, and assistant speech post-processing are not local.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Solution</p>
+              <p class="mt-1 text-sm">
+                Put text and audio execution through one deeper HTTP API Transport turn intake module. Leave route matching,
+                auth, CORS, and body parsing in the wire module.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Wins</p>
+              <ul class="mt-1 space-y-1 text-sm">
+                <li>Locality: one lifecycle policy.</li>
+                <li>Leverage: text and audio share tests.</li>
+                <li>Failure handling stops duplicating.</li>
+                <li>Speech post-processing isolates.</li>
+                <li>No speculative app-wide seam.</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article id="chat-settings" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="mr-auto text-2xl font-semibold">Deepen Chat Settings interaction</h2>
+            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">local-substitutable</span>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-[0.95fr_1.35fr]">
+            <div>
+              <p class="mini-label mb-2">Files</p>
+              <ul class="space-y-1 font-mono text-sm text-slate-700">
+                <li>chat-settings-service.js</li>
+                <li>commands/chat-settings-command.js</li>
+                <li>chat-output-visibility.js</li>
+                <li>chat-commands.js</li>
+                <li>tests/chat-settings.test.js</li>
+              </ul>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">Before: shallow split</p>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <div class="wide-interface rounded-t border border-red-300 bg-red-50 p-2">command module<br /><span class="text-xs">picker flow, admin checks, definition lookup</span></div>
+                    <div class="implementation rounded-b border border-t-0 border-slate-200 bg-white p-2">reply result</div>
+                  </div>
+                  <div>
+                    <div class="wide-interface rounded-t border border-red-300 bg-red-50 p-2">settings module<br /><span class="text-xs">definitions, options, persistence, formatting</span></div>
+                    <div class="implementation rounded-b border border-t-0 border-slate-200 bg-white p-2">large registry</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">After: one deep module</p>
+                <div class="mx-auto max-w-sm text-sm">
+                  <div class="thin-interface rounded-t border border-emerald-300 bg-emerald-50 p-2">Chat Settings command asks for settings interaction</div>
+                  <div class="deep-module implementation rounded-b p-5">
+                    <p class="font-semibold">Chat Settings module</p>
+                    <div class="mt-3 grid gap-2 text-xs text-slate-200">
+                      <div class="rounded bg-white/10 p-2">definition registry</div>
+                      <div class="rounded bg-white/10 p-2">select and multi-select policy</div>
+                      <div class="rounded bg-white/10 p-2">admin and master rules</div>
+                      <div class="rounded bg-white/10 p-2">format, set, reset, inspect</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="mini-label">Problem</p>
+              <p class="mt-1 text-sm">
+                The settings interface leaks definition internals: callers know picker and multi-picker rules, admin checks,
+                root database wiring, and the difference between inspect, set, and reset flows.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Solution</p>
+              <p class="mt-1 text-sm">
+                Move the complete settings interaction behind the Chat Settings module while keeping setting definitions and
+                storage compatibility inside that same implementation.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Wins</p>
+              <ul class="mt-1 space-y-1 text-sm">
+                <li>Locality: settings rules concentrate.</li>
+                <li>Leverage: command stays tiny.</li>
+                <li>Picker tests hit one interface.</li>
+                <li>Definition helpers stop leaking.</li>
+                <li>Output wording stays consistent.</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article id="channel-identity" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="mr-auto text-2xl font-semibold">Localize Channel identity migration</h2>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Speculative</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">ports &amp; adapters</span>
+          </div>
+
+          <div class="mt-4 grid gap-4 md:grid-cols-[0.95fr_1.35fr]">
+            <div>
+              <p class="mini-label mb-2">Files</p>
+              <ul class="space-y-1 font-mono text-sm text-slate-700">
+                <li>types.d.ts</li>
+                <li>conversation/create-conversation-runner.js</li>
+                <li>conversation/channel-input-routing.js</li>
+                <li>whatsapp/inbound/channel-input.js</li>
+                <li>http-api-transport.js</li>
+                <li>chat-paths.js</li>
+                <li>store/repos/chats.js</li>
+                <li>docs/glossary.md</li>
+              </ul>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">Before</p>
+                <div class="space-y-2 text-sm">
+                  <div class="module-box rounded-lg p-2">WhatsApp Transport: chatId means remoteJid</div>
+                  <div class="module-box rounded-lg p-2">HTTP API Transport: chatId means client channel</div>
+                  <div class="rounded-lg border border-red-300 bg-red-50 p-2">Input Orchestration: chatId means Channel</div>
+                  <div class="module-box rounded-lg p-2">Storage and paths: chat_id / chat dirs</div>
+                  <div class="leak text-center text-xs font-semibold">one name carries several identities</div>
+                </div>
+              </div>
+
+              <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+                <p class="mini-label mb-3">After</p>
+                <pre class="mermaid">
+flowchart TB
+  W[WhatsApp chat]
+  H[HTTP client channel]
+  A[Transport adapters]
+  C[Channel identity inside app seams]
+  L[legacy chat_id storage]
+  W --> A
+  H --> A
+  A --> C
+  C --> L
+classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+class C deep;
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-3">
+            <div>
+              <p class="mini-label">Problem</p>
+              <p class="mt-1 text-sm">
+                The app glossary says new app-level interfaces should prefer Channel vocabulary, but many app seams still use
+                chatId for Transport identity, Channel identity, storage identity, and path identity.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Solution</p>
+              <p class="mt-1 text-sm">
+                Migrate Channel identity only at new or touched app seams, while adapters and storage keep legacy chat fields at
+                compatibility edges.
+              </p>
+            </div>
+            <div>
+              <p class="mini-label">Wins</p>
+              <ul class="mt-1 space-y-1 text-sm">
+                <li>Locality: identity translation localizes.</li>
+                <li>Leverage: Transports stop leaking names.</li>
+                <li>Vocabulary migration becomes incremental.</li>
+                <li>Storage compatibility remains intact.</li>
+                <li>Tests can name Channel behavior.</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-lg border border-emerald-200 bg-emerald-50 p-6">
+        <p class="mini-label text-emerald-800">Top Recommendation</p>
+        <h2 class="mt-2 text-2xl font-semibold">Start with <a class="underline" href="#command-orchestration">Deepen Command Orchestration</a></h2>
+        <p class="mt-2 text-sm text-emerald-950">
+          It has the best leverage: existing tests already cover ChannelInput routing and command behavior, and the change would
+          shrink Input Orchestration without challenging accepted ADRs.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
