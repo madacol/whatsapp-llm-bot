@@ -334,6 +334,68 @@ function createAcpProcessError(input) {
 }
 
 /**
+ * @param {{
+ *   command: string,
+ *   resolvedCommand: string,
+ *   cwd?: string | null,
+ *   error: unknown,
+ *   pendingRequests: string[],
+ *   stderrTail?: string,
+ * }} input
+ * @returns {Error}
+ */
+function createAcpConnectionWriteError(input) {
+  const parts = [
+    "ACP connection write failed.",
+    `command=${input.command}`,
+    `resolved=${input.resolvedCommand}`,
+  ];
+  if (input.cwd) {
+    parts.push(`cwd=${input.cwd}`);
+  }
+  const code = getErrorCode(input.error);
+  if (code) {
+    parts.push(`code=${code}`);
+  }
+  if (input.pendingRequests.length > 0) {
+    parts.push(`pending=${input.pendingRequests.join(",")}`);
+  }
+  if (input.stderrTail) {
+    parts.push(`stderrTail=${input.stderrTail}`);
+  }
+  parts.push(getErrorMessage(input.error));
+  return new Error(parts.join(" "), { cause: input.error });
+}
+
+/**
+ * @param {{
+ *   command: string,
+ *   resolvedCommand: string,
+ *   cwd?: string | null,
+ *   pendingRequests: string[],
+ *   stderrTail?: string,
+ * }} input
+ * @returns {Error}
+ */
+function createAcpConnectionUnavailableError(input) {
+  const parts = [
+    "ACP connection is not writable.",
+    `command=${input.command}`,
+    `resolved=${input.resolvedCommand}`,
+  ];
+  if (input.cwd) {
+    parts.push(`cwd=${input.cwd}`);
+  }
+  if (input.pendingRequests.length > 0) {
+    parts.push(`pending=${input.pendingRequests.join(",")}`);
+  }
+  if (input.stderrTail) {
+    parts.push(`stderrTail=${input.stderrTail}`);
+  }
+  return new Error(parts.join(" "));
+}
+
+/**
  * @param {import("node:child_process").ChildProcess} proc
  * @param {number} timeoutMs
  * @returns {Promise<void>}
@@ -470,6 +532,50 @@ export async function openAcpConnection(options) {
   let processError = /** @type {Error | null} */ (null);
   let startupSettled = false;
 
+  /**
+   * @param {Error} error
+   * @returns {void}
+   */
+  function failConnection(error) {
+    if (!processError) {
+      processError = error;
+    }
+    closed = true;
+    queue.end();
+    for (const [id, pending] of [...pendingRequests]) {
+      pendingRequests.delete(id);
+      pending.reject(processError);
+    }
+  }
+
+  /**
+   * @param {unknown} error
+   * @returns {Error}
+   */
+  function createWriteFailure(error) {
+    return createAcpConnectionWriteError({
+      command: options.command,
+      resolvedCommand,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      error,
+      pendingRequests: pendingRequestSummaries(pendingRequests),
+      ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
+    });
+  }
+
+  /**
+   * @returns {Error}
+   */
+  function createUnavailableFailure() {
+    return processError ?? createAcpConnectionUnavailableError({
+      command: options.command,
+      resolvedCommand,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      pendingRequests: pendingRequestSummaries(pendingRequests),
+      ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
+    });
+  }
+
   const startup = new Promise((resolve, reject) => {
     proc.once("spawn", () => {
       startupSettled = true;
@@ -507,6 +613,28 @@ export async function openAcpConnection(options) {
     });
   });
 
+  proc.stdin.on("error", (error) => {
+    const pendingRequestList = pendingRequestSummaries(pendingRequests);
+    const writeError = createWriteFailure(error);
+    failConnection(writeError);
+    if (!closeRequested) {
+      log.warn("ACP child stdin failed.", {
+        command: options.command,
+        resolvedCommand,
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        code: getErrorCode(error),
+        message: getErrorMessage(error),
+        pendingRequests: pendingRequestList,
+        ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
+      });
+    }
+    try {
+      proc.kill();
+    } catch {
+      // best-effort cleanup
+    }
+  });
+
   proc.stderr.setEncoding("utf8");
   proc.stderr.on("data", (chunk) => {
     stderrTail = appendStderrTail(stderrTail, String(chunk));
@@ -530,7 +658,48 @@ export async function openAcpConnection(options) {
   function send(message) {
     const jsonRpcMessage = { jsonrpc: "2.0", ...message };
     captureAcpProtocolMessage(fixtureCapture, "client_to_agent", jsonRpcMessage);
-    proc.stdin.write(`${JSON.stringify(jsonRpcMessage)}\n`);
+    if (closed || proc.stdin.destroyed || proc.stdin.writableEnded || !proc.stdin.writable) {
+      throw createUnavailableFailure();
+    }
+    try {
+      proc.stdin.write(`${JSON.stringify(jsonRpcMessage)}\n`);
+    } catch (error) {
+      const writeError = createWriteFailure(error);
+      failConnection(writeError);
+      throw writeError;
+    }
+  }
+
+  /**
+   * @param {string} message
+   * @param {unknown} error
+   * @returns {void}
+   */
+  function logOutboundWriteFailure(message, error) {
+    if (closeRequested) {
+      return;
+    }
+    log.warn(message, {
+      command: options.command,
+      resolvedCommand,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      message: getErrorMessage(error),
+    });
+  }
+
+  /**
+   * @param {Record<string, unknown>} message
+   * @param {string} failureMessage
+   * @returns {boolean}
+   */
+  function trySend(message, failureMessage) {
+    try {
+      send(message);
+      return true;
+    } catch (error) {
+      logOutboundWriteFailure(failureMessage, error);
+      return false;
+    }
   }
 
   /**
@@ -595,13 +764,16 @@ export async function openAcpConnection(options) {
         }
 
         if (typeof message.id === "number" && typeof message.method === "string") {
+          /** @type {Record<string, unknown>} */
+          let response;
           try {
             const result = options.handleRequest ? await options.handleRequest(message) : {};
-            send({ id: message.id, result: result ?? {} });
+            response = { id: message.id, result: result ?? {} };
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            send({ id: message.id, error: { code: jsonRpcErrorCode(error), message: errorMessage } });
+            response = { id: message.id, error: { code: jsonRpcErrorCode(error), message: errorMessage } };
           }
+          trySend(response, "ACP client request response send failed.");
           continue;
         }
 
@@ -678,7 +850,8 @@ export async function openAcpConnection(options) {
           }, timeoutMs);
           timer.unref?.();
         };
-        pendingRequests.set(id, {
+        /** @type {PendingRequest} */
+        const pending = {
           method,
           resolve: (value) => {
             clearRequestTimer();
@@ -689,13 +862,20 @@ export async function openAcpConnection(options) {
             reject(error);
           },
           ...(requestOptions.refreshOnActivity ? { refreshTimeout: armRequestTimer } : {}),
-        });
+        };
+        pendingRequests.set(id, pending);
         armRequestTimer();
-        send({ id, method, params });
+        try {
+          send({ id, method, params });
+        } catch (error) {
+          if (pendingRequests.delete(id)) {
+            pending.reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
       });
     },
     sendNotification(method, params = {}) {
-      send({ method, params });
+      trySend({ method, params }, "ACP notification send failed.");
     },
     notifications: queue.iterate(),
     async close() {

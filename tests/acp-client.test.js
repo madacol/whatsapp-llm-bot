@@ -159,6 +159,37 @@ describe("ACP client process stderr", () => {
     assert.equal(details?.stderrTail, "fatal provider detail");
   });
 
+  it("rejects pending requests when child stdin fails instead of surfacing an uncaught EPIPE", async () => {
+    const calls = await captureWarnLogs(async () => {
+      const connection = await openAcpConnection({
+        command: process.execPath,
+        args: ["-e", hangingRequestFixtureCode("")],
+        fixtureCapture: null,
+      });
+      try {
+        const pending = connection.sendRequest("initialize", {}, { timeoutMs: 1_000 });
+        const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+
+        assert.doesNotThrow(() => {
+          connection.proc.stdin.emit("error", error);
+        });
+
+        await assert.rejects(
+          pending,
+          /ACP connection write failed.*code=EPIPE.*pending=initialize#1.*write EPIPE/,
+        );
+      } finally {
+        await connection.close();
+      }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.[0], "[harness:acp]");
+    assert.equal(calls[0]?.[1], "ACP child stdin failed.");
+    assert.deepEqual(calls[0]?.[2]?.pendingRequests, ["initialize#1"]);
+    assert.equal(calls[0]?.[2]?.code, "EPIPE");
+  });
+
   it("reports child context and stderr tail when a request times out", async () => {
     const calls = await captureWarnLogs(async () => {
       const connection = await openAcpConnection({

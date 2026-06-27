@@ -2,6 +2,7 @@
 
 Completed task details are archived here instead of deleted.
 
+- ACP EPIPE crash after `/clear` follow-up fixed. [details](acp-epipe-crash-after-clear.md)
 - Command and intake architecture. [details](command-intake-architecture.md)
 - Deepened outbound durability and state seams. [details](outbound-state-architecture.md)
 - ACP apply_patch escalation. [details](acp-apply-patch-escalation.md)
