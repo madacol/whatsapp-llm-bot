@@ -98,20 +98,13 @@ describe("WhatsAppDeliveryPlan", () => {
   });
 
   it("routes simple text queue delivery through delivery plans", async () => {
-    const replaySource = await readFile(new URL("../whatsapp/outbound/queue-replay.js", import.meta.url), "utf8");
-    const persistentSource = await readFile(new URL("../whatsapp/outbound/persistent-queue.js", import.meta.url), "utf8");
+    const durabilitySource = await readFile(new URL("../whatsapp/outbound/durability.js", import.meta.url), "utf8");
 
-    assert.equal(replaySource.includes("makeTextMessage"), false, "queue replay should not build raw text payloads");
-    assert.equal(persistentSource.includes("makeTextMessage"), false, "live text queue fallback should not build raw text payloads");
+    assert.equal(durabilitySource.includes("makeTextMessage"), false, "durable delivery should not build raw text payloads");
     assert.equal(
-      replaySource.includes("executeWhatsAppDeliveryPlan"),
+      durabilitySource.includes("executeWhatsAppDeliveryPlan"),
       true,
-      "queue replay should execute text via WhatsAppDeliveryPlan",
-    );
-    assert.equal(
-      persistentSource.includes("executeWhatsAppDeliveryPlan"),
-      true,
-      "live text sends should execute text via WhatsAppDeliveryPlan",
+      "durable delivery should execute text via WhatsAppDeliveryPlan",
     );
   });
 });

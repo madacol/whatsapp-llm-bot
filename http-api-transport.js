@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { createLogger } from "./logger.js";
-import { createHttpTransportTurnLedger } from "./http-api-transport-ledger.js";
+import { createHttpApiTurnFlow } from "./http-api-turn-flow.js";
 import { mediaPathToMimeType, readMediaBuffer, validateMediaPath, writeMedia } from "./media-store.js";
 import { synthesizeSpeechForHttpApi } from "./http-api-speech.js";
 
@@ -349,9 +349,7 @@ export async function createHttpApiTransport(options = {}) {
   /** @type {number | null} */
   let assignedPort = null;
   let started = false;
-  const ledger = createHttpTransportTurnLedger({ maxEvents });
-  /** @type {Set<{ chatId: string, res: import("node:http").ServerResponse }>} */
-  const sseClients = new Set();
+  const turnFlow = createHttpApiTurnFlow({ maxEvents });
 
   /**
    * @param {import("node:http").IncomingMessage} req
@@ -370,7 +368,7 @@ export async function createHttpApiTransport(options = {}) {
    * @returns {void}
    */
   function updateTurnStatus(record, status) {
-    ledger.updateTurnStatus(record, status);
+    turnFlow.updateTurnStatus(record, status);
   }
 
   /**
@@ -380,14 +378,7 @@ export async function createHttpApiTransport(options = {}) {
    * @returns {HttpApiOutboundEvent}
    */
   function appendEvent(chatId, event, turnId) {
-    const row = ledger.appendEvent(chatId, event, turnId);
-    for (const client of sseClients) {
-      if (client.chatId === chatId) {
-        client.res.write(`id: ${row.eventId}\n`);
-        client.res.write(`data: ${JSON.stringify(row)}\n\n`);
-      }
-    }
-    return row;
+    return turnFlow.appendEvent(chatId, event, turnId);
   }
 
   /**
@@ -396,7 +387,7 @@ export async function createHttpApiTransport(options = {}) {
    * @returns {HttpApiOutboundEvent[]}
    */
   function listEvents(chatId, after) {
-    return ledger.listEvents(chatId, after);
+    return turnFlow.listEvents(chatId, after);
   }
 
   /**
@@ -405,22 +396,7 @@ export async function createHttpApiTransport(options = {}) {
    * @returns {ChannelInputIO}
    */
   function createChannelInputIo(chatId, turnId) {
-    return {
-      send: async (event) => {
-        appendEvent(chatId, event, turnId);
-        return undefined;
-      },
-      reply: async (event) => {
-        appendEvent(chatId, event, turnId);
-        return undefined;
-      },
-      select: async () => "",
-      selectMany: async () => ({ kind: "cancelled" }),
-      confirm: async () => false,
-      react: async () => {},
-      getIsAdmin: async () => true,
-      prepareMediaRegistry: () => {},
-    };
+    return turnFlow.createChannelInputIo(chatId, turnId);
   }
 
   /**
@@ -467,7 +443,7 @@ export async function createHttpApiTransport(options = {}) {
       return;
     }
 
-    const ledgerTurn = ledger.createOrGetTurn(transportId, payload);
+    const ledgerTurn = turnFlow.createOrGetTurn(transportId, payload);
     if (!ledgerTurn.created) {
       const existing = ledgerTurn.record;
       sendJson(res, waitForCompletion && existing.status === "completed" ? 200 : 202, {
@@ -482,7 +458,7 @@ export async function createHttpApiTransport(options = {}) {
     const record = ledgerTurn.record;
 
     const turn = buildChannelInput(transportId, payload, record);
-    ledger.setActiveTurn(payload.chatId, record.turnId);
+    turnFlow.setActiveTurn(payload.chatId, record.turnId);
 
     const runTurn = async () => {
       try {
@@ -493,7 +469,7 @@ export async function createHttpApiTransport(options = {}) {
         updateTurnStatus(record, "failed");
         log.error("HTTP API transport turn handler failed:", error);
       } finally {
-        ledger.clearActiveTurn(payload.chatId, record.turnId);
+        turnFlow.clearActiveTurn(payload.chatId, record.turnId);
       }
     };
 
@@ -567,7 +543,7 @@ export async function createHttpApiTransport(options = {}) {
       return;
     }
 
-    const ledgerTurn = ledger.createOrGetTurn(transportId, payload);
+    const ledgerTurn = turnFlow.createOrGetTurn(transportId, payload);
     if (!ledgerTurn.created) {
       const existing = ledgerTurn.record;
       sendJson(res, waitForCompletion && existing.status === "completed" ? 200 : 202, {
@@ -581,7 +557,7 @@ export async function createHttpApiTransport(options = {}) {
 
     const record = ledgerTurn.record;
     const turn = buildChannelInput(transportId, payload, record);
-    ledger.setActiveTurn(payload.chatId, record.turnId);
+    turnFlow.setActiveTurn(payload.chatId, record.turnId);
 
     /** @type {{ path: string, mimeType: string, url: string } | null} */
     let audio = null;
@@ -614,7 +590,7 @@ export async function createHttpApiTransport(options = {}) {
         updateTurnStatus(record, "failed");
         log.error("HTTP API transport audio turn handler failed:", error);
       } finally {
-        ledger.clearActiveTurn(payload.chatId, record.turnId);
+        turnFlow.clearActiveTurn(payload.chatId, record.turnId);
       }
     };
 
@@ -688,14 +664,17 @@ export async function createHttpApiTransport(options = {}) {
       "content-type": "text/event-stream; charset=utf-8",
     });
     res.flushHeaders?.();
-    for (const row of listEvents(chatId, after)) {
-      res.write(`id: ${row.eventId}\n`);
-      res.write(`data: ${JSON.stringify(row)}\n\n`);
-    }
-    const client = { chatId, res };
-    sseClients.add(client);
+    const client = turnFlow.openEventStream(chatId, after, {
+      write: (row) => {
+        res.write(`id: ${row.eventId}\n`);
+        res.write(`data: ${JSON.stringify(row)}\n\n`);
+      },
+      close: () => {
+        res.end();
+      },
+    });
     res.on("close", () => {
-      sseClients.delete(client);
+      turnFlow.closeEventStream(client);
     });
   }
 
@@ -753,7 +732,7 @@ export async function createHttpApiTransport(options = {}) {
     if (req.method === "GET" && statusMatch) {
       const transportId = decodePathPart(statusMatch[1] ?? "");
       const turnId = decodePathPart(statusMatch[2] ?? "");
-      const turn = turnId ? ledger.getTurn(turnId) : null;
+      const turn = turnId ? turnFlow.getTurn(turnId) : null;
       if (!transportId || !turn || turn.transportId !== transportId) {
         sendJson(res, 404, { error: "Turn not found" });
         return;
@@ -779,7 +758,7 @@ export async function createHttpApiTransport(options = {}) {
       const rows = listEvents(chatId, parseCursor(url.searchParams.get("after") ?? req.headers["last-event-id"]?.toString() ?? null));
       sendJson(res, 200, {
         events: rows,
-        nextEventId: ledger.getLastEventId(),
+        nextEventId: turnFlow.getLastEventId(),
       });
       return;
     }
@@ -832,10 +811,7 @@ export async function createHttpApiTransport(options = {}) {
     async stop() {
       onTurn = async () => {};
       started = false;
-      for (const client of sseClients) {
-        client.res.end();
-      }
-      sseClients.clear();
+      turnFlow.closeEventStreams();
       const activeServer = server;
       server = null;
       assignedPort = null;
@@ -851,13 +827,13 @@ export async function createHttpApiTransport(options = {}) {
         kind: "app_message",
         role: "plain",
         content: text,
-      }, ledger.getActiveTurnId(chatId));
+      }, turnFlow.getActiveTurnId(chatId));
     },
     async sendEvent(chatId, event) {
       if (!started) {
         throw new Error("HTTP API transport has not been started");
       }
-      appendEvent(chatId, event, ledger.getActiveTurnId(chatId));
+      appendEvent(chatId, event, turnFlow.getActiveTurnId(chatId));
       return undefined;
     },
   };
