@@ -4,7 +4,7 @@
 
 ## Todo
 
-- Implement vertical scenario runner proof. [details](vertical-scenario-runner.md)
+- Investigate whether tests should be type-checked. [details](test-type-checking.md)
 
 ## Blocked
 
