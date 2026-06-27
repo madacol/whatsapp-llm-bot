@@ -1,5 +1,6 @@
 import { generateSessionTitle } from "./session-title.js";
 import { createLogger } from "../logger.js";
+import { createAgentSessionPersistence } from "./session-persistence.js";
 
 const defaultLog = createLogger("conversation:session-binding");
 
@@ -28,12 +29,13 @@ const defaultLog = createLogger("conversation:session-binding");
 /**
  * @typedef {{
  *   directory: HarnessSessionDirectory,
- *   saveHarnessSession: import("../store.js").Store["saveHarnessSession"],
- *   archiveHarnessSession: import("../store.js").Store["archiveHarnessSession"],
- *   getHarnessSessionHistory: import("../store.js").Store["getHarnessSessionHistory"],
- *   restoreHarnessSession: import("../store.js").Store["restoreHarnessSession"],
- *   pushHarnessForkStack: import("../store.js").Store["pushHarnessForkStack"],
- *   popHarnessForkStack: import("../store.js").Store["popHarnessForkStack"],
+ *   sessionPersistence?: import("./session-persistence.js").AgentSessionPersistence,
+ *   saveHarnessSession?: import("../store.js").Store["saveHarnessSession"],
+ *   archiveHarnessSession?: import("../store.js").Store["archiveHarnessSession"],
+ *   getHarnessSessionHistory?: import("../store.js").Store["getHarnessSessionHistory"],
+ *   restoreHarnessSession?: import("../store.js").Store["restoreHarnessSession"],
+ *   pushHarnessForkStack?: import("../store.js").Store["pushHarnessForkStack"],
+ *   popHarnessForkStack?: import("../store.js").Store["popHarnessForkStack"],
  *   getMessages: import("../store.js").Store["getMessages"],
  *   llmClient: LlmClient,
  *   resolveHarnessInstanceForChat: (chatInfo: import("../store.js").ChatRow | undefined) => Promise<ReturnType<typeof import("#harnesses").resolveHarnessInstance> | null>,
@@ -69,6 +71,34 @@ function getDurableResumeCursor(chatInfo, harnessName) {
 
 /**
  * @param {HarnessSessionBindingServiceDeps} deps
+ * @returns {import("./session-persistence.js").AgentSessionPersistence}
+ */
+function resolveSessionPersistence(deps) {
+  if (deps.sessionPersistence) {
+    return deps.sessionPersistence;
+  }
+  if (
+    typeof deps.saveHarnessSession !== "function"
+    || typeof deps.archiveHarnessSession !== "function"
+    || typeof deps.getHarnessSessionHistory !== "function"
+    || typeof deps.restoreHarnessSession !== "function"
+    || typeof deps.pushHarnessForkStack !== "function"
+    || typeof deps.popHarnessForkStack !== "function"
+  ) {
+    throw new Error("Session persistence is required.");
+  }
+  return createAgentSessionPersistence({
+    saveHarnessSession: deps.saveHarnessSession,
+    archiveHarnessSession: deps.archiveHarnessSession,
+    getHarnessSessionHistory: deps.getHarnessSessionHistory,
+    restoreHarnessSession: deps.restoreHarnessSession,
+    pushHarnessForkStack: deps.pushHarnessForkStack,
+    popHarnessForkStack: deps.popHarnessForkStack,
+  });
+}
+
+/**
+ * @param {HarnessSessionBindingServiceDeps} deps
  * @returns {{
  *   beginTurn: (input: {
  *     chatId: string,
@@ -95,6 +125,7 @@ function getDurableResumeCursor(chatInfo, harnessName) {
 export function createHarnessSessionBindingService(deps) {
   const titleGenerator = deps.generateTitle ?? generateSessionTitle;
   const log = deps.log ?? defaultLog;
+  const sessionPersistence = resolveSessionPersistence(deps);
 
   /**
    * @param {string} chatId
@@ -108,7 +139,7 @@ export function createHarnessSessionBindingService(deps) {
     try {
       stopped = !!(await harnessInstance?.adapter?.stopSession(chatId));
     } finally {
-      await deps.saveHarnessSession(chatId, null);
+      await sessionPersistence.saveActiveSession(chatId, null);
     }
     return stopped;
   }
@@ -120,7 +151,7 @@ export function createHarnessSessionBindingService(deps) {
    */
   async function archiveWithGeneratedTitle(chatId, chatInfo) {
     if (!chatInfo?.harness_session_id || !chatInfo?.harness_session_kind) {
-      return deps.archiveHarnessSession(chatId);
+      return sessionPersistence.archiveActiveSession(chatId);
     }
 
     try {
@@ -130,10 +161,10 @@ export function createHarnessSessionBindingService(deps) {
         chatInfo,
         messageRows,
       });
-      return deps.archiveHarnessSession(chatId, { title });
+      return sessionPersistence.archiveActiveSession(chatId, { title });
     } catch (error) {
       log.warn("Failed to generate session title before archive:", error);
-      return deps.archiveHarnessSession(chatId);
+      return sessionPersistence.archiveActiveSession(chatId);
     }
   }
 
@@ -240,7 +271,7 @@ export function createHarnessSessionBindingService(deps) {
         /** @type {string} */ sessionChatId,
         /** @type {HarnessSessionRef | null} */ sessionRef,
       ) => {
-        await deps.saveHarnessSession(sessionChatId, sessionRef);
+        await sessionPersistence.saveActiveSession(sessionChatId, sessionRef);
         if (sessionChatId === chatId) {
           mark(sessionRef ? "ready" : "stopped", sessionRef?.id ?? null);
         }
@@ -293,17 +324,17 @@ export function createHarnessSessionBindingService(deps) {
     createCommandSessionControl(chatInfo) {
       return {
         archive: async (sessionChatId) => archiveWithGeneratedTitle(sessionChatId, chatInfo),
-        getHistory: deps.getHarnessSessionHistory,
-        restore: deps.restoreHarnessSession,
+        getHistory: sessionPersistence.getArchivedSessions,
+        restore: sessionPersistence.restoreArchivedSession,
         clearRuntime: async (sessionChatId) => clearActiveSession(sessionChatId, chatInfo),
       };
     },
 
     createSessionForkControl() {
       return {
-        save: deps.saveHarnessSession,
-        push: deps.pushHarnessForkStack,
-        pop: deps.popHarnessForkStack,
+        save: sessionPersistence.saveActiveSession,
+        push: sessionPersistence.pushForkedSession,
+        pop: sessionPersistence.popForkedSession,
       };
     },
   };

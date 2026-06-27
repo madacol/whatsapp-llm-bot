@@ -15,6 +15,7 @@ import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
 import { buildHarnessTurnInput } from "./build-harness-turn-input.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { createHarnessSessionBindingService } from "./harness-session-binding.js";
+import { createAgentSessionPersistence } from "./session-persistence.js";
 
 const NO_LIVE_INPUT_TARGET = Object.freeze({ supportsLiveInput: false });
 
@@ -259,13 +260,8 @@ function materializeRuntimeSelection(selection) {
 export function createAgentRuntime({ store, llmClient, log }) {
   const {
     getMessages,
-    saveHarnessSession,
-    archiveHarnessSession,
-    getHarnessSessionHistory,
-    restoreHarnessSession,
-    pushHarnessForkStack,
-    popHarnessForkStack,
   } = store;
+  const sessionPersistence = createAgentSessionPersistence(store);
   const runCoordinator = createHarnessRunCoordinator({
     liveInputJournal: {
       enqueue: store.enqueueHarnessLiveInput,
@@ -274,12 +270,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
   });
   const sessionBinding = createHarnessSessionBindingService({
     directory: getHarnessSessionDirectory(),
-    saveHarnessSession,
-    archiveHarnessSession,
-    getHarnessSessionHistory,
-    restoreHarnessSession,
-    pushHarnessForkStack,
-    popHarnessForkStack,
+    sessionPersistence,
     getMessages,
     llmClient,
     log,
