@@ -149,11 +149,11 @@
           <div class="tags">
             <span class="tag">2026-06-27 10:37 UTC</span>
             <span class="tag">Strong</span>
-            <span class="tag status-current">Current/open</span>
+            <span class="tag">Done</span>
           </div>
           <h2>Deepen command and intake seams</h2>
           <p>Architecture review focused on Command Orchestration, HTTP API Transport turn intake, Chat Settings interaction, and Channel identity migration.</p>
-          <p class="status-note"><strong>Status:</strong> Current/open. No acceptance, rejection, or implementation evidence yet; this is the newest candidate set.</p>
+          <p class="status-note"><strong>Status:</strong> Done. `tasks/done/command-intake-architecture.md` and commit `c823933` record all four candidates implemented and verified.</p>
         </a>
 
         <a class="review" href="./reviews/20260626-1942-outbound-state-seams.html">
@@ -164,7 +164,7 @@
           </div>
           <h2>Deepen outbound durability and state seams</h2>
           <p>Architecture review focused on WhatsApp outbound queueing, Session persistence vocabulary, and the HTTP API Transport turn/event flow.</p>
-          <p class="status-note"><strong>Status:</strong> Done. `tasks/done/outbound-state-architecture.md` records all three candidates implemented and verified.</p>
+          <p class="status-note"><strong>Status:</strong> Done. `tasks/done/outbound-state-architecture.md` and commit `ed71bad` record all three candidates implemented and verified.</p>
         </a>
 
         <a class="review" href="./reviews/20260625-0459-agent-run-activity-output.html">
@@ -175,7 +175,7 @@
           </div>
           <h2>Deepen Agent Run Activity output</h2>
           <p>Architecture review focused on keeping runtime and subagent tool details behind Agent Run Activity before WhatsApp Presentation renders them.</p>
-          <p class="status-note"><strong>Status:</strong> Midway/current. Output ports and `diagnosticRaw` cleanup are in place, but reasoning/subagent reconciliation pressure remains current.</p>
+          <p class="status-note"><strong>Status:</strong> Midway/current. ADR 0001, ADR 0004, and `tasks/agent-run-activity-reasoning-subagent-output.md` show output ports and `diagnosticRaw` cleanup are in place while reasoning/subagent reconciliation remains current.</p>
         </a>
 
         <a class="review" href="./reviews/20260622-1359-media-runtime-presentation.html">
@@ -186,7 +186,7 @@
           </div>
           <h2>Deepen Media Input Enrichment</h2>
           <p>Architecture review focused on consolidating media-to-text enrichment before widening the Agent Runtime and Presentation seams.</p>
-          <p class="status-note"><strong>Status:</strong> Done. Git history shows media enrichment, Agent Runtime facade, and WhatsApp delivery planning landed after this report.</p>
+          <p class="status-note"><strong>Status:</strong> Done. Commits `e767de4`, `e7bfff1`, and `6167d6f` landed media enrichment, the Agent Runtime facade, and WhatsApp delivery planning after this report.</p>
         </a>
 
         <a class="review" href="./reviews/20260617-2355-outboundevent-producer-ports.html">
@@ -197,7 +197,7 @@
           </div>
           <h2>Deepen OutboundEvent producer ports</h2>
           <p>Architecture review focused on splitting AgentRunOutputPort, AppOutputPort, and OutboundEventSink producer seams.</p>
-          <p class="status-note"><strong>Status:</strong> Done for the top recommendation. ADR 0004 plus output-port tests enforce the split; turn/command follow-ups continue under the newest report.</p>
+          <p class="status-note"><strong>Status:</strong> Done for the top recommendation. ADR 0004 and `tests/output-port-boundaries.test.js` enforce the split; turn/command follow-ups were later completed by `tasks/done/command-intake-architecture.md`.</p>
         </a>
 
         <a class="review" href="./reviews/20260616-1649-acp-client-request-channel.html">
@@ -208,7 +208,7 @@
           </div>
           <h2>Deepen the ACP client request channel</h2>
           <p>Architecture review focused on the ACP request channel and provider request policy locality.</p>
-          <p class="status-note"><strong>Status:</strong> Done for the top recommendation. `harnesses/acp-client-request-channel.js` and tests exist; secondary candidates were implemented later or reframed by newer reviews.</p>
+          <p class="status-note"><strong>Status:</strong> Done for the top recommendation. `harnesses/acp-client-request-channel.js` and its tests exist; ACP connection-failure lifecycle cleanup is separately tracked in `tasks/acp-client-connection-failure-lifecycle.md`.</p>
         </a>
 
         <a class="review" href="./reviews/20260616-2115-runtime-event-seam.html">
@@ -219,7 +219,7 @@
           </div>
           <h2>Deepen the runtime-event seam</h2>
           <p>Architecture review focused on keeping raw ACP payload shape out of WhatsApp outbound rendering.</p>
-          <p class="status-note"><strong>Status:</strong> Superseded/done. The raw provider payload rule became ADR 0001 and architecture constraints; later Agent Run Activity and outbound-state reports replace the remaining framing.</p>
+          <p class="status-note"><strong>Status:</strong> Superseded/done. ADR 0001 and `docs/architecture/constraints.md` own the raw-provider-payload rule; later Agent Run Activity and outbound-state reports replace the remaining framing.</p>
         </a>
       </section>
     </main>

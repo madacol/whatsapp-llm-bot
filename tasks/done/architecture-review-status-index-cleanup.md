@@ -56,3 +56,19 @@ Make the architecture review index a reliable current-status map:
 - Status notes cite durable repo evidence such as task files and/or commit hashes.
 - The index remains static HTML and keeps all existing report links.
 - Docs-only verification is sufficient; no code tests required.
+
+## Completion Notes
+
+- Updated `architecture-review-site/index.html` so the command/intake report is marked done.
+- Added durable evidence to status notes: done task files, ADRs, docs, tests, and implementation commit hashes.
+- Preserved the static HTML index and all existing report links.
+- Kept Agent Run Activity as midway/current and linked the remaining reasoning/subagent reconciliation pressure to `tasks/agent-run-activity-reasoning-subagent-output.md`.
+- Recorded ACP connection-failure lifecycle cleanup as separate pending work rather than folding it into the completed ACP request-channel report.
+
+## Verification
+
+- Docs-only change; code verification intentionally skipped per task instructions.
+
+## Status
+
+Done.

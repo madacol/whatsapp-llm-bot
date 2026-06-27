@@ -50,3 +50,18 @@ Concentrate reasoning snapshot/delta reconciliation, subagent message normalizat
 - Existing reasoning/subagent vertical tests remain green.
 - The repeated-reasoning investigation is either resolved or updated with evidence explaining what remains.
 - `pnpm type-check` and relevant ACP/runtime/presentation tests pass.
+
+## Completion Notes
+
+- Added `harnesses/agent-run-activity-reconciliation.js` as the owner seam for reasoning delta/snapshot coalescing, open reasoning completion, spawned-subagent thread naming, subagent tool enrichment, and `wait_agent` response dedupe.
+- Refactored `harnesses/harness-runtime-event-dispatcher.js` to delegate reconciliation to that module before runtime events reach WhatsApp Presentation.
+- Added `tests/agent-run-activity-reconciliation.test.js` for the extracted seam and kept dispatcher/hook coverage green.
+- Resolved the related repeated-reasoning investigation separately with evidence from the completed thinking coalescing fix.
+
+## Verification
+
+- Red: `pnpm test tests/agent-run-activity-reconciliation.test.js` failed before production edits with `ERR_MODULE_NOT_FOUND` for `harnesses/agent-run-activity-reconciliation.js`.
+- Green: `pnpm test tests/agent-run-activity-reconciliation.test.js tests/harness-runtime-event-dispatcher.test.js tests/build-agent-io-hooks.test.js`
+- Green: `pnpm type-check`
+- Green: `pnpm test tests/agent-run-activity-reconciliation.test.js tests/harness-runtime-event-dispatcher.test.js tests/build-agent-io-hooks.test.js tests/sendBlocks.test.js`
+- Green with escalation because default sandbox stdio drops ACP child stdout: `pnpm test tests/acp-payload-to-whatsapp.test.js`

@@ -134,3 +134,28 @@ Start with Option 3 as the implementation base and borrow Option 1 naming for re
   - captured runtime/provider payload to outbound/Baileys presentation.
 - New tests read declaratively enough that fixture, pipeline, and expectation are visible without scanning harness setup.
 - Existing vertical-slice behavior remains covered during migration.
+
+## Completion Notes
+
+- Chose Option 3: a thin DSL over existing test harnesses.
+- Added `tests/vertical-slice-scenarios.js` with:
+  - `replayFixture({ fixture, pipeline, expect })`;
+  - `acpSessionUpdatesToBaileys()` for provider/runtime payloads through Agent Run Activity and WhatsApp Presentation to Baileys sends;
+  - `whatsappInboundToBaileys()` for WhatsApp inbound events through the transport and app handler to final Baileys sends;
+  - semantic sent-message text matchers.
+- Added fixture-backed scenarios in `tests/declarative-vertical-slice.test.js`.
+- Added JSON fixtures:
+  - `tests/fixtures/vertical/acp-read-tool.json`;
+  - `tests/fixtures/vertical/whatsapp-text-upsert.json`.
+- Left existing vertical-slice tests in place; the new helper is an incremental path, not a migration that removes coverage.
+
+## Verification
+
+- Red: `pnpm test tests/declarative-vertical-slice.test.js` failed with `ERR_MODULE_NOT_FOUND` before the helper existed.
+- Green: `pnpm test tests/declarative-vertical-slice.test.js`.
+- Green: `pnpm type-check`.
+- Green: `pnpm test tests/declarative-vertical-slice.test.js tests/acp-read-presentation-vertical.test.js tests/acp-execute-presentation-vertical.test.js`.
+
+## Status
+
+Done.

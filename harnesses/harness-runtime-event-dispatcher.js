@@ -1,5 +1,6 @@
 import { getDefaultFixtureCapture } from "../diagnostics/capture.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
+import { createAgentRunActivityReconciliation } from "./agent-run-activity-reconciliation.js";
 import { getHarnessRuntimeDiagnosticRaw, normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 
 /**
@@ -93,87 +94,6 @@ function attachRuntimeBoundaryFacts(event, workdir) {
 }
 
 /**
- * ACP thought chunks are mostly deltas, but the provider can also emit a later
- * snapshot of the current thought block. Keep the assembled text latest and
- * non-repeating without changing ordinary token deltas.
- * @param {string} current
- * @param {string} incoming
- * @returns {string}
- */
-function appendCoalescedDeltaText(current, incoming) {
-  if (!incoming) {
-    return current;
-  }
-  if (!current) {
-    return incoming;
-  }
-  if (current === incoming) {
-    return current;
-  }
-  const minimumSnapshotLength = 24;
-  if (incoming.length >= minimumSnapshotLength && current.endsWith(incoming)) {
-    return current;
-  }
-  if (current.length >= minimumSnapshotLength && incoming.startsWith(current)) {
-    return incoming;
-  }
-  const maxOverlap = Math.min(current.length, incoming.length);
-  for (let overlapLength = maxOverlap; overlapLength >= minimumSnapshotLength; overlapLength -= 1) {
-    if (current.endsWith(incoming.slice(0, overlapLength))) {
-      return current + incoming.slice(overlapLength);
-    }
-  }
-  return current + incoming;
-}
-
-/**
- * @param {string[]} parts
- * @returns {string[]}
- */
-function cleanCompletedReasoningParts(parts) {
-  return parts
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isRecord(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * @param {Record<string, unknown>} args
- * @returns {string[]}
- */
-function readReceiverThreadIds(args) {
-  const value = Array.isArray(args.receiverThreadIds) ? args.receiverThreadIds : args.receiver_thread_ids;
-  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0) : [];
-}
-
-/**
- * @param {unknown} prompt
- * @returns {string | null}
- */
-function deriveSubagentNicknameFromPrompt(prompt) {
-  if (typeof prompt !== "string") {
-    return null;
-  }
-  const firstLine = prompt.trim().split(/\r?\n/)[0]?.trim() ?? "";
-  if (!firstLine) {
-    return null;
-  }
-  const sentenceMatch = /^(.+?)[.!?](?:\s|$)/.exec(firstLine);
-  const nickname = (sentenceMatch?.[1] ?? firstLine).replace(/\s+/g, " ").trim();
-  if (!nickname) {
-    return null;
-  }
-  return nickname.length > 80 ? `${nickname.slice(0, 77).trimEnd()}...` : nickname;
-}
-
-/**
  * Create the app-facing dispatcher for canonical harness runtime events.
  * Provider-specific runners should normalize raw SDK/RPC messages before this
  * point; this layer owns presentation hooks and accumulated `AgentResult`.
@@ -193,14 +113,9 @@ function deriveSubagentNicknameFromPrompt(prompt) {
  */
 export function createHarnessRuntimeEventDispatcher(input) {
   const hooks = { ...DEFAULT_RUNTIME_EVENT_HOOKS, ...input.hooks };
+  const activity = createAgentRunActivityReconciliation({ hooks });
   const emitRuntimeEvent = input.emitRuntimeEvent ?? hooks.onRuntimeEvent;
   const fixtureCapture = input.fixtureCapture === undefined ? getDefaultFixtureCapture() : input.fixtureCapture;
-  /** @type {Map<string, LlmResponseMetadata>} */
-  const subagentThreads = new Map();
-  /** @type {Set<string>} */
-  const deliveredSubagentResponses = new Set();
-  /** @type {{ contentParts: string[], summaryParts: string[], contentDeltaText: string, summaryDeltaText: string } | null} */
-  let openReasoning = null;
 
   /** @type {AgentResult} */
   const result = {
@@ -233,186 +148,6 @@ export function createHarnessRuntimeEventDispatcher(input) {
     if (input.emitUsage !== false && (usage.promptTokens > 0 || usage.completionTokens > 0 || usage.cachedTokens > 0)) {
       await hooks.onUsage(formatUsageCost(result.usage), toUsageTokens(result.usage));
     }
-  }
-
-  /**
-   * @param {HarnessRuntimeTool} tool
-   * @returns {void}
-   */
-  function rememberSpawnedSubagent(tool) {
-    if (tool.name !== "spawn_agent") {
-      return;
-    }
-    const receiverThreadIds = readReceiverThreadIds(tool.arguments);
-    if (receiverThreadIds.length > 0) {
-      const agentNickname = deriveSubagentNicknameFromPrompt(tool.arguments.prompt);
-      for (const threadId of receiverThreadIds) {
-        subagentThreads.set(threadId, {
-          source: "subagent",
-          threadId,
-          ...(agentNickname ? { agentNickname } : {}),
-        });
-      }
-      return;
-    }
-    if (typeof tool.output !== "string") {
-      return;
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(tool.output);
-    } catch {
-      return;
-    }
-    if (!isRecord(parsed)) {
-      return;
-    }
-    const threadId = typeof parsed.agent_id === "string"
-      ? parsed.agent_id
-      : typeof parsed.threadId === "string" ? parsed.threadId : null;
-    if (!threadId) {
-      return;
-    }
-    subagentThreads.set(threadId, {
-      source: "subagent",
-      threadId,
-      ...(typeof parsed.nickname === "string" ? { agentNickname: parsed.nickname } : {}),
-    });
-  }
-
-  /**
-   * @param {HarnessRuntimeEvent} event
-   * @returns {HarnessRuntimeEvent}
-   */
-  function enrichSubagentToolEvent(event) {
-    if (
-      event.type !== "tool.started"
-      && event.type !== "tool.updated"
-      && event.type !== "tool.completed"
-      && event.type !== "tool.failed"
-    ) {
-      return event;
-    }
-    const threadId = event.tool.subagent?.threadId;
-    const remembered = threadId ? subagentThreads.get(threadId) : null;
-    if (!remembered) {
-      return event;
-    }
-    return {
-      ...event,
-      tool: {
-        ...event.tool,
-        subagent: {
-          ...remembered,
-          ...(event.tool.subagent ?? {}),
-          ...(event.tool.subagent?.agentNickname
-            ? { agentNickname: event.tool.subagent.agentNickname }
-            : remembered.agentNickname ? { agentNickname: remembered.agentNickname } : {}),
-        },
-      },
-    };
-  }
-
-  /**
-   * @param {HarnessRuntimeTool} tool
-   * @returns {Array<{ threadId: string, text: string }>}
-   */
-  function extractWaitAgentResponses(tool) {
-    if (tool.name !== "wait_agent" || typeof tool.output !== "string") {
-      return [];
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(tool.output);
-    } catch {
-      return [];
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return [];
-    }
-    const status = /** @type {Record<string, unknown>} */ (parsed).status;
-    if (!status || typeof status !== "object" || Array.isArray(status)) {
-      return [];
-    }
-    /** @type {Array<{ threadId: string, text: string }>} */
-    const responses = [];
-    for (const [threadId, state] of Object.entries(/** @type {Record<string, unknown>} */ (status))) {
-      if (!state || typeof state !== "object" || Array.isArray(state)) {
-        continue;
-      }
-      const text = /** @type {Record<string, unknown>} */ (state).completed;
-      if (typeof text === "string" && text.length > 0) {
-        responses.push({ threadId, text });
-      }
-    }
-    return responses;
-  }
-
-   /**
-    * @param {{ threadId?: string, text: string }} response
-   * @returns {Promise<void>}
-   */
-  async function emitSubagentResponse(response) {
-    /** @type {LlmResponseMetadata} */
-    const metadata = response.threadId
-      ? subagentThreads.get(response.threadId) ?? { source: "subagent", threadId: response.threadId }
-      : { source: "subagent" };
-    const dedupeKey = `${metadata.threadId ?? ""}\u0000${response.text}`;
-    if (deliveredSubagentResponses.has(dedupeKey)) {
-      return;
-    }
-    deliveredSubagentResponses.add(dedupeKey);
-    await hooks.onLlmResponse(response.text, metadata);
-  }
-
-  /**
-   * @param {HarnessRuntimeEvent} event
-   * @returns {void}
-   */
-  function rememberReasoning(event) {
-    if (event.type !== "reasoning.started" && event.type !== "reasoning.updated" && event.type !== "reasoning.completed") {
-      return;
-    }
-    if (!openReasoning) {
-      openReasoning = { contentParts: [], summaryParts: [], contentDeltaText: "", summaryDeltaText: "" };
-    }
-    const contentParts = event.contentParts ?? [event.text];
-    const summaryParts = event.summaryParts ?? [];
-    if (event.appendMode === "delta") {
-      openReasoning.contentDeltaText = appendCoalescedDeltaText(openReasoning.contentDeltaText, contentParts.join(""));
-      openReasoning.summaryDeltaText = appendCoalescedDeltaText(openReasoning.summaryDeltaText, summaryParts.join(""));
-    } else {
-      openReasoning.contentParts.push(...contentParts);
-      openReasoning.summaryParts.push(...summaryParts);
-    }
-    if (event.type === "reasoning.completed") {
-      openReasoning = null;
-    }
-  }
-
-  /**
-   * @returns {Promise<void>}
-   */
-  async function completeOpenReasoning() {
-    if (!openReasoning) {
-      return;
-    }
-    const contentParts = cleanCompletedReasoningParts([
-      openReasoning.contentDeltaText.trim(),
-      ...openReasoning.contentParts.map((part) => part.trim()),
-    ]);
-    const summaryParts = cleanCompletedReasoningParts([
-      openReasoning.summaryDeltaText.trim(),
-      ...openReasoning.summaryParts.map((part) => part.trim()),
-    ]);
-    const text = [...contentParts, ...summaryParts].join("\n\n").trim();
-    openReasoning = null;
-    await hooks.onReasoning({
-      status: "completed",
-      summaryParts,
-      contentParts,
-      text,
-    });
   }
 
   /**
@@ -452,15 +187,13 @@ export function createHarnessRuntimeEventDispatcher(input) {
       return;
     }
     if (shouldEmitAsRuntimeProgress(normalizedEvent)) {
-      await emitRuntimeEvent(attachRuntimeBoundaryFacts(enrichSubagentToolEvent(normalizedEvent), input.workdir));
+      await emitRuntimeEvent(attachRuntimeBoundaryFacts(activity.enrichSubagentToolEvent(normalizedEvent), input.workdir));
       if (normalizedEvent.type === "tool.completed") {
-        rememberSpawnedSubagent(normalizedEvent.tool);
+        activity.rememberSpawnedSubagent(normalizedEvent.tool);
         if (normalizedEvent.tool.outputBlocks) {
           await hooks.onToolResult(normalizedEvent.tool.outputBlocks, normalizedEvent.tool.name, normalizedEvent.tool.permissions ?? {});
         }
-        for (const response of extractWaitAgentResponses(normalizedEvent.tool)) {
-          await emitSubagentResponse(response);
-        }
+        await activity.emitWaitAgentResponses(normalizedEvent.tool);
       }
       return;
     }
@@ -468,28 +201,10 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "reasoning.started":
       case "reasoning.updated":
       case "reasoning.completed":
-        rememberReasoning(normalizedEvent);
-        if (normalizedEvent.status === "completed") {
-          const contentParts = cleanCompletedReasoningParts(normalizedEvent.contentParts ?? [normalizedEvent.text]);
-          const summaryParts = cleanCompletedReasoningParts(normalizedEvent.summaryParts ?? []);
-          const text = normalizedEvent.text.trim();
-          await hooks.onReasoning({
-            status: normalizedEvent.status,
-            summaryParts,
-            contentParts,
-            text,
-          });
-          return;
-        }
-        await hooks.onReasoning({
-          status: normalizedEvent.status,
-          summaryParts: normalizedEvent.summaryParts ?? [],
-          contentParts: normalizedEvent.contentParts ?? [normalizedEvent.text],
-          text: normalizedEvent.text,
-        });
+        await activity.emitReasoning(normalizedEvent);
         return;
       case "assistant.completed":
-        await completeOpenReasoning();
+        await activity.completeOpenReasoning();
         if (normalizedEvent.responseMode === "append") {
           result.response.push({ type: normalizedEvent.contentType, text: normalizedEvent.text });
         } else if (normalizedEvent.responseMode !== "none") {
@@ -512,11 +227,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
         }
         return;
       case "subagent.completed":
-        await completeOpenReasoning();
-        await hooks.onLlmResponse(normalizedEvent.text, {
-          source: "subagent",
-          ...(normalizedEvent.metadata ?? {}),
-        });
+        await activity.emitSubagentCompleted(normalizedEvent);
         return;
       case "plan.updated":
         await hooks.onPlan(createPlanPresentationFromState(normalizedEvent.plan));
@@ -531,7 +242,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
         await emitRuntimeEvent(normalizedEvent);
         return;
       case "turn.completed":
-        await completeOpenReasoning();
+        await activity.completeOpenReasoning();
         await emitRuntimeEvent(normalizedEvent);
         return;
       case "request.opened":
@@ -544,7 +255,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
         return;
       case "item.completed":
         if (normalizedEvent.item.kind === "assistant") {
-          await completeOpenReasoning();
+          await activity.completeOpenReasoning();
           const text = normalizedEvent.item.text ?? "";
           result.response = [{ type: "markdown", text }];
           if (text) {
