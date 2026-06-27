@@ -3,6 +3,7 @@
 Completed task details are archived here instead of deleted.
 
 - ACP EPIPE crash after `/clear` follow-up fixed. [details](acp-epipe-crash-after-clear.md)
+- Removed inspect output truncation. [details](remove-inspect-output-truncation.md)
 - Architecture review status index cleanup. [details](architecture-review-status-index-cleanup.md)
 - Sandboxed child-process stdio investigation. [details](investigate-sandboxed-stdio-tests.md)
 - ACP client connection failure lifecycle extracted. [details](acp-client-connection-failure-lifecycle.md)
