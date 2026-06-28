@@ -60,14 +60,6 @@ function isRecord(value) {
 
 /**
  * @param {unknown} value
- * @returns {value is (...args: unknown[]) => unknown}
- */
-function isFunction(value) {
-  return typeof value === "function";
-}
-
-/**
- * @param {unknown} value
  * @returns {string | number | boolean | null | undefined}
  */
 function toDiagnosticScalar(value) {
@@ -670,26 +662,19 @@ export async function executeGroupParticipantLookup(sock, chatId) {
 }
 
 /**
- * @param {import("@whiskeysockets/baileys").WASocket} sock
- * @returns {boolean}
- */
-function hasCommunityLinkGroup(sock) {
-  return "communityLinkGroup" in sock && isFunction(sock.communityLinkGroup);
-}
-
-/**
  * @param {{
- *   sock: import("@whiskeysockets/baileys").WASocket,
+ *   sock: WhatsAppTransportSocketPort,
  *   groupJid: string,
  *   parentCommunityJid: string,
  * }} input
  * @returns {Promise<void>}
  */
 async function linkGroupToCommunity({ sock, groupJid, parentCommunityJid }) {
-  if (!hasCommunityLinkGroup(sock)) {
+  const communityLinkGroup = sock.communityLinkGroup;
+  if (typeof communityLinkGroup !== "function") {
     throw new Error("Baileys communityLinkGroup API is unavailable in this runtime.");
   }
-  await sock.communityLinkGroup(groupJid, parentCommunityJid);
+  await communityLinkGroup(groupJid, parentCommunityJid);
 }
 
 /**
@@ -752,7 +737,25 @@ function serializeTransportError(error) {
 
 /**
  * @typedef {{
- *   createConnectionSupervisor?: typeof createWhatsAppConnectionSupervisor,
+ *   start: () => Promise<void>;
+ *   stop: () => Promise<void>;
+ *   sendText: (chatId: string, text: string) => Promise<void>;
+ *   handleConnectionUpdate: (
+ *     update: import("@whiskeysockets/baileys").BaileysEventMap["connection.update"],
+ *     sock: WhatsAppTransportSocketPort,
+ *   ) => Promise<void>;
+ *   isStopped: () => boolean;
+ * }} WhatsAppConnectionSupervisorPort
+ *
+ * @typedef {(options: {
+ *   onSocketReady: (sock: WhatsAppTransportSocketPort, saveCreds: () => Promise<void>) => void;
+ *   onClearState: () => void;
+ * }) => Promise<WhatsAppConnectionSupervisorPort>} WhatsAppConnectionSupervisorFactory
+ */
+
+/**
+ * @typedef {{
+ *   createConnectionSupervisor?: WhatsAppConnectionSupervisorFactory,
  *   outboundStore?: import("../store.js").Store,
  *   inboundCoalesceDelayMs?: number,
  *   inboundDispatchReady?: Promise<void>,
@@ -774,12 +777,13 @@ export async function createWhatsAppTransport(options = {}) {
   const confirmRuntime = createConfirmRuntime();
   const selectRuntime = createSelectRuntime();
   const reactionRuntime = createReactionRuntime({ observer: captureWhatsAppReactionRuntimeEvent });
+  /** @type {WhatsAppConnectionSupervisorFactory} */
   const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
   const outboundStore = options.outboundStore;
 
   /** @type {(input: ChannelInput) => Promise<void>} */
   let onTurn = async () => {};
-  /** @type {import('@whiskeysockets/baileys').WASocket | null} */
+  /** @type {WhatsAppTransportSocketPort | null} */
   let currentSocket = null;
   let started = false;
   let hasOpenConnection = false;
@@ -873,7 +877,7 @@ export async function createWhatsAppTransport(options = {}) {
    * Resolve the socket only after Baileys reports the connection as open.
    * A registered socket can still be in initial sync, where outbound sends can
    * fail with "Precondition Required" / "Connection Closed".
-   * @returns {import('@whiskeysockets/baileys').WASocket | null}
+   * @returns {WhatsAppTransportSocketPort | null}
    */
   function getOpenSocket() {
     return hasOpenConnection ? currentSocket : null;
@@ -954,7 +958,7 @@ export async function createWhatsAppTransport(options = {}) {
    * Baileys emits `connection: open` before its initial-sync event buffer has
    * necessarily flushed. Outbound sends during that window can block inside
    * Baileys until the connection times out, delaying inbound delivery.
-   * @param {import("@whiskeysockets/baileys").WASocket} sock
+   * @param {WhatsAppTransportSocketPort} sock
    * @returns {Promise<boolean>}
    */
   async function waitForEventBufferToDrain(sock) {
@@ -975,7 +979,7 @@ export async function createWhatsAppTransport(options = {}) {
    * Baileys' own initial-sync event processor. Sends attempted during
    * AwaitingInitialSync can wait on Baileys internals for a long time; keeping
    * that wait out of sock.ev.process lets inbound buffering flush on schedule.
-   * @param {import("@whiskeysockets/baileys").WASocket} sock
+   * @param {WhatsAppTransportSocketPort} sock
    * @returns {void}
    */
   function scheduleConnectionOpenWork(sock) {
@@ -993,7 +997,7 @@ export async function createWhatsAppTransport(options = {}) {
 
   /**
    * Register socket handlers on the current socket instance.
-   * @param {import('@whiskeysockets/baileys').WASocket} sock
+   * @param {WhatsAppTransportSocketPort} sock
    * @param {() => Promise<void>} saveCreds
    * @returns {void}
    */
@@ -1266,6 +1270,9 @@ export async function createWhatsAppTransport(options = {}) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
+      if (typeof sock.groupCreate !== "function") {
+        throw new Error("Baileys groupCreate API is unavailable in this runtime.");
+      }
       let metadata;
       try {
         metadata = await sock.groupCreate(subject, participants);
@@ -1291,8 +1298,12 @@ export async function createWhatsAppTransport(options = {}) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
+      const communityCreate = sock.communityCreate;
+      if (typeof communityCreate !== "function") {
+        throw new Error("Baileys communityCreate API is unavailable in this runtime.");
+      }
       try {
-        return await executeCommunityCreate(sock, subject, description);
+        return await executeCommunityCreate({ communityCreate }, subject, description);
       } catch (error) {
         log.error("WhatsApp communityCreate failed:", {
           subject,
@@ -1308,8 +1319,12 @@ export async function createWhatsAppTransport(options = {}) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
+      const communityCreateGroup = sock.communityCreateGroup;
+      if (typeof communityCreateGroup !== "function") {
+        throw new Error("Baileys communityCreateGroup API is unavailable in this runtime.");
+      }
       try {
-        return await executeCommunityCreateGroup(sock, subject, participants, parentCommunityChatId);
+        return await executeCommunityCreateGroup({ communityCreateGroup }, subject, participants, parentCommunityChatId);
       } catch (error) {
         log.error("WhatsApp communityCreateGroup failed:", {
           subject,
@@ -1347,8 +1362,12 @@ export async function createWhatsAppTransport(options = {}) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
+      const groupMetadata = sock.groupMetadata;
+      if (typeof groupMetadata !== "function") {
+        throw new Error("Baileys groupMetadata API is unavailable in this runtime.");
+      }
       try {
-        return await executeGroupLinkedParentLookup(sock, chatId);
+        return await executeGroupLinkedParentLookup({ groupMetadata }, chatId);
       } catch (error) {
         log.error("WhatsApp groupMetadata lookup failed:", {
           chatId,
@@ -1363,8 +1382,12 @@ export async function createWhatsAppTransport(options = {}) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
+      const groupMetadata = sock.groupMetadata;
+      if (typeof groupMetadata !== "function") {
+        throw new Error("Baileys groupMetadata API is unavailable in this runtime.");
+      }
       try {
-        return await executeGroupParticipantLookup(sock, chatId);
+        return await executeGroupParticipantLookup({ groupMetadata }, chatId);
       } catch (error) {
         log.error("WhatsApp groupMetadata participant lookup failed:", {
           chatId,
@@ -1379,6 +1402,9 @@ export async function createWhatsAppTransport(options = {}) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
+      if (typeof sock.groupParticipantsUpdate !== "function") {
+        throw new Error("Baileys groupParticipantsUpdate API is unavailable in this runtime.");
+      }
       await sock.groupParticipantsUpdate(chatId, participants, "promote");
     },
 
@@ -1387,6 +1413,9 @@ export async function createWhatsAppTransport(options = {}) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
+      if (typeof sock.groupUpdateSubject !== "function") {
+        throw new Error("Baileys groupUpdateSubject API is unavailable in this runtime.");
+      }
       await sock.groupUpdateSubject(chatId, subject);
     },
 
@@ -1394,6 +1423,9 @@ export async function createWhatsAppTransport(options = {}) {
       const sock = currentSocket;
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
+      }
+      if (typeof sock.groupSettingUpdate !== "function") {
+        throw new Error("Baileys groupSettingUpdate API is unavailable in this runtime.");
       }
       await sock.groupSettingUpdate(chatId, enabled ? "announcement" : "not_announcement");
     },

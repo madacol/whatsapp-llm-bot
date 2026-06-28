@@ -43,7 +43,45 @@ async function wait(ms) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
+ * @returns {sock is WhatsAppOutboundSocketPort & WhatsAppSocketRelayMessagePort}
+ */
+function hasRelaySocket(sock) {
+  return typeof sock.relayMessage === "function";
+}
+
+/**
+ * @param {WhatsAppOutboundSocketPort} sock
+ * @returns {WhatsAppOutboundSocketPort & WhatsAppSocketRelayMessagePort}
+ */
+function requireRelaySocket(sock) {
+  if (!hasRelaySocket(sock)) {
+    throw new Error("WhatsApp socket does not support raw relay messages.");
+  }
+  return sock;
+}
+
+/**
+ * @param {WhatsAppOutboundSocketPort} sock
+ * @returns {sock is WhatsAppOutboundSocketPort & WhatsAppRawRelaySocketPort}
+ */
+function hasRawRelaySocket(sock) {
+  return hasRelaySocket(sock) && typeof sock.waUploadToServer === "function";
+}
+
+/**
+ * @param {WhatsAppOutboundSocketPort} sock
+ * @returns {WhatsAppOutboundSocketPort & WhatsAppRawRelaySocketPort}
+ */
+function requireRawRelaySocket(sock) {
+  if (!hasRawRelaySocket(sock)) {
+    throw new Error("WhatsApp socket does not support raw media relay.");
+  }
+  return sock;
+}
+
+/**
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {any} msg
  * @param {Record<string, unknown> | undefined} options
@@ -77,7 +115,7 @@ export async function sendObservedWhatsAppMessage(sock, chatId, msg, options) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppSocketRelayMessagePort} sock
  * @param {string} chatId
  * @param {any} msg
  * @param {Record<string, unknown>} options
@@ -177,7 +215,7 @@ function isAttachmentStep(step) {
 
 /**
  * Send multiple images as a WhatsApp album using raw protocol messages.
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {Array<{ image: Buffer, caption?: string }>} items
  * @param {{ quoted?: BaileysMessage }} [options]
@@ -185,13 +223,15 @@ function isAttachmentStep(step) {
  * @returns {Promise<import('@whiskeysockets/baileys').WAMessageKey | undefined>}
  */
 export async function sendAlbum(sock, chatId, items, options, executionOptions = {}) {
-  const userJid = sock.user?.id;
+  const userJid = sock.user?.id ?? "";
 
   if (items.length === 0) return undefined;
   if (items.length === 1) {
     const sent = await sendObservedWhatsAppMessage(sock, chatId, makeImageMessage(items[0].image, items[0].caption), options ?? {});
     return sent?.key;
   }
+
+  const rawSocket = requireRawRelaySocket(sock);
 
   const albumMsgId = generateMessageIDV2(userJid);
   const albumMsg = generateWAMessageFromContent(
@@ -204,14 +244,14 @@ export async function sendAlbum(sock, chatId, items, options, executionOptions =
       messageContextInfo: { messageSecret: randomBytes(32) },
     }),
     {
-      userJid: userJid ?? "",
+      userJid,
       messageId: albumMsgId,
       ...(options?.quoted && { quoted: options.quoted }),
     },
   );
   if (!albumMsg.message) throw new Error("Failed to generate album header message");
 
-  await relayObservedWhatsAppMessage(sock, chatId, albumMsg.message, { messageId: albumMsgId });
+  await relayObservedWhatsAppMessage(rawSocket, chatId, albumMsg.message, { messageId: albumMsgId });
 
   const parentMessageKey = {
     remoteJid: albumMsg.key.remoteJid,
@@ -219,7 +259,7 @@ export async function sendAlbum(sock, chatId, items, options, executionOptions =
     id: albumMsg.key.id,
   };
 
-  const uploadOpts = { upload: sock.waUploadToServer, userJid: userJid ?? "" };
+  const uploadOpts = { upload: rawSocket.waUploadToServer, userJid };
   const uploaded = await Promise.all(
     items.map((item) => generateWAMessage(
       chatId,
@@ -245,7 +285,7 @@ export async function sendAlbum(sock, chatId, items, options, executionOptions =
       },
     };
 
-    await relayObservedWhatsAppMessage(sock, chatId, imageMessage.message, {
+    await relayObservedWhatsAppMessage(rawSocket, chatId, imageMessage.message, {
       messageId: /** @type {string} */ (imageMessage.key.id),
     });
 
@@ -319,7 +359,7 @@ function resolveReactionMessageKey(key, chatId) {
 
 /**
  * Edit a previously sent WhatsApp message.
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} jid
  * @param {string} newText
  * @param {{ messageKey?: import('@whiskeysockets/baileys').WAMessageKey, messageKind?: "text" | "image", fallbackKeyId?: string }} target
@@ -331,7 +371,7 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
     throw new Error("Cannot edit WhatsApp message without an edit target.");
   }
   if (resolved.messageKind === "image") {
-    await relayObservedWhatsAppMessage(sock, jid, {
+    await relayObservedWhatsAppMessage(requireRelaySocket(sock), jid, {
       protocolMessage: {
         key: resolved.key,
         type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
@@ -345,7 +385,7 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import("./delivery-plan.js").WhatsAppSendTextStep} step
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -361,7 +401,7 @@ async function executeTextStep(sock, chatId, step, options, executionOptions) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import("./delivery-plan.js").WhatsAppSendImageStep} step
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -381,7 +421,7 @@ async function executeImageStep(sock, chatId, step, options) {
     options,
   });
   try {
-    const sent = await sendImageHD(sock, chatId, step.image, step.caption, options);
+    const sent = await sendImageHD(requireRawRelaySocket(sock), chatId, step.image, step.caption, options);
     appendWhatsAppOutboundDiagnostic({
       transport: "sendMessage",
       phase: "sent",
@@ -405,7 +445,7 @@ async function executeImageStep(sock, chatId, step, options) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import("./delivery-plan.js").WhatsAppDeliveryStep} step
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -486,7 +526,7 @@ async function executeDeliveryStep(sock, chatId, step, options, executionOptions
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import("../../message-renderer.js").RenderedImagesContinuation} continuation
  * @param {import('@whiskeysockets/baileys').WAMessageKey} promptKey
@@ -546,7 +586,7 @@ function subscribeRenderedImagesContinuation(sock, chatId, continuation, promptK
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import("../../message-renderer.js").RenderedImagesContinuation} continuation
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -566,7 +606,7 @@ async function sendRenderedImagesContinuation(sock, chatId, continuation, option
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import("./delivery-plan.js").WhatsAppDeliveryPlan} plan
  * @param {{ quoted?: BaileysMessage } | undefined} [options]

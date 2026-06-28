@@ -154,7 +154,7 @@ export function hydrateHdRef(block) {
 
 /**
  * @param {string} chatId
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppSocketLidMappingPort} sock
  * @returns {Promise<string>}
  */
 export async function normalizeChatId(chatId, sock) {
@@ -301,7 +301,7 @@ export async function processHdImageMessage(baileysMessage, imageMessage, downlo
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppRawRelaySocketPort} sock
  * @param {string} chatId
  * @param {Buffer} imageBuffer
  * @param {string} [caption]

@@ -29,7 +29,7 @@ const QR_TIMEOUT_MS = 5 * 60 * 1000;
  *   createSocket: (
  *     auth: Awaited<ReturnType<typeof useMultiFileAuthState>>["state"],
  *     version: [number, number, number],
- *   ) => import("@whiskeysockets/baileys").WASocket;
+ *   ) => WhatsAppConnectionSocketPort;
  *   clearAuthState: (authDir: string) => Promise<void>;
  *   printQrCode: (qr: string) => void;
  *   wait: (ms: number) => Promise<void>;
@@ -44,7 +44,7 @@ const QR_TIMEOUT_MS = 5 * 60 * 1000;
  *   version: [number, number, number];
  *   log: SupervisorLogger;
  *   onSocketReady: (
- *     sock: import("@whiskeysockets/baileys").WASocket,
+ *     sock: WhatsAppTransportSocketPort,
  *     saveCreds: () => Promise<void>,
  *   ) => void;
  *   onClearState: () => void;
@@ -60,7 +60,7 @@ const QR_TIMEOUT_MS = 5 * 60 * 1000;
  *   sendText: (chatId: string, text: string) => Promise<void>;
  *   handleConnectionUpdate: (
  *     update: import("@whiskeysockets/baileys").BaileysEventMap["connection.update"],
- *     sock: import("@whiskeysockets/baileys").WASocket,
+ *     sock: WhatsAppTransportSocketPort,
  *   ) => Promise<void>;
  *   isStopped: () => boolean;
  * }} WhatsAppConnectionSupervisor
@@ -86,7 +86,7 @@ function printQrCode(qr) {
  * Build a WASocket instance from auth state.
  * @param {Awaited<ReturnType<typeof useMultiFileAuthState>>["state"]} auth
  * @param {[number, number, number]} version
- * @returns {import("@whiskeysockets/baileys").WASocket}
+ * @returns {WhatsAppConnectionSocketPort}
  */
 function createSocket(auth, version) {
   return makeWASocket({
@@ -94,6 +94,17 @@ function createSocket(auth, version) {
     auth,
     browser: Browsers.ubuntu("Chrome"),
   });
+}
+
+/**
+ * @param {WhatsAppTransportSocketPort & { end?: BaileysSocket["end"] }} sock
+ * @returns {void}
+ */
+function endSocket(sock) {
+  if (typeof sock.end !== "function") {
+    throw new Error("WhatsApp socket does not support connection lifecycle end.");
+  }
+  sock.end(undefined);
 }
 
 /**
@@ -137,7 +148,7 @@ export function createConnectionSupervisor(options, deps) {
     qrTimeoutMs = QR_TIMEOUT_MS,
   } = options;
 
-  /** @type {{ current: import("@whiskeysockets/baileys").WASocket | null }} */
+  /** @type {{ current: WhatsAppConnectionSocketPort | null }} */
   const sockRef = { current: null };
   /** @type {ReturnType<typeof setTimeout> | null} */
   let qrExitTimer = null;
@@ -169,7 +180,7 @@ export function createConnectionSupervisor(options, deps) {
 
     const sock = deps.createSocket(state, version);
     if (stopped) {
-      sock.end(undefined);
+      endSocket(sock);
       return;
     }
 
@@ -199,7 +210,9 @@ export function createConnectionSupervisor(options, deps) {
       const sock = sockRef.current;
       sockRef.current = null;
       try {
-        sock?.end(undefined);
+        if (sock) {
+          endSocket(sock);
+        }
       } catch (error) {
         logger.error("Error during WhatsApp cleanup:", error);
       }
@@ -229,7 +242,7 @@ export function createConnectionSupervisor(options, deps) {
           logger.warn(`Auth failure (${statusCode}). Clearing auth and requesting re-pair...`);
           await deps.clearAuthState(authDir);
           await deps.sendAuthResetAlert(statusCode);
-          sock.end(undefined);
+          endSocket(sock);
           await reconnect();
           qrExitTimer = setTimeout(() => {
             logger.error("QR code was not scanned within 5 minutes. Exiting.");
@@ -239,7 +252,7 @@ export function createConnectionSupervisor(options, deps) {
           logger.error(`Auth still failing (${statusCode}) after reset. Exiting.`);
           deps.exit(1);
         } else if (statusCode !== 401) {
-          sock.end(undefined);
+          endSocket(sock);
           await deps.wait(1000);
           await reconnect();
         }

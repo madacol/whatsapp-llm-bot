@@ -15,7 +15,7 @@ import { scenarioStep } from "./scenario-runner.js";
 /**
  * @typedef {import("./scenario-runner.js").ScenarioContext} ScenarioContext
  * @typedef {import("./scenario-runner.js").ScenarioStep} ScenarioStep
- * @typedef {(events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>} ProcessEvents
+ * @typedef {(events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => void | Promise<void>} ProcessEvents
  *
  * @typedef {{
  *   botPhoneJid: string,
@@ -148,8 +148,8 @@ export function rawLidPollVoteMessage({
  */
 export function whatsappSelectManyModule(input) {
   return scenarioStep("whatsappSelectManyModule", async (ctx) => {
-    /** @type {ProcessEvents | null} */
-    let processEvents = null;
+    /** @type {{ current: ProcessEvents | null }} */
+    const processEventsRef = { current: null };
     /** @type {(value: unknown) => void} */
     let resolveSelection = () => {};
     const selectionPromise = new Promise((resolve) => {
@@ -163,7 +163,8 @@ export function whatsappSelectManyModule(input) {
     resultPromise.catch(() => {});
     ctx.setResult(input.resultName ?? "selectMany", resultPromise);
 
-    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+    /** @type {WhatsAppTransportSocketPort} */
+    const socket = {
       user: {
         id: input.identity.botPhoneJid,
         lid: input.identity.botLidJid.replace("@lid", ":32@lid"),
@@ -173,20 +174,22 @@ export function whatsappSelectManyModule(input) {
          * @param {ProcessEvents} handler
          */
         process(handler) {
-          processEvents = handler;
+          processEventsRef.current = async (events) => {
+            await handler(events);
+          };
         },
       },
       /**
        * @param {string} targetChatId
        * @param {Record<string, unknown>} message
-       * @returns {Promise<Record<string, unknown>>}
+       * @returns {Promise<BaileysMessage>}
        */
       sendMessage: async (targetChatId, message) => {
         const id = "poll" in message ? input.pollMessageId : `sent-${ctx.sentMessages.length + 1}`;
         ctx.sentMessages.push({ id, chatId: targetChatId, message });
         if ("poll" in message) {
           const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
-          return {
+          return /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
             key: { id, remoteJid: targetChatId, fromMe: true },
             message: {
               messageContextInfo: {
@@ -201,9 +204,9 @@ export function whatsappSelectManyModule(input) {
               },
             },
             participant: input.identity.botPhoneJid,
-          };
+          }));
         }
-        return { key: { id, remoteJid: targetChatId, fromMe: true } };
+        return /** @type {BaileysMessage} */ ({ key: { id, remoteJid: targetChatId, fromMe: true } });
       },
       sendPresenceUpdate: async () => {},
       signalRepository: {
@@ -211,7 +214,7 @@ export function whatsappSelectManyModule(input) {
           getPNForLID: async () => null,
         },
       },
-    }));
+    };
 
     let stopped = false;
     const transport = await createWhatsAppTransport({
@@ -250,7 +253,7 @@ export function whatsappSelectManyModule(input) {
       resolveSelection(selection);
     });
 
-    const registeredProcessEvents = /** @type {ProcessEvents | null} */ (/** @type {unknown} */ (processEvents));
+    const registeredProcessEvents = processEventsRef.current;
     if (!registeredProcessEvents) {
       throw new Error("Expected connection event processor to be registered.");
     }

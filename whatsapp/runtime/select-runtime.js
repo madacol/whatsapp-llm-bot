@@ -19,7 +19,7 @@ const CANCEL_OPTION_ID = "cancel";
 const CANCEL_OPTION_LABEL = "Cancel ❌";
 
 /**
- * @typedef {import('@whiskeysockets/baileys').WASocket | (() => import('@whiskeysockets/baileys').WASocket | null)} SocketResolver
+ * @typedef {WhatsAppPollSocketPort | (() => WhatsAppPollSocketPort | null)} SocketResolver
  */
 
 /**
@@ -92,8 +92,8 @@ export function getPollCreationData(msg) {
  *   createSelectMany: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
  *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   observePollCreationMessage: (message: import('@whiskeysockets/baileys').WAMessage) => boolean;
- *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
- *   resolvePollUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
+ *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: WhatsAppPollSocketPort) => Promise<PollVoteEvent | null>;
+ *   resolvePollUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate, sock: WhatsAppPollSocketPort) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
  *   clear: () => void;
  * }} SelectRuntime
@@ -149,15 +149,15 @@ function createUniquePollLabel(preferredLabel, usedLabels) {
 
 /**
  * @param {SocketResolver} socketResolver
- * @returns {() => import('@whiskeysockets/baileys').WASocket | null}
+ * @returns {() => WhatsAppPollSocketPort | null}
  */
 function createSocketGetter(socketResolver) {
   return typeof socketResolver === "function" ? socketResolver : () => socketResolver;
 }
 
 /**
- * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
- * @returns {import('@whiskeysockets/baileys').WASocket}
+ * @param {() => WhatsAppPollSocketPort | null} getSocket
+ * @returns {WhatsAppPollSocketPort}
  */
 function requireSocket(getSocket) {
   const sock = getSocket();
@@ -188,7 +188,7 @@ function rememberSentPoll(sentPolls, pollMsgId, sent) {
 
 /**
  * Send a poll prompt and return the metadata needed to track its result.
- * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @param {() => WhatsAppPollSocketPort | null} getSocket
  * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
  * @param {string} chatId
  * @param {string} question
@@ -229,7 +229,7 @@ async function sendPollPrompt(getSocket, sentPolls, chatId, question, options, c
 
 /**
  * Apply the transport-side effect after a selection settles.
- * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @param {() => WhatsAppPollSocketPort | null} getSocket
  * @param {string} chatId
  * @param {import('@whiskeysockets/baileys').WAMessageKey} sentPollKey
  * @param {boolean} isCancelled
@@ -248,7 +248,7 @@ function applySettlementEffect(getSocket, chatId, sentPollKey, isCancelled, dele
 
 /**
  * Remove a poll prompt after a confirm settles so no reaction mechanism is involved.
- * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @param {() => WhatsAppPollSocketPort | null} getSocket
  * @param {import('@whiskeysockets/baileys').WAMessageKey} sentPollKey
  * @returns {void}
  */
@@ -306,7 +306,7 @@ function resolveSelectedPollOptionNames(pollCreation, selectedOptions) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppPollSocketPort} sock
  * @param {string} chatId
  * @returns {Promise<string>}
  */
@@ -315,7 +315,12 @@ async function normalizePollChatId(sock, chatId) {
     return chatId;
   }
 
-  const phoneNumber = await sock.signalRepository.lidMapping.getPNForLID(chatId);
+  const getPNForLID = sock.signalRepository?.lidMapping?.getPNForLID;
+  if (!getPNForLID) {
+    return chatId;
+  }
+
+  const phoneNumber = await getPNForLID(chatId);
   return phoneNumber ? jidNormalizedUser(phoneNumber) : chatId;
 }
 
@@ -452,7 +457,7 @@ function decryptPollVoteWithCandidateAuthors(vote, pollEncKey, pollMsgId, pollCr
  * Decrypt a poll vote message and resolve the selected option names.
  * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
  * @param {import('@whiskeysockets/baileys').WAMessage} message
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppPollSocketPort} sock
  * @returns {Promise<PollVoteEvent | null>}
  */
 async function decryptAndResolvePollVote(sentPolls, message, sock) {
@@ -551,7 +556,7 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
  * update.pollUpdates.
  * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
  * @param {import('@whiskeysockets/baileys').WAMessageUpdate} update
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppPollSocketPort} sock
  * @returns {Promise<PollVoteEvent | null>}
  */
 async function resolveDecryptedPollUpdate(sentPolls, update, sock) {
@@ -838,7 +843,7 @@ export function createSelectRuntime() {
     /**
      * Decrypt and resolve an incoming poll vote message.
      * @param {import('@whiskeysockets/baileys').WAMessage} message
-     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     * @param {WhatsAppPollSocketPort} sock
      * @returns {Promise<PollVoteEvent | null>}
      */
     resolvePollVoteMessage(message, sock) {
@@ -848,7 +853,7 @@ export function createSelectRuntime() {
     /**
      * Resolve a decrypted incoming `messages.update` poll vote.
      * @param {import('@whiskeysockets/baileys').WAMessageUpdate} update
-     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     * @param {WhatsAppPollSocketPort} sock
      * @returns {Promise<PollVoteEvent | null>}
      */
     resolvePollUpdate(update, sock) {

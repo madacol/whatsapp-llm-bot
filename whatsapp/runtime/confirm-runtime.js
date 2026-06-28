@@ -5,7 +5,7 @@ import { createSelectRuntime } from "./select-runtime.js";
  */
 
 /**
- * @typedef {import('@whiskeysockets/baileys').WASocket | (() => import('@whiskeysockets/baileys').WASocket | null)} SocketResolver
+ * @typedef {WhatsAppPollSocketPort | (() => WhatsAppPollSocketPort | null)} SocketResolver
  */
 
 /**
@@ -14,11 +14,11 @@ import { createSelectRuntime } from "./select-runtime.js";
 
 /**
  * @typedef {{
- *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>, sock: import('@whiskeysockets/baileys').WASocket) => void;
+ *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>, sock: WhatsAppPollSocketPort) => void;
  *   handlePollVote: (event: ConfirmPollVoteEvent) => boolean;
  *   observePollCreationMessage: (message: import('@whiskeysockets/baileys').WAMessage) => boolean;
- *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<ConfirmPollVoteEvent | null>;
- *   resolvePollUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate, sock: import('@whiskeysockets/baileys').WASocket) => Promise<ConfirmPollVoteEvent | null>;
+ *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: WhatsAppPollSocketPort) => Promise<ConfirmPollVoteEvent | null>;
+ *   resolvePollUpdate: (update: import('@whiskeysockets/baileys').WAMessageUpdate, sock: WhatsAppPollSocketPort) => Promise<ConfirmPollVoteEvent | null>;
  *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   readonly size: number;
  *   clear: () => void;
