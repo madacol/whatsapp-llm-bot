@@ -18,7 +18,7 @@ Use testing to prove the user-valued behavior, not the implementation story.
 3. Start vertical and use real evidence.
    Default to a test or replay that enters through the real entry point and follows the path to the user-valued outcome. For regressions, inspect the latest relevant captured input, logs, persisted state, trace, or fixture before production edits.
 
-   For new vertical slice and end-to-end tests in this repo, use the scenario-runner pattern in `tests/scenario-runner.js`: plain JavaScript step arrays, composite modules for repeated setup, real capture records from logs or smoke-generated capture output, and plain assertions over scenario context. Existing long tests should stay in their current form until several useful new scenario tests prove that migration will improve readability and maintenance.
+   For changes and bug fixes in this repo, identify the vertical slice or end-to-end proof for the behavior being changed. If a relevant vertical/e2e test already exists, migrate that proof to the scenario-runner pattern as part of the change. If no relevant vertical/e2e test exists, create one with the scenario-runner pattern. Use `tests/scenario-runner.js`: plain JavaScript step arrays, composite modules for repeated setup, real capture records from logs or smoke-generated capture output, and plain assertions over scenario context. Migrate only the relevant proof; broad unrelated legacy-test migration can stay deferred.
 
    For cross-seam behavior, test from the relevant start seam to the relevant end seam before adding narrower tests.
 
@@ -26,7 +26,7 @@ Use testing to prove the user-valued behavior, not the implementation story.
    If the desired result, acknowledgement, durable state, or cleanup condition changes the test and is materially ambiguous, ask before choosing the proof target.
 
 5. Keep the suspected seam in the proof.
-   Base red proof on the real failing artifact when one exists. Do not mock, bypass, or unit-test around the boundary most likely to be failing. Narrow tests are support only after the vertical path localizes the seam.
+   Base red proof on the real failing artifact when one exists. Do not mock, bypass, or unit-test around the boundary most likely to be failing. Narrow seam/unit tests are support tests; they do not replace the vertical proof for a behavior change or bug fix.
 
 6. Verify green on the same path.
    Green proof must cover the user-valued outcome and any relevant durable/async settlement. For live bugs, also verify the running version or say it was not verified.
