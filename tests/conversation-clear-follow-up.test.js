@@ -33,7 +33,11 @@ describe("clear command follow-up", () => {
       },
     };
 
-    const followUp = buildClearCommandFollowUp(turn, turn.content[0], "/")?.followUpTurn;
+    const firstBlock = turn.content[0];
+    if (firstBlock?.type !== "text") {
+      assert.fail("expected first content block to be text");
+    }
+    const followUp = buildClearCommandFollowUp(turn, firstBlock, "/")?.followUpTurn;
 
     assert.ok(followUp);
     assert.equal(followUp.facts.addressedToBot, true);

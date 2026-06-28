@@ -84,6 +84,7 @@ describe("WhatsApp upsert shape diagnostics", () => {
     /** @type {Array<Record<string, unknown>>} */
     const captured = [];
     const fixtureCapture = {
+      /** @param {Record<string, unknown>} entry */
       capture(entry) {
         captured.push(structuredClone(entry));
       },
@@ -241,7 +242,7 @@ describe("message-event-classifier", () => {
             participant: "147025689575646@lid",
           },
           text: "👁",
-          senderTimestampMs: "1774137275097",
+          senderTimestampMs: 1774137275097,
         },
       },
     }));

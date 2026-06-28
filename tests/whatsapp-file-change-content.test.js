@@ -6,6 +6,7 @@ import { renderFileChangeContent } from "../whatsapp/outbound/file-change-conten
 describe("WhatsApp file-change content", () => {
   it("renders brand-new file writes as code through the extracted module", () => {
     const content = renderFileChangeContent({
+      kind: "file_change",
       path: "src/new-module.js",
       changeKind: "add",
       newText: "export const value = 1;\n",

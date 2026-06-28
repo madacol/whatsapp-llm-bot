@@ -11,7 +11,7 @@ import { createConnectionSupervisor } from "../whatsapp/connection-supervisor.js
 
 /**
  * @typedef {{
- *   sock: BaileysSocket;
+ *   sock: WhatsAppConnectionSocketPort;
  *   state: MockSocketState;
  * }} MockSocket
  */
@@ -37,18 +37,21 @@ function createMockSocket() {
     endCalls: 0,
   };
 
-  const sock = /** @type {BaileysSocket} */ (/** @type {unknown} */ ({
+  /** @type {WhatsAppConnectionSocketPort} */
+  const sock = {
+    user: { id: "bot-phone-id:0@s.whatsapp.net" },
     ev: {
       process: () => {},
     },
-    end: () => {
+    end: async () => {
       state.endCalls += 1;
     },
     sendMessage: async (chatId, message) => {
       state.sendMessages.push({ chatId, message });
       return { key: { id: `sent-${state.sendMessages.length}`, remoteJid: chatId } };
     },
-  }));
+    sendPresenceUpdate: async () => {},
+  };
 
   return { sock, state };
 }
@@ -57,7 +60,7 @@ describe("createConnectionSupervisor", () => {
   it("reconnects after non-auth disconnects", async () => {
     /** @type {MockSocket[]} */
     const sockets = [];
-    /** @type {BaileysSocket[]} */
+    /** @type {WhatsAppTransportSocketPort[]} */
     const readySockets = [];
 
     const supervisor = createConnectionSupervisor(

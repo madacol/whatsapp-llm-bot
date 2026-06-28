@@ -4,6 +4,10 @@ import { access, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
+/**
+ * @param {string} filePath
+ * @returns {Promise<boolean>}
+ */
 async function pathExists(filePath) {
   try {
     await access(filePath, constants.F_OK);

@@ -26,11 +26,16 @@ import { codexAcpEntryPoint, fakeCodexPath } from "./codex-acp-patch-fixture.js"
 const testConfirmRegistry = createConfirmRuntime();
 const testUserResponseRegistry = createSelectRuntime();
 
+/**
+ * @typedef {ReturnType<typeof createMockBaileysSocket>} MockBaileysSocket
+ * @typedef {ReturnType<MockBaileysSocket["getSentMessages"]>} MockSentMessages
+ */
+
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
 /** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
-/** @type {import("@electric-sql/pglite").PGlite} */
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let testDb;
 /** @type {import("../store.js").Store} */
 let testStore;
@@ -377,7 +382,7 @@ describe("ACP file changes through WhatsApp transport", () => {
   /**
    * @param {string} prompt
    * @param {(workdir: string) => Promise<void>} [setup]
-   * @returns {Promise<{ rendered: string[], sentMessages: ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]> }>}
+   * @returns {Promise<{ rendered: string[], sentMessages: MockSentMessages }>}
    */
   async function runAcpPrompt(prompt, setup) {
     const senderId = `e2e-acp-files-${nextSender++}`;
@@ -595,7 +600,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
   /**
    * @param {string} prompt
    * @param {{ pollChoice?: string, pollChoices?: string[] }} [options]
-   * @returns {Promise<{ rendered: string[], sentMessages: ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]> }>}
+   * @returns {Promise<{ rendered: string[], sentMessages: MockSentMessages }>}
    */
   async function runAcpPrompt(prompt, options = {}) {
     await registerRuntimeHarness();
@@ -651,7 +656,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
   }
 
   /**
-   * @param {ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]>} sentMessages
+   * @param {MockSentMessages} sentMessages
    * @returns {string[]}
    */
   function getPinnedStatusTexts(sentMessages) {
@@ -688,7 +693,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
   }
 
   /**
-   * @param {ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]>} sentMessages
+   * @param {MockSentMessages} sentMessages
    * @returns {void}
    */
   function assertPinnedStatusUnpinned(sentMessages) {
@@ -1101,8 +1106,8 @@ describe("group detection", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("quote extraction", () => {
   it("passes current and quoted identity through the adapter", async () => {
-    /** @type {ChannelInput | null} */
-    let capturedCtx = null;
+    /** @type {{ value: ChannelInput | null }} */
+    const capturedCtx = { value: null };
     const { sock } = createMockBaileysSocket();
 
     await adaptIncomingMessage(
@@ -1114,17 +1119,18 @@ describe("quote extraction", () => {
         quotedSenderId: "99999",
       }),
       sock,
-      async (ctx) => { capturedCtx = ctx; },
+      async (ctx) => { capturedCtx.value = ctx; },
       testConfirmRegistry,
       testUserResponseRegistry,
     );
 
-    assert.ok(capturedCtx, "Handler should have been called");
-    assert.equal(capturedCtx.senderName, "Current User");
-    assert.equal(capturedCtx.facts.quotedSenderId, "99999");
-    assert.equal(capturedCtx.facts.quotedSenderJid, "99999@s.whatsapp.net");
+    const observedCtx = capturedCtx.value;
+    assert.ok(observedCtx, "Handler should have been called");
+    assert.equal(observedCtx.senderName, "Current User");
+    assert.equal(observedCtx.facts.quotedSenderId, "99999");
+    assert.equal(observedCtx.facts.quotedSenderJid, "99999@s.whatsapp.net");
 
-    const quoteBlock = capturedCtx.content.find(b => b.type === "quote");
+    const quoteBlock = observedCtx.content.find(b => b.type === "quote");
     assert.ok(quoteBlock, "Should have a quote content block");
     assert.ok(
       /** @type {QuoteContentBlock} */ (quoteBlock).content.some(
@@ -1342,18 +1348,19 @@ describe("timestamp parsing", () => {
   it("parses numeric timestamp from WAMessage", async () => {
     const unixTime = 1700000000;
 
-    /** @type {Date | null} */
-    let capturedTimestamp = null;
+    /** @type {{ value: Date | null }} */
+    const capturedTimestamp = { value: null };
     const { sock } = createMockBaileysSocket();
 
     const msg = createWAMessage({ text: "time check", chatId: "e2e-ts@s.whatsapp.net", timestamp: unixTime });
 
     await adaptIncomingMessage(msg, sock, async (ctx) => {
-      capturedTimestamp = ctx.timestamp;
+      capturedTimestamp.value = ctx.timestamp;
     }, testConfirmRegistry, testUserResponseRegistry);
 
-    assert.ok(capturedTimestamp, "Should have captured timestamp");
-    assert.equal(capturedTimestamp.getTime(), unixTime * 1000);
+    const observedTimestamp = capturedTimestamp.value;
+    assert.ok(observedTimestamp, "Should have captured timestamp");
+    assert.equal(observedTimestamp.getTime(), unixTime * 1000);
   });
 });
 

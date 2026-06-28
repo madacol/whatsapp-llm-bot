@@ -74,6 +74,9 @@ describe("Agent Run Activity reconciliation", () => {
       },
     });
 
+    if (childToolEvent.type !== "tool.started") {
+      assert.fail(`expected tool.started event, got ${childToolEvent.type}`);
+    }
     assert.deepEqual(childToolEvent.tool.subagent, {
       source: "subagent",
       threadId: "thread-1",

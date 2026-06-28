@@ -14,6 +14,7 @@ describe("message failure presentation", () => {
       toolName: "Shell",
       summary: "*Shell*  `pnpm test`",
       command: "pnpm test",
+      inspectMode: "bash",
     }), {
       kind: "text",
       text: "❌ *Shell*  `pnpm test`",

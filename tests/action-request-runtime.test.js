@@ -11,7 +11,9 @@ import { executeQueuedActionRequests } from "../action-request-runtime.js";
 function createSession() {
   /** @type {Message[]} */
   const persistedMessages = [];
-  return /** @type {Session} */ ({
+  let nextMessageId = 1;
+  /** @type {Session} */
+  const session = {
     chatId: "chat-1",
     senderIds: [],
     context: /** @type {ExecuteActionContext} */ ({
@@ -27,10 +29,18 @@ function createSession() {
     }),
     addMessage: async (_chatId, message) => {
       persistedMessages.push(message);
-      return undefined;
+      return {
+        message_id: nextMessageId++,
+        chat_id: _chatId,
+        sender_id: "",
+        message_data: message,
+        timestamp: new Date(0),
+        display_key: null,
+      };
     },
-    updateToolMessage: async () => undefined,
-  });
+    updateToolMessage: async () => null,
+  };
+  return session;
 }
 
 describe("executeQueuedActionRequests", () => {
@@ -96,9 +106,9 @@ describe("executeQueuedActionRequests", () => {
             parameters: { type: "object", properties: {} },
             permissions: {},
             formatToolCall: ({ prompt }) => `Generating ${typeof prompt === "string" ? prompt : "image"}`,
-          },
+        },
         executeTool: async (actionName, _context, params, options) => {
-          executed.push({ actionName, params, workdir: options.workdir ?? null });
+          executed.push({ actionName, params, workdir: options?.workdir ?? null });
           if (actionName === "generate_video") {
             return { result: [{ type: "text", text: "video generated" }], permissions: {} };
           }

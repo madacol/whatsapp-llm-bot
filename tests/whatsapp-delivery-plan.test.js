@@ -16,6 +16,34 @@ function base64(text) {
   return Buffer.from(text).toString("base64");
 }
 
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {Record<string, unknown>} msg
+ * @returns {string}
+ */
+function readEditedImageCaption(msg) {
+  const protocolMessage = msg.protocolMessage;
+  if (!isRecord(protocolMessage)) {
+    assert.fail("expected protocol message");
+  }
+  const editedMessage = protocolMessage.editedMessage;
+  if (!isRecord(editedMessage)) {
+    assert.fail("expected edited message");
+  }
+  const imageMessage = editedMessage.imageMessage;
+  if (!isRecord(imageMessage) || typeof imageMessage.caption !== "string") {
+    assert.fail("expected edited image caption");
+  }
+  return imageMessage.caption;
+}
+
 describe("WhatsAppDeliveryPlan", () => {
   it("renders rich send content into deterministic delivery steps before socket execution", async () => {
     const plan = await buildWhatsAppContentDeliveryPlan({
@@ -73,7 +101,7 @@ describe("WhatsAppDeliveryPlan", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0]?.msg.text, "hello");
     assert.equal(relayed.length, 1);
-    assert.equal(relayed[0]?.msg.protocolMessage.editedMessage.imageMessage.caption, "edited caption");
+    assert.equal(relayed[0] ? readEditedImageCaption(relayed[0].msg) : "", "edited caption");
     assert.equal(result.lastEditableKey?.id, "msg-1");
     assert.equal(result.lastEditableMessageKind, "text");
   });

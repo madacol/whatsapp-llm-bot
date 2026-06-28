@@ -318,12 +318,13 @@ describe("workspace resolver foundation", () => {
   it("recovers when a concurrent group workspace adoption wins the chat insert race", async () => {
     const chatId = "resolver-raced-group-chat";
     const chatName = "Raced Squad";
-    /** @type {WorkspaceRow | null} */
-    let racedWorkspace = null;
+    /** @type {{ workspace: WorkspaceRow | null }} */
+    const raced = { workspace: null };
     const racingStore = {
       ...store,
+      /** @param {Parameters<typeof store.createWorkspace>[0]} input */
       async createWorkspace(input) {
-        racedWorkspace = await store.createWorkspace(input);
+        raced.workspace = await store.createWorkspace(input);
         throw Object.assign(new Error("UNIQUE constraint failed: workspaces.workspace_chat_id"), {
           code: "ERR_SQLITE_ERROR",
           errcode: 2067,
@@ -335,11 +336,14 @@ describe("workspace resolver foundation", () => {
 
     const resolved = await racingBindingService.resolveChatBinding(chatId, undefined, chatName, true);
 
-    assert.ok(racedWorkspace);
+    const workspace = raced.workspace;
+    if (!workspace) {
+      assert.fail("expected raced workspace to be created");
+    }
     assert.deepEqual(resolved, {
       kind: "workspace",
-      project: await store.getProject(racedWorkspace.project_id),
-      workspace: racedWorkspace,
+      project: await store.getProject(workspace.project_id),
+      workspace,
     });
   });
 });

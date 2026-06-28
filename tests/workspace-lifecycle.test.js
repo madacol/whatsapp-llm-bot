@@ -20,7 +20,7 @@ import { getChatSqlitePath } from "../chat-paths.js";
 
 const execFileAsync = promisify(execFile);
 
-/** @type {PGlite} */
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let db;
 /** @type {Awaited<ReturnType<typeof import("../store.js").initStore>>} */
 let store;
@@ -47,7 +47,7 @@ async function registerWorkspaceHarness() {
 }
 
 /**
- * @returns {Promise<{
+ * @returns {{
  *   transport: ChatTransport,
  *   createdGroups: Array<{ subject: string, participants: string[], chatId: string }>,
  *   createdCommunities: Array<{ subject: string, description: string, chatId: string }>,
@@ -59,7 +59,7 @@ async function registerWorkspaceHarness() {
  *   sentEvents: Array<{ chatId: string, event: OutboundEvent }>,
  *   renamedGroups: Array<{ chatId: string, subject: string }>,
  *   announcementChanges: Array<{ chatId: string, enabled: boolean }>,
- * }>}
+ * }}
  */
 function createFakeTransport() {
   /** @type {Array<{ subject: string, participants: string[], chatId: string }>} */

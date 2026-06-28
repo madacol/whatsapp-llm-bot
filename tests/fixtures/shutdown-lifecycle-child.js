@@ -7,6 +7,9 @@ const activeTurn = new Promise((resolve) => {
 });
 const activeTurnHandle = setInterval(() => {}, 1_000);
 
+/**
+ * @param {unknown} message
+ */
 function send(message) {
   if (process.send) {
     process.send(message);

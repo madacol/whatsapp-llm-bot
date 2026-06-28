@@ -15,7 +15,9 @@ import { updateChatConfig } from "../chat-config.js";
 
 const execFileAsync = promisify(execFile);
 
-/** @type {import("@electric-sql/pglite").PGlite} */
+/** @typedef {(event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>} RuntimeEventSubscriber */
+
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let db;
 /** @type {Awaited<ReturnType<typeof import("../store.js").initStore>>} */
 let store;
@@ -36,7 +38,7 @@ before(async () => {
 
   const runner = createConversationRunner({
     store,
-    llmClient: /** @type {LlmClient} */ ({}),
+    llmClient: llmClient({}),
   });
 
   handleMessage = runner.handleMessage;
@@ -260,6 +262,14 @@ function createDeferredVoid() {
 }
 
 /**
+ * @param {unknown} client
+ * @returns {LlmClient}
+ */
+function llmClient(client) {
+  return /** @type {LlmClient} */ (/** @type {unknown} */ (client));
+}
+
+/**
  * @param {() => boolean} predicate
  * @returns {Promise<void>}
  */
@@ -343,6 +353,10 @@ describe("createConversationRunner prompt formatting", () => {
                 };
               },
               interruptTurn: async () => false,
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async () => false,
               stopSession: async () => false,
               listSessions: () => [],
@@ -373,7 +387,7 @@ describe("createConversationRunner prompt formatting", () => {
       harness_config: {},
     }));
 
-    /** @type {Array<({ type: string, provider: string } & Record<string, unknown>) => void | Promise<void>>} */
+    /** @type {RuntimeEventSubscriber[]} */
     const subscribers = [];
     /** @type {string[]} */
     const phases = [];
@@ -457,6 +471,10 @@ describe("createConversationRunner prompt formatting", () => {
                 };
               },
               interruptTurn: async () => false,
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async () => false,
               stopSession: async () => false,
               listSessions: () => [],
@@ -484,7 +502,7 @@ describe("createConversationRunner prompt formatting", () => {
       content: [{ type: "text", text: "hello" }],
       io: {
         reply: async (event) => {
-          if (event.kind === "content" || event.kind === "assistant_output") {
+          if (event.kind === "assistant_output") {
             replies.push(event.content);
           }
           return undefined;
@@ -519,13 +537,13 @@ describe("createConversationRunner prompt formatting", () => {
       harness_config: {},
     }));
 
-    /** @type {Array<({ type: string, provider: string, chatId?: string } & Record<string, unknown>) => void | Promise<void>>} */
+    /** @type {RuntimeEventSubscriber[]} */
     const subscribers = [];
     let startedTurns = 0;
     /** @type {() => void} */
     let releaseBothTurns = () => {};
     const bothTurnsStarted = new Promise((resolve) => {
-      releaseBothTurns = resolve;
+      releaseBothTurns = () => resolve(undefined);
     });
 
     registerHarnessDriver({
@@ -586,6 +604,10 @@ describe("createConversationRunner prompt formatting", () => {
                 };
               },
               interruptTurn: async () => false,
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async () => false,
               stopSession: async () => false,
               listSessions: () => [],
@@ -864,6 +886,10 @@ describe("createConversationRunner prompt formatting", () => {
                 };
               },
               interruptTurn: async () => false,
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async (_chatId, text) => {
                 phases.push("inject");
                 injectedTexts.push(text);
@@ -966,6 +992,10 @@ describe("createConversationRunner prompt formatting", () => {
                 };
               },
               interruptTurn: async () => false,
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async (_chatId, text) => {
                 injectedTexts.push(text);
                 return false;
@@ -986,7 +1016,7 @@ describe("createConversationRunner prompt formatting", () => {
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
     const runner = createConversationRunner({
       store,
-      llmClient: /** @type {LlmClient} */ ({
+      llmClient: llmClient({
         chat: {
           completions: {
             create: async () => {
@@ -1090,6 +1120,10 @@ describe("createConversationRunner prompt formatting", () => {
                 };
               },
               interruptTurn: async () => false,
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async (_chatId, text) => {
                 injectedTexts.push(text);
                 return true;
@@ -1110,7 +1144,7 @@ describe("createConversationRunner prompt formatting", () => {
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
     const runner = createConversationRunner({
       store,
-      llmClient: /** @type {LlmClient} */ ({
+      llmClient: llmClient({
         chat: {
           completions: {
             create: async () => ({
@@ -1143,7 +1177,7 @@ describe("createConversationRunner prompt formatting", () => {
       assert.equal(event.kind, "app_message");
       assert.equal(event.role, "plain");
       const content = event.content;
-      assert.equal(typeof content, "string");
+      assert.ok(typeof content === "string", "Expected plain app message content to be text");
       secondTurn.responses.push({ type: "reply", text: content, source: "plain" });
       return {
         update: async (update) => {
@@ -1241,6 +1275,10 @@ describe("createConversationRunner prompt formatting", () => {
                 releaseFirstRun.resolve();
                 return true;
               },
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async (_chatId, text) => {
                 phases.push("inject:false");
                 injectedTexts.push(text);
@@ -1262,7 +1300,7 @@ describe("createConversationRunner prompt formatting", () => {
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
     const runner = createConversationRunner({
       store,
-      llmClient: /** @type {LlmClient} */ ({}),
+      llmClient: llmClient({}),
       liveInputFallbackDelayMs: 5,
     });
 
@@ -1357,6 +1395,10 @@ describe("createConversationRunner prompt formatting", () => {
                 releaseFirstRun.resolve();
                 return true;
               },
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async () => {
                 phases.push("inject:false");
                 return false;
@@ -1377,7 +1419,7 @@ describe("createConversationRunner prompt formatting", () => {
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
     const runner = createConversationRunner({
       store,
-      llmClient: /** @type {LlmClient} */ ({
+      llmClient: llmClient({
         chat: {
           completions: {
             create: async () => {
@@ -1430,10 +1472,10 @@ describe("createConversationRunner prompt formatting", () => {
     const phases = [];
     const runner = createConversationRunner({
       store,
-      llmClient: /** @type {LlmClient} */ ({}),
+      llmClient: llmClient({}),
       restartCommandHandler: async () => ({
         result: "Restart signal sent.",
-        afterResponse: () => {
+        afterResponse: async () => {
           phases.push("after-response");
         },
       }),
@@ -1522,6 +1564,10 @@ describe("createConversationRunner prompt formatting", () => {
                 };
               },
               interruptTurn: async () => false,
+              respondToRequest: async () => false,
+              respondToUserInput: async () => false,
+              hasSession: () => false,
+              stopAll: async () => {},
               injectMessage: async (_chatId, text) => {
                 phases.push("inject");
                 injectedTexts.push(text);
@@ -1542,7 +1588,7 @@ describe("createConversationRunner prompt formatting", () => {
 
     const runner = createConversationRunner({
       store,
-      llmClient: /** @type {LlmClient} */ ({}),
+      llmClient: llmClient({}),
       restartCommandHandler: createRestartCommandHandler({
         createRestartId: () => "restart-live-input-sequence",
         restartScheduler: (input) => {
@@ -1638,7 +1684,8 @@ describe("createConversationRunner prompt formatting", () => {
     await handleMessage(turn.context);
 
     assert.ok(seenMessages, "Expected the harness to receive messages");
-    const lastMessage = seenMessages.at(-1);
+    const receivedMessages = /** @type {ChatMessage[]} */ (/** @type {unknown} */ (seenMessages));
+    const lastMessage = receivedMessages.at(-1);
     assert.ok(lastMessage, "Expected a final user message");
     assert.equal(lastMessage.role, "user");
     if (lastMessage.role !== "user") {

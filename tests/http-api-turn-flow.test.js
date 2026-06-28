@@ -33,7 +33,7 @@ describe("HTTP API turn flow", () => {
     assert.equal(flow.getActiveTurnId(payload.chatId), "turn-1");
     assert.deepEqual(flow.listEvents(payload.chatId, 0).map((row) => row.turnId), ["turn-1"]);
 
-    /** @type {unknown[]} */
+    /** @type {ReturnType<typeof flow.listEvents>} */
     const streamed = [];
     const client = flow.openEventStream(payload.chatId, 0, (row) => {
       streamed.push(row);

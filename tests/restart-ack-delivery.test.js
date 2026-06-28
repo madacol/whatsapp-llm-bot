@@ -6,13 +6,19 @@ import path from "node:path";
 import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
 
+/**
+ * @typedef {{ level: "info" | "warn", message: string, data: Record<string, unknown> }} TestLogEntry
+ */
+
 function createLogSink() {
-  /** @type {Array<{ level: string, message: string, data: Record<string, unknown> }>} */
+  /** @type {TestLogEntry[]} */
   const entries = [];
   return {
     entries,
     log: {
+      /** @param {string} message @param {Record<string, unknown>} [data] */
       info: (message, data) => entries.push({ level: "info", message, data: data ?? {} }),
+      /** @param {string} message @param {Record<string, unknown>} [data] */
       warn: (message, data) => entries.push({ level: "warn", message, data: data ?? {} }),
     },
   };

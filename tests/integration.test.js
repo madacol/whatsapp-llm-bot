@@ -22,7 +22,7 @@ import { readChatConfig, updateChatConfig } from "../chat-config.js";
 let mockServer;
 /** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
-/** @type {import("@electric-sql/pglite").PGlite} */
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let testDb;
 
 const CACHE_PATH = path.resolve("data/models.json");
@@ -33,6 +33,7 @@ const capturedTurns = integrationHarnessState.turns;
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 const seedChat = (chatId, options) => seedChat_(testDb, chatId, options);
 
+/** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 async function seedAcpChat(chatId, options = {}) {
   await registerIntegrationHarness();
   await seedChat(chatId, options);

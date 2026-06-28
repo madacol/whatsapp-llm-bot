@@ -4,6 +4,33 @@ import { assistantOutputEvent } from "../outbound-events.js";
 import { createWhatsAppWorkspacePresenter } from "../whatsapp/workspace-presenter.js";
 
 /**
+ * @typedef {{
+ *   projectId: string,
+ *   workspaceId: string,
+ *   workspaceChatId: string,
+ *   workspaceChatSubject: string,
+ *   role?: WhatsAppWorkspacePresentationRole,
+ *   linkedCommunityChatId?: string | null,
+ * }} SaveWorkspacePresentationInput
+ */
+
+/**
+ * @param {SaveWorkspacePresentationInput} input
+ * @returns {WhatsAppWorkspacePresentationRow}
+ */
+function presentationRowFromInput(input) {
+  return {
+    workspace_id: input.workspaceId,
+    project_id: input.projectId,
+    workspace_chat_id: input.workspaceChatId,
+    workspace_chat_subject: input.workspaceChatSubject,
+    role: input.role ?? "workspace",
+    linked_community_chat_id: input.linkedCommunityChatId ?? null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
  * @param {{
  *   existingPresentation?: WhatsAppWorkspacePresentationRow | null,
  * }} [options]
@@ -22,8 +49,10 @@ function createStore(options = {}) {
     storedPresentations,
     store: {
       getWhatsAppWorkspacePresentation: async () => options.existingPresentation ?? null,
+      /** @param {SaveWorkspacePresentationInput} input */
       saveWhatsAppWorkspacePresentation: async (input) => {
         storedPresentations.push(input);
+        return presentationRowFromInput(input);
       },
     },
   };
@@ -367,7 +396,7 @@ describe("WhatsAppWorkspacePresenter", () => {
             timestamp: new Date().toISOString(),
           };
         },
-        saveWhatsAppWorkspacePresentation: async () => {},
+        saveWhatsAppWorkspacePresentation: async (input) => presentationRowFromInput(input),
       },
       transport: {
         start: async () => {},
@@ -410,7 +439,7 @@ describe("WhatsAppWorkspacePresenter", () => {
           linked_community_chat_id: null,
           timestamp: new Date().toISOString(),
         }),
-        saveWhatsAppWorkspacePresentation: async () => {},
+        saveWhatsAppWorkspacePresentation: async (input) => presentationRowFromInput(input),
       },
       transport: {
         start: async () => {},

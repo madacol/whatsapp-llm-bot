@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 const recordPath = process.env.FAKE_CODEX_RECORD_PATH;
 const keepAlive = setInterval(() => {}, 60 * 60 * 1000);
+keepAlive.unref?.();
 let inputBuffer = Buffer.alloc(0);
 let useContentLengthFraming = false;
 let currentThreadCwd = process.cwd();
@@ -76,6 +77,16 @@ function record(event, value) {
     return;
   }
   fs.appendFileSync(recordPath, `${JSON.stringify({ event, value })}\n`);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown>}
+ */
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? /** @type {Record<string, unknown>} */ (value)
+    : {};
 }
 
 /**
@@ -405,7 +416,8 @@ async function handleMessage(parsed) {
     return;
   }
   const message = /** @type {Record<string, unknown>} */ (parsed);
-  const { id, method, params } = message;
+  const { id, method } = message;
+  const params = asRecord(message.params);
   record("request", { method, params });
   switch (method) {
     case "initialize":
@@ -730,10 +742,11 @@ function drainLineMessages() {
   }
 }
 
-const stdin = fs.createReadStream(null, { fd: 0, autoClose: false });
+const stdin = fs.createReadStream(/** @type {fs.PathLike} */ (/** @type {unknown} */ (null)), { fd: 0, autoClose: false });
 
 stdin.on("data", (chunk) => {
-  inputBuffer = Buffer.concat([inputBuffer, chunk]);
+  const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  inputBuffer = Buffer.concat([inputBuffer, buffer]);
   if (inputBuffer.includes("Content-Length:")) {
     useContentLengthFraming = true;
   }

@@ -2,13 +2,19 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { scheduleRestart } from "../restart/restart-scheduler.js";
 
+/**
+ * @typedef {{ level: "info" | "error", message: string, data: Record<string, unknown> }} TestLogEntry
+ */
+
 function createLogSink() {
-  /** @type {Array<{ level: string, message: string, data: Record<string, unknown> }>} */
+  /** @type {TestLogEntry[]} */
   const entries = [];
   return {
     entries,
     log: {
+      /** @param {string} message @param {Record<string, unknown>} [data] */
       info: (message, data) => entries.push({ level: "info", message, data: data ?? {} }),
+      /** @param {string} message @param {Record<string, unknown>} [data] */
       error: (message, data) => entries.push({ level: "error", message, data: data ?? {} }),
     },
   };
@@ -16,8 +22,8 @@ function createLogSink() {
 
 describe("restart scheduler observability", () => {
   it("logs the scheduled restart and the SIGTERM delivery with the restart id", () => {
-    /** @type {(() => void) | null} */
-    let scheduledCallback = null;
+    /** @type {{ callback: (() => void) | null }} */
+    const scheduled = { callback: null };
     /** @type {Array<{ pid: number, signal: NodeJS.Signals }>} */
     const killed = [];
     const { entries, log } = createLogSink();
@@ -29,7 +35,7 @@ describe("restart scheduler observability", () => {
       log,
       setTimeoutFn: (callback, delayMs) => {
         assert.equal(delayMs, 5);
-        scheduledCallback = callback;
+        scheduled.callback = callback;
         return { unref: () => {} };
       },
       killFn: (pid, signal) => {
@@ -37,8 +43,11 @@ describe("restart scheduler observability", () => {
       },
     });
 
-    assert.equal(typeof scheduledCallback, "function");
-    scheduledCallback?.();
+    const scheduledCallback = scheduled.callback;
+    if (typeof scheduledCallback !== "function") {
+      assert.fail("expected restart callback to be scheduled");
+    }
+    scheduledCallback();
 
     assert.deepEqual(killed, [{ pid: 1234, signal: "SIGTERM" }]);
     assert.deepEqual(entries.map((entry) => ({

@@ -76,6 +76,9 @@ describe("prompt media augmentation", () => {
     assert.equal(latest.content[1].text.includes("[Audio description:"), false);
 
     const [request] = mockServer.getRequests();
+    if (!request || typeof request !== "object" || !("messages" in request)) {
+      assert.fail("expected captured LLM request with messages");
+    }
     const allText = JSON.stringify(request.messages);
     assert.ok(allText.includes("New context about markdown table image chunks."), "Should keep context after /clear");
     assert.ok(!allText.includes(".git-local"), "Should drop context before /clear");

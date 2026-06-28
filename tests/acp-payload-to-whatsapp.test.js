@@ -66,12 +66,36 @@ async function waitFor(predicate) {
 }
 
 /**
+ * @param {Record<string, unknown>} payload
+ * @returns {unknown}
+ */
+function acpSessionUpdate(payload) {
+  const update = payload.update;
+  if (!update || typeof update !== "object") {
+    return undefined;
+  }
+  return /** @type {{ sessionUpdate?: unknown }} */ (update).sessionUpdate;
+}
+
+/**
+ * @param {Record<string, unknown> | undefined} msg
+ * @returns {unknown}
+ */
+function messageEditId(msg) {
+  const edit = msg?.edit;
+  if (!edit || typeof edit !== "object") {
+    return undefined;
+  }
+  return /** @type {{ id?: unknown }} */ (edit).id;
+}
+
+/**
  * @param {{
  *   sock: ReturnType<typeof createMockSock>["sock"],
  *   chatId: string,
  *   cwd: string | null,
  *   visibility: import("../chat-output-visibility.js").OutputVisibility,
- *   outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *   outboundEvents: Array<{ via: "send" | "reply", event: OutboundEvent }>,
  *   pinnedStatusDelivery: Array<Record<string, unknown>>,
  *   reactionRuntime?: import("../whatsapp/runtime/reaction-runtime.js").ReactionRuntime,
  * }} input
@@ -115,7 +139,7 @@ function buildObservedWhatsAppHooks(input) {
  *   trace: {
  *     acpPayloads: Record<string, unknown>[],
  *     runtimeEvents: Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>,
- *     outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *     outboundEvents: Array<{ via: "send" | "reply", event: OutboundEvent }>,
  *     pinnedStatusDelivery: Array<Record<string, unknown>>,
  *     reactionRuntime?: import("../whatsapp/runtime/reaction-runtime.js").ReactionRuntime,
  *   },
@@ -128,7 +152,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
   const reactionRuntime = options.enableInspectReactions ? createReactionRuntime() : undefined;
   /** @type {Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>} */
   const runtimeEvents = [];
-  /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
+  /** @type {Array<{ via: "send" | "reply", event: OutboundEvent }>} */
   const outboundEvents = [];
   /** @type {Array<Record<string, unknown>>} */
   const pinnedStatusDelivery = [];
@@ -186,7 +210,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
  *   relayed: Array<{ chatId: string, msg: Record<string, unknown>, opts: Record<string, unknown> }>,
  *   trace: {
  *     adapterEvents: Array<{ type: string, provider: string } & Record<string, unknown>>,
- *     outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *     outboundEvents: Array<{ via: "send" | "reply", event: OutboundEvent }>,
  *     pinnedStatusDelivery: Array<Record<string, unknown>>,
  *   },
  * }>}
@@ -197,7 +221,7 @@ async function runAcpMockProcessToWhatsApp() {
   const { sock, sent, relayed } = createMockSock();
   /** @type {Array<{ type: string, provider: string } & Record<string, unknown>>} */
   const adapterEvents = [];
-  /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
+  /** @type {Array<{ via: "send" | "reply", event: OutboundEvent }>} */
   const outboundEvents = [];
   /** @type {Array<Record<string, unknown>>} */
   const pinnedStatusDelivery = [];
@@ -205,7 +229,7 @@ async function runAcpMockProcessToWhatsApp() {
     sock,
     chatId,
     cwd: workdir,
-    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true, usage: true },
+    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
     outboundEvents,
     pinnedStatusDelivery,
   });
@@ -264,7 +288,7 @@ async function runAcpMockProcessToWhatsApp() {
  *   relayed: Array<{ chatId: string, msg: Record<string, unknown>, opts: Record<string, unknown> }>,
  *   trace: {
  *     adapterEvents: Array<{ type: string, provider: string } & Record<string, unknown>>,
- *     outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *     outboundEvents: Array<{ via: "send" | "reply", event: OutboundEvent }>,
  *     pinnedStatusDelivery: Array<Record<string, unknown>>,
  *   },
  * }>}
@@ -275,7 +299,7 @@ async function runFakeCodexSubagentChildToolsToWhatsApp() {
   const { sock, sent, relayed } = createMockSock();
   /** @type {Array<{ type: string, provider: string } & Record<string, unknown>>} */
   const adapterEvents = [];
-  /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
+  /** @type {Array<{ via: "send" | "reply", event: OutboundEvent }>} */
   const outboundEvents = [];
   /** @type {Array<Record<string, unknown>>} */
   const pinnedStatusDelivery = [];
@@ -283,7 +307,7 @@ async function runFakeCodexSubagentChildToolsToWhatsApp() {
     sock,
     chatId,
     cwd: workdir,
-    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true, usage: true, subagents: true },
+    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true, subagents: true },
     outboundEvents,
     pinnedStatusDelivery,
   });
@@ -420,7 +444,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       },
     ], { chatId: "acp-payload-tool@s.whatsapp.net" });
 
-    assert.deepEqual(trace.acpPayloads.map((payload) => payload.update?.sessionUpdate), ["tool_call", "tool_call_update"]);
+    assert.deepEqual(trace.acpPayloads.map(acpSessionUpdate), ["tool_call", "tool_call_update"]);
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started", "tool.completed"]);
     assert.deepEqual(trace.outboundEvents.map((entry) => [entry.via, entry.event.kind]), [
       ["send", "runtime_event"],
@@ -487,7 +511,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
 
     const texts = sent.map((entry) => typeof entry.msg.text === "string" ? entry.msg.text : "");
 
-    assert.deepEqual(trace.acpPayloads.map((payload) => payload.update?.sessionUpdate), [
+    assert.deepEqual(trace.acpPayloads.map(acpSessionUpdate), [
       "agent_message_chunk",
       "plan",
       "tool_call_update",
@@ -750,7 +774,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     const { sock, sent } = createMockSock();
     /** @type {Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>} */
     const runtimeEvents = [];
-    /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
+    /** @type {Array<{ via: "send" | "reply", event: OutboundEvent }>} */
     const outboundEvents = [];
     /** @type {Array<Record<string, unknown>>} */
     const pinnedStatusDelivery = [];
@@ -759,7 +783,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       sock,
       chatId,
       cwd,
-      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, usage: true },
+      visibility: DEFAULT_OUTPUT_VISIBILITY,
       outboundEvents,
       pinnedStatusDelivery,
     });
@@ -1042,7 +1066,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       change: {
         path: "/repo/acp-fs-write.txt",
         kind: "update",
-        source: "direct-write",
+        source: "tool",
         cwd,
       },
     }), "📝 *File*  `acp-fs-write.txt`");
@@ -1172,7 +1196,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       },
     ], {
       chatId: "acp-payload-read-location@s.whatsapp.net",
-      workdir: "/repo",
+      cwd: "/repo",
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
@@ -1199,7 +1223,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       },
     ], {
       chatId: "acp-payload-read-location-range@s.whatsapp.net",
-      workdir: "/repo",
+      cwd: "/repo",
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
@@ -1234,7 +1258,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       },
     ], {
       chatId: "acp-payload-codex-read-location-range@s.whatsapp.net",
-      workdir: "/repo",
+      cwd: "/repo",
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
@@ -1426,7 +1450,9 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
-    assert.deepEqual(trace.runtimeEvents[0]?.tool, {
+    const [toolStartedEvent] = trace.runtimeEvents;
+    assert.equal(toolStartedEvent?.type, "tool.started");
+    assert.deepEqual(toolStartedEvent.tool, {
       id: "search-real-shape",
       name: "Search",
       arguments: {
@@ -1712,7 +1738,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ]);
     assert.equal(sent[0]?.msg.text, "🔧 *Shell*  `pnpm type-check`");
     assert.equal(sent[1]?.msg.text, "👍 🔧 *Shell*  `pnpm type-check`");
-    assert.equal(sent[1]?.msg.edit?.id, "msg-1");
+    assert.equal(messageEditId(sent[1]?.msg), "msg-1");
     assert.equal(sent.some((entry) => String(entry.msg.text ?? "").includes("Guardian warning")), false);
   });
 
@@ -1749,7 +1775,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     });
 
     assert.equal(sent[1]?.msg.text, "👎 🔧 *Shell*  `rm -rf actions`");
-    assert.equal(sent[1]?.msg.edit?.id, "msg-1");
+    assert.equal(messageEditId(sent[1]?.msg), "msg-1");
     assert.equal(sent.some((entry) => String(entry.msg.text ?? "").includes("Guardian warning")), false);
   });
 

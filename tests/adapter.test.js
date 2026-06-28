@@ -58,6 +58,34 @@ function withTimeout(promise, timeoutMs) {
 }
 
 /**
+ * @param {Record<string, unknown>} message
+ * @returns {BaileysMessage}
+ */
+function asBaileysMessage(message) {
+  return /** @type {BaileysMessage} */ (/** @type {unknown} */ (message));
+}
+
+/**
+ * @param {IncomingContentBlock[]} content
+ * @returns {QuoteContentBlock}
+ */
+function requireQuoteBlock(content) {
+  const quote = content.find((block) => block.type === "quote");
+  assert.ok(quote && quote.type === "quote", "Should have quote block");
+  return quote;
+}
+
+/**
+ * @template {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} T
+ * @param {T | undefined} block
+ * @returns {T & { path: string }}
+ */
+function requireStoredMediaBlock(block) {
+  assert.ok(block && "path" in block && typeof block.path === "string", "Expected stored media block");
+  return /** @type {T & { path: string }} */ (block);
+}
+
+/**
  * @param {object} params
  * @param {string} params.chatId
  * @param {string} params.messageId
@@ -108,7 +136,7 @@ function createHdImageMessage({ chatId, messageId, pairedMediaType, parentMessag
 /**
  * Create a mock Baileys socket and confirm registry for testing.
  * @returns {{
- *   sock: any,
+ *   sock: WhatsAppChannelInputSocketPort,
  *   registry: ReturnType<typeof createConfirmRuntime>,
  *   sentMessages: Array<{ chatId: string, msg: any, key: { id: string, remoteJid: string }, options?: Record<string, unknown> }>,
  *   reactions: any[],
@@ -121,16 +149,18 @@ function createMockSock() {
   /** @type {any[]} */
   const reactions = [];
 
+  /** @type {WhatsAppChannelInputSocketPort} */
   const sock = {
     sendMessage: async (/** @type {string} */ chatId, /** @type {any} */ msg, /** @type {Record<string, unknown> | undefined} */ options) => {
       if (msg.react) {
         reactions.push(msg.react);
-        return null;
+        return undefined;
       }
       const key = { id: `msg-${sentMessages.length}`, remoteJid: chatId };
       sentMessages.push({ chatId, msg, key, options });
-      return { key };
+      return /** @type {BaileysMessage} */ ({ key });
     },
+    sendPresenceUpdate: async () => {},
   };
 
   const registry = createConfirmRuntime();
@@ -191,11 +221,11 @@ function createPresenceTurnIo({ messageId, defaultLeaseTtlMs, pulseIntervalMs })
   const confirmRuntime = createConfirmRuntime();
   const io = createChannelInputIo({
     sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-      sendMessage: async (chatId, msg, options) => {
+      sendMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown> | undefined} */ options) => {
         sentMessages.push({ chatId, msg, options });
-        return { key: { id: `sent-${chatId}`, remoteJid: chatId } };
+        return /** @type {BaileysMessage} */ ({ key: { id: `sent-${chatId}`, remoteJid: chatId } });
       },
-      sendPresenceUpdate: async (presence, chatId) => {
+      sendPresenceUpdate: async (/** @type {"composing" | "paused"} */ presence, /** @type {string} */ chatId) => {
         presenceUpdates.push({ presence, chatId });
       },
     })),
@@ -223,7 +253,7 @@ function createPresenceTurnIo({ messageId, defaultLeaseTtlMs, pulseIntervalMs })
 
 describe("getMessageContent", () => {
   it("extracts quoted message with reply text", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "My reply",
@@ -237,11 +267,11 @@ describe("getMessageContent", () => {
 
     assert.ok(content.some(b => b.type === "quote"), "Should have quote block");
     assert.ok(
-      content.some(b => b.type === "text" && /** @type {Partial<BaileysMessage>} */ (b).text === "My reply"),
+      content.some(b => b.type === "text" && b.text === "My reply"),
       "Should have reply text",
     );
 
-    const quote = /** @type {Partial<BaileysMessage>} */ (content.find(b => b.type === "quote"));
+    const quote = requireQuoteBlock(content);
     assert.ok(
       quote.content.some(b => b.type === "text" && b.text === "Original"),
       "Quote should contain original text",
@@ -249,7 +279,7 @@ describe("getMessageContent", () => {
   });
 
   it("extracts quoted extendedTextMessage", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "replying",
@@ -263,7 +293,7 @@ describe("getMessageContent", () => {
     });
     const { content } = await getMessageContent(msg);
 
-    const quote = /** @type {Partial<BaileysMessage>} */ (content.find(b => b.type === "quote"));
+    const quote = requireQuoteBlock(content);
     assert.ok(quote, "Should have quote block");
     assert.ok(
       quote.content.some(b => b.type === "text" && b.text === "original extended"),
@@ -293,8 +323,8 @@ describe("getMessageContent", () => {
     );
 
     assert.ok(capturedTurn, "Handler should receive the user reply");
-    const quote = capturedTurn.content.find((block) => block.type === "quote");
-    assert.ok(quote, "Stable bot answer quote should remain available as context");
+    const turn = /** @type {ChannelInput} */ (capturedTurn);
+    const quote = requireQuoteBlock(turn.content);
     assert.ok(
       quote.content.some((block) => block.type === "text" && block.text === "🤖 The build passed."),
     );
@@ -323,15 +353,16 @@ describe("getMessageContent", () => {
     );
 
     assert.ok(capturedTurn, "Handler should receive the user reply");
-    assert.equal(capturedTurn.facts.repliedToBot, true);
-    assert.equal(capturedTurn.facts.quotedSenderId, "bot-123");
+    const turn = /** @type {ChannelInput} */ (capturedTurn);
+    assert.equal(turn.facts.repliedToBot, true);
+    assert.equal(turn.facts.quotedSenderId, "bot-123");
 
-    const quote = capturedTurn.content.find((block) => block.type === "quote");
+    const quote = turn.content.find((block) => block.type === "quote");
     assert.equal(quote, undefined);
   });
 
   it("extracts image caption from quoted message", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "About this image",
@@ -345,7 +376,7 @@ describe("getMessageContent", () => {
     });
     const { content } = await getMessageContent(msg);
 
-    const quote = /** @type {Partial<BaileysMessage>} */ (content.find(b => b.type === "quote"));
+    const quote = requireQuoteBlock(content);
     assert.ok(quote);
     assert.ok(
       quote.content.some(b => b.type === "text" && b.text === "Image caption"),
@@ -353,20 +384,20 @@ describe("getMessageContent", () => {
   });
 
   it("extracts document caption as text", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: { documentMessage: { caption: "See attached" } },
     });
     const { content } = await getMessageContent(msg);
 
     assert.ok(
-      content.some(b => b.type === "text" && /** @type {Partial<BaileysMessage>} */ (b).text === "See attached"),
+      content.some(b => b.type === "text" && b.text === "See attached"),
     );
   });
 
   it("downloads direct documents into file blocks", async () => {
     const fakeBuffer = Buffer.from("fake-pdf-data");
     const mockDownload = async () => fakeBuffer;
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         documentMessage: {
           mimetype: "application/pdf",
@@ -378,8 +409,7 @@ describe("getMessageContent", () => {
     });
     const { content } = await getMessageContent(msg, mockDownload);
 
-    const fileBlock = /** @type {FileContentBlock | undefined} */ (content.find((b) => b.type === "file"));
-    assert.ok(fileBlock, "Should contain file block");
+    const fileBlock = requireStoredMediaBlock(/** @type {FileContentBlock | undefined} */ (content.find((b) => b.type === "file")));
     assert.equal(fileBlock.mime_type, "application/pdf");
     assert.equal(fileBlock.file_name, "report.pdf");
     assert.match(fileBlock.path, /^[a-f0-9]{64}\.pdf$/);
@@ -391,7 +421,7 @@ describe("getMessageContent", () => {
   });
 
   it("extracts quotedSenderId from contextInfo participant", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "My reply",
@@ -409,7 +439,7 @@ describe("getMessageContent", () => {
   it("downloads quoted image into quote block", async () => {
     const fakeBuffer = Buffer.from("fake-image-data");
     const mockDownload = async () => fakeBuffer;
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "What's this?",
@@ -440,7 +470,7 @@ describe("getMessageContent", () => {
   it("downloads quoted video into quote block", async () => {
     const fakeBuffer = Buffer.from("fake-video-data");
     const mockDownload = async () => fakeBuffer;
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "nice video",
@@ -464,7 +494,7 @@ describe("getMessageContent", () => {
   it("downloads quoted audio into quote block", async () => {
     const fakeBuffer = Buffer.from("fake-audio-data");
     const mockDownload = async () => fakeBuffer;
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "what did you say?",
@@ -488,7 +518,7 @@ describe("getMessageContent", () => {
   it("downloads quoted documents into quote blocks", async () => {
     const fakeBuffer = Buffer.from("fake-doc-data");
     const mockDownload = async () => fakeBuffer;
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "please review",
@@ -509,8 +539,7 @@ describe("getMessageContent", () => {
 
     const quote = /** @type {QuoteContentBlock} */ (content.find((b) => b.type === "quote"));
     assert.ok(quote, "Should have quote block");
-    const fileBlock = /** @type {FileContentBlock | undefined} */ (quote.content.find((b) => b.type === "file"));
-    assert.ok(fileBlock, "Quote should contain file block");
+    const fileBlock = requireStoredMediaBlock(/** @type {FileContentBlock | undefined} */ (quote.content.find((b) => b.type === "file")));
     assert.equal(fileBlock.mime_type, "application/pdf");
     assert.equal(fileBlock.file_name, "quoted.pdf");
     assert.deepEqual(await readMediaBuffer(fileBlock.path), fakeBuffer);
@@ -522,7 +551,7 @@ describe("getMessageContent", () => {
 
   it("falls back to text placeholder when quoted media download fails", async () => {
     const mockDownload = async () => { throw new Error("download failed"); };
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: {
         extendedTextMessage: {
           text: "What's this?",
@@ -545,7 +574,7 @@ describe("getMessageContent", () => {
   });
 
   it("returns undefined quotedSenderId when no quote", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
+    const msg = asBaileysMessage({
       message: { conversation: "Hello" },
     });
     const { quotedSenderId } = await getMessageContent(msg);
@@ -556,7 +585,7 @@ describe("getMessageContent", () => {
     const chatId = "multi-hd@s.whatsapp.net";
     const SD_PARENT = proto.ContextInfo.PairedMediaType.SD_IMAGE_PARENT;
     const HD_CHILD = proto.ContextInfo.PairedMediaType.HD_IMAGE_CHILD;
-    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
+    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(String(message.key.id ?? ""));
     /** @type {ImageContentBlock[]} */
     const parentImages = [];
     const confirmRegistry = createConfirmRuntime();
@@ -617,7 +646,8 @@ describe("getMessageContent", () => {
       messages: [],
       mediaRegistry: new Map([["stored-parent", reattachedImage]]),
     });
-    assert.ok(reattachedImage.getHd instanceof Promise, "WhatsApp ChannelInputIO should reattach pending HD promises");
+    const reattachedGetHd = /** @type {unknown} */ (reattachedImage.getHd);
+    assert.ok(reattachedGetHd instanceof Promise, "WhatsApp ChannelInputIO should reattach pending HD promises");
 
     await adaptIncomingMessage(
       createHdImageMessage({
@@ -641,7 +671,7 @@ describe("getMessageContent", () => {
     assert.equal(resolvedHd.type, "image");
     assert.equal(resolvedHd.mime_type, "image/jpeg");
     assert.equal(await readBlockBase64(resolvedHd), Buffer.from("hd-child-1").toString("base64"));
-    assert.deepEqual(await withTimeout(reattachedImage.getHd, 50), resolvedHd);
+    assert.deepEqual(await withTimeout(reattachedGetHd, 50), resolvedHd);
     assert.equal(await withTimeout(secondImage.getHd ?? Promise.resolve(null), 50), "timeout");
   });
 });
@@ -711,7 +741,7 @@ describe("adaptIncomingMessages", () => {
     }));
     const confirmRegistry = createConfirmRuntime();
     const selectRegistry = createSelectRuntime();
-    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
+    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(String(message.key.id ?? ""));
     /** @type {ChannelInput | null} */
     let receivedTurn = null;
 
@@ -757,11 +787,12 @@ describe("adaptIncomingMessages", () => {
     );
 
     assert.ok(receivedTurn);
-    const imageBlocks = receivedTurn.content.filter((block) => block.type === "image");
+    const turn = /** @type {ChannelInput} */ (receivedTurn);
+    const imageBlocks = turn.content.filter((block) => block.type === "image");
     assert.equal(imageBlocks.length, 4);
-    assert.equal(receivedTurn.chatId, chatId);
+    assert.equal(turn.chatId, chatId);
     assert.deepEqual(
-      await Promise.all(imageBlocks.map((block) => readMediaBuffer(block.path))),
+      await Promise.all(imageBlocks.map((block) => readMediaBuffer(requireStoredMediaBlock(block).path))),
       ["image-1", "image-2", "image-3", "image-4"].map((id) => Buffer.from(id)),
     );
   });
@@ -799,7 +830,7 @@ describe("createChannelInputIo", () => {
   it("routes outbound replies through the latest live socket after reconnect", async () => {
     const oldSocket = createMockSock();
     const newSocket = createMockSock();
-    /** @type {BaileysSocket | null} */
+    /** @type {WhatsAppChannelInputSocketPort | null} */
     let currentSocket = oldSocket.sock;
 
     const io = createChannelInputIo({
@@ -858,8 +889,10 @@ describe("createChannelInputIo", () => {
       content: "Restart signal sent.",
     });
 
-    assert.equal(typeof handle?.transportHandleId, "string");
-    const persisted = await store.getWhatsAppEditHandle(handle.transportHandleId);
+    assert.ok(handle, "Expected reply to return a durable message handle");
+    const transportHandleId = handle.transportHandleId;
+    assert.ok(typeof transportHandleId === "string", "Expected reply handle to include a transport handle id");
+    const persisted = await store.getWhatsAppEditHandle(transportHandleId);
     assert.equal(persisted?.chat_id, chatId);
     assert.equal(persisted?.message_kind, "text");
   });
@@ -1128,7 +1161,7 @@ describe("HD receive integration", () => {
       user: { id: "bot@s.whatsapp.net" },
       signalRepository: {
         lidMapping: {
-          getPNForLID: async (lid) => lid === rawChatId ? normalizedChatId : null,
+          getPNForLID: async (/** @type {string} */ lid) => lid === rawChatId ? normalizedChatId : null,
         },
       },
       sendPresenceUpdate: async () => {},
@@ -1170,7 +1203,7 @@ describe("HD receive integration", () => {
       signalRepository: {
         lidMapping: {
           mappingCache: new Map([[rawChatId, normalizedChatId]]),
-          async getPNForLID(lid) {
+          async getPNForLID(/** @type {string} */ lid) {
             return this.mappingCache.get(lid) ?? null;
           },
         },
@@ -1217,13 +1250,13 @@ describe("HD receive integration", () => {
       user: { id: "bot@s.whatsapp.net" },
       signalRepository: {
         lidMapping: {
-          getPNForLID: async (lid) => lid === rawChatId ? normalizedChatId : null,
+          getPNForLID: async (/** @type {string} */ lid) => lid === rawChatId ? normalizedChatId : null,
         },
       },
       sendPresenceUpdate: async () => {},
       readMessages: async () => {},
     }));
-    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
+    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(String(message.key.id ?? ""));
 
     await adaptIncomingMessage(
       createHdImageMessage({ chatId: rawChatId, messageId: parentMessageId, pairedMediaType: SD_PARENT }),
@@ -1238,7 +1271,9 @@ describe("HD receive integration", () => {
       mockDownload,
     );
 
-    assert.ok(parentImage?.getHd, "Expected SD parent to expose a pending HD promise");
+    const sdParent = /** @type {ImageContentBlock} */ (/** @type {unknown} */ (parentImage));
+    assert.ok(sdParent, "Expected SD parent image to be captured");
+    assert.ok(sdParent.getHd, "Expected SD parent to expose a pending HD promise");
 
     await adaptIncomingMessage(
       createHdImageMessage({
@@ -1257,7 +1292,7 @@ describe("HD receive integration", () => {
       mockDownload,
     );
 
-    const resolvedHd = await withTimeout(parentImage.getHd, 100);
+    const resolvedHd = await withTimeout(sdParent.getHd, 100);
     assert.ok(resolvedHd && resolvedHd !== "timeout");
     assert.equal(resolvedHd.type, "image");
     assert.equal(resolvedHd.mime_type, "image/jpeg");
@@ -1334,7 +1369,7 @@ describe("HD receive integration", () => {
       confirmRegistry,
       userResponseRegistry,
       undefined,
-      async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id),
+      async (/** @type {BaileysMessage} */ message) => Buffer.from(String(message.key.id ?? "")),
     );
 
     const { rows } = await db.sql`SELECT message_data FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp ASC`;
@@ -1503,7 +1538,7 @@ describe("createConfirmRuntime", () => {
   it("uses the latest live socket when a confirm prompt is sent after reconnect", async () => {
     const oldSocket = createMockSock();
     const newSocket = createMockSock();
-    /** @type {BaileysSocket | null} */
+    /** @type {WhatsAppChannelInputSocketPort | null} */
     let currentSocket = oldSocket.sock;
 
     const confirm = oldSocket.registry.createConfirm(() => currentSocket, "test-chat");

@@ -26,6 +26,17 @@ before(async () => {
   await ensureChatStoreSchema(db);
 });
 
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
+function requireNumber(value) {
+  if (typeof value !== "number") {
+    assert.fail(`expected numeric id, got ${typeof value}`);
+  }
+  return value;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // extractTextFromMessage
 // ═══════════════════════════════════════════════════════════════════
@@ -199,7 +210,13 @@ describe("findMemories", () => {
   });
 
   it("finds memories by embedding similarity", async () => {
+    /**
+     * @param {number} seed
+     * @param {number} [dims]
+     * @returns {number[]}
+     */
     function fakeEmbedding2(seed, dims = 3) {
+      /** @type {number[]} */
       const vec = [];
       for (let i = 0; i < dims; i++) vec.push(Math.sin(seed + i));
       const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
@@ -314,11 +331,12 @@ describe("listMemories", () => {
 describe("deleteMemory", () => {
   it("deletes a memory by id and chatId", async () => {
     await store.createChat("mem-del-1");
-    const { rows: [{ id }] } = await db.sql`
+    const { rows: [row] } = await db.sql`
       INSERT INTO memories (chat_id, content, search_text)
       VALUES ('mem-del-1', 'To be deleted', 'To be deleted')
       RETURNING id
     `;
+    const id = requireNumber(row?.id);
 
     const deleted = await deleteMemory(db, "mem-del-1", id);
     assert.equal(deleted, true);
@@ -336,11 +354,12 @@ describe("deleteMemory", () => {
   it("does not delete memory belonging to a different chat", async () => {
     await store.createChat("mem-del-a");
     await store.createChat("mem-del-b");
-    const { rows: [{ id }] } = await db.sql`
+    const { rows: [row] } = await db.sql`
       INSERT INTO memories (chat_id, content, search_text)
       VALUES ('mem-del-a', 'Chat A only', 'Chat A only')
       RETURNING id
     `;
+    const id = requireNumber(row?.id);
 
     const deleted = await deleteMemory(db, "mem-del-b", id);
     assert.equal(deleted, false);

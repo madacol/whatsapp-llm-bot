@@ -227,8 +227,8 @@ export function whatsappInboundToBaileys(options) {
     const db = await createTestDb();
     setDb("./pgdata/root", db);
     const events = Array.isArray(payload) ? payload : [payload];
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {{ value: ((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null }} */
+    const processEvents = { value: null };
     /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {ChannelInput[]} */
@@ -236,10 +236,15 @@ export function whatsappInboundToBaileys(options) {
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
       ev: {
+        /** @param {(events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>} handler */
         process(handler) {
-          processEvents = handler;
+          processEvents.value = handler;
         },
       },
+      /**
+       * @param {string} targetChatId
+       * @param {Record<string, unknown>} message
+       */
       sendMessage: async (targetChatId, message) => {
         const id = `sent-${sentMessages.length + 1}`;
         sentMessages.push({ id, chatId: targetChatId, message });
@@ -266,13 +271,14 @@ export function whatsappInboundToBaileys(options) {
     });
 
     try {
-      if (!processEvents) {
+      const processRegisteredEvents = processEvents.value;
+      if (!processRegisteredEvents) {
         throw new Error("Expected connection event processor to be registered");
       }
-      await processEvents({ "connection.update": { connection: "open" } });
+      await processRegisteredEvents({ "connection.update": { connection: "open" } });
       for (const event of events) {
         assert.ok(event && typeof event === "object", `Expected WhatsApp event object, got ${JSON.stringify(event)}`);
-        await processEvents(/** @type {Partial<import("@whiskeysockets/baileys").BaileysEventMap>} */ (event));
+        await processRegisteredEvents(/** @type {Partial<import("@whiskeysockets/baileys").BaileysEventMap>} */ (event));
       }
       await waitForCondition(
         () => sentMessages.length > 0,

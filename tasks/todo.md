@@ -2,7 +2,6 @@
 
 ## Active
 
-- Investigate whether tests should be type-checked. [details](test-type-checking.md)
 
 ## Todo
 

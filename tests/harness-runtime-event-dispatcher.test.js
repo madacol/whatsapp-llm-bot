@@ -37,11 +37,6 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.equal("diagnosticRaw" in event, false);
     assert.equal("raw" in event, false);
     assert.deepEqual(getHarnessRuntimeDiagnosticRaw({
-      type: "content.delta",
-      provider: "codex",
-      itemId: "assistant-1",
-      text: "Done",
-      contentType: "markdown",
       diagnosticRaw: {
         source: "acp.jsonrpc",
         method: "session/update",

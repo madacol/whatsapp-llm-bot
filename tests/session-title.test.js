@@ -6,6 +6,38 @@ import {
   resetHarnessRegistryForTests,
 } from "../harnesses/index.js";
 
+/**
+ * @param {Partial<import("../store.js").ChatRow> & { chat_id: string }} overrides
+ * @returns {import("../store.js").ChatRow}
+ */
+function createChatRow(overrides) {
+  return {
+    is_enabled: true,
+    system_prompt: null,
+    model: null,
+    respond_on_any: false,
+    respond_on_mention: true,
+    respond_on_reply: true,
+    respond_on: "mention",
+    debug: false,
+    media_to_text_models: {},
+    model_roles: {},
+    memory: false,
+    memory_threshold: null,
+    active_persona: null,
+    harness: null,
+    harness_cwd: null,
+    output_visibility: {},
+    harness_config: {},
+    harness_session_id: null,
+    harness_session_kind: null,
+    harness_session_history: [],
+    harness_fork_stack: [],
+    timestamp: "2026-03-23T20:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("generateSessionTitle", () => {
   it("uses the active harness instance text generator when available", async () => {
     resetHarnessRegistryForTests();
@@ -48,7 +80,7 @@ describe("generateSessionTitle", () => {
     });
 
     const title = await generateSessionTitle({
-      llmClient: /** @type {LlmClient} */ ({
+      llmClient: /** @type {LlmClient} */ (/** @type {unknown} */ ({
         chat: {
           completions: {
             create: async () => {
@@ -56,8 +88,8 @@ describe("generateSessionTitle", () => {
             },
           },
         },
-      }),
-      chatInfo: /** @type {import("../store.js").ChatRow} */ ({
+      })),
+      chatInfo: createChatRow({
         chat_id: "chat-1",
         harness: "title-test",
         harness_config: {

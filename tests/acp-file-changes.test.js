@@ -15,6 +15,15 @@ import {
   updateAcpFileChangeBaseline,
 } from "../harnesses/acp-file-changes.js";
 
+/**
+ * @param {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEventInput[]} events
+ * @returns {Array<Extract<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEventInput, { type: "file-change.completed" }>>}
+ */
+function requireFileChangeEvents(events) {
+  assert.ok(events.every((event) => event.type === "file-change.completed"));
+  return /** @type {Array<Extract<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEventInput, { type: "file-change.completed" }>>} */ (events);
+}
+
 describe("ACP file changes", () => {
   it("resolves provider paths against the run workdir", () => {
     assert.equal(resolveAcpFileChangePath("/tmp/acp-work", "src/file.js"), "/tmp/acp-work/src/file.js");
@@ -192,8 +201,8 @@ describe("ACP file changes", () => {
     });
 
     assert.equal(changes.length, 26);
-    assert.ok(changes.every((event) => event.type === "file-change.completed"));
-    assert.ok(changes.every((event) => event.change.source === "snapshot"));
+    const fileChanges = requireFileChangeEvents(changes);
+    assert.ok(fileChanges.every((event) => event.change.source === "snapshot"));
   });
 
   it("snapshots and diffs explicit paths outside the run workdir", async () => {
@@ -219,18 +228,19 @@ describe("ACP file changes", () => {
       diagnosticRaw: { source: "test" },
     });
 
-    assert.deepEqual(changes.map((event) => [event.change.path, event.change.kind]), [
+    const fileChanges = requireFileChangeEvents(changes);
+    assert.deepEqual(fileChanges.map((event) => [event.change.path, event.change.kind]), [
       [updatedPath, "update"],
       [addedPath, "add"],
       [deletedPath, "delete"],
     ]);
-    assert.deepEqual(changes.map((event) => [event.change.oldText, event.change.newText]), [
+    assert.deepEqual(fileChanges.map((event) => [event.change.oldText, event.change.newText]), [
       ["old skill\n", "new skill\n"],
       [undefined, "new file\n"],
       ["delete me\n", undefined],
     ]);
-    assert.match(String(changes[0].change.diff ?? ""), /-old skill/);
-    assert.match(String(changes[0].change.diff ?? ""), /\+new skill/);
+    assert.match(String(fileChanges[0]?.change.diff ?? ""), /-old skill/);
+    assert.match(String(fileChanges[0]?.change.diff ?? ""), /\+new skill/);
   });
 
   it("detects ignored ACP file changes only from explicit path policies", async () => {

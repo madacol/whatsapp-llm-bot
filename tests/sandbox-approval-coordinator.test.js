@@ -7,6 +7,7 @@ import {
   resolveSandboxApprovalDirectory,
 } from "../harnesses/sandbox-approval-coordinator.js";
 
+/** @type {import("../harnesses/sandbox-approval.js").SandboxEscapeRequest} */
 const SAMPLE_REQUEST = {
   toolName: "Shell",
   kind: "command",
@@ -80,7 +81,7 @@ describe("resolveSandboxApprovalDirectory", () => {
   it("uses the parent directory for file targets", () => {
     assert.equal(resolveSandboxApprovalDirectory({
       toolName: "write_file",
-      kind: "path",
+      kind: /** @type {const} */ ("path"),
       summary: "Access `/repo/shared/out.txt` outside the workspace `/repo/project`.",
       target: "../shared/out.txt",
       resolvedTarget: "/repo/shared/out.txt",

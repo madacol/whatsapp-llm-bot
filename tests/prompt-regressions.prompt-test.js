@@ -61,6 +61,10 @@ async function resolveFixtures(messages) {
       resolved.push(msg);
       continue;
     }
+    if (msg.role !== "user") {
+      resolved.push(msg);
+      continue;
+    }
     const resolvedContent = await Promise.all(
       msg.content.map(async (block) => {
         if (

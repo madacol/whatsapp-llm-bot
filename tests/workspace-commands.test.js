@@ -9,7 +9,7 @@ process.env.MODEL = "mock-model";
 import { createChannelInput, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
 
-/** @type {PGlite} */
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let db;
 /** @type {Awaited<ReturnType<typeof import("../store.js").initStore>>} */
 let store;

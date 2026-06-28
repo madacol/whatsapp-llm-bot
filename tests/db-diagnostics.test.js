@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRuntimeDiagnosticsState, setDefaultRuntimeDiagnosticsStateForTesting } from "../diagnostics-config.js";
+import { DB_CACHE_LOG_ENV, createRuntimeDiagnosticsState, setDefaultRuntimeDiagnosticsStateForTesting } from "../diagnostics-config.js";
 import { getSqliteDb } from "../db.js";
 
 describe("database diagnostics logging", () => {
@@ -25,12 +25,11 @@ describe("database diagnostics logging", () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "db-diagnostics-"));
     const diagnostics = createRuntimeDiagnosticsState({
       configPath: path.join(tempDir, "logging.json"),
-      env: {},
+      env: { [DB_CACHE_LOG_ENV]: "1" },
       reloadIntervalMs: 0,
     });
     setDefaultRuntimeDiagnosticsStateForTesting(diagnostics);
 
-    await diagnostics.update({ dbCacheLog: true });
     const calls = captureWarnLogs(() => {
       getSqliteDb(path.join(tempDir, "loud.sqlite"));
     });

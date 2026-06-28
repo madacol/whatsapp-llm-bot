@@ -17,10 +17,15 @@ const OGGS_MAGIC = Buffer.from("OggS", "ascii");
 const OPUS_HEAD_MAGIC = Buffer.from("OpusHead", "ascii");
 
 /**
+ * @typedef {{ isDirectory: () => boolean, isFile: () => boolean }} PathStat
+ * @typedef {(path: string) => Promise<PathStat>} StatPathFn
+ * @typedef {(path: string) => Promise<Buffer>} ReadFilePathFn
+ * @typedef {(buffer: Buffer, mimeType: string | undefined, blockType: "image" | "video" | "audio" | "file", fileName?: string | undefined) => Promise<string>} WriteStoredMediaFn
+ *
  * @typedef {{
- *   statPath?: typeof stat;
- *   readFilePath?: typeof readFile;
- *   writeStoredMedia?: typeof writeMedia;
+ *   statPath?: StatPathFn;
+ *   readFilePath?: ReadFilePathFn;
+ *   writeStoredMedia?: WriteStoredMediaFn;
  *   makeTempDir?: typeof mkdtemp;
  *   removePath?: typeof rm;
  *   archiveDirectoryToZip?: (sourceDir: string, zipPath: string) => Promise<void>;

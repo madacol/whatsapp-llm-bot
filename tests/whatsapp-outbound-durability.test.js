@@ -1,10 +1,21 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { updateChatConfig } from "../chat-config.js";
+import { initStore } from "../store.js";
+import { createTestDb, seedChat } from "./helpers.js";
 import { createWhatsAppOutboundDurability } from "../whatsapp/outbound/durability.js";
 
 describe("WhatsApp outbound durability", () => {
   it("owns live fallback, replay, output visibility, and queued handle resolution behind one seam", async () => {
+    const db = await createTestDb();
+    const store = await initStore(db);
+    await seedChat(db, "chat-1", { enabled: true });
+    await updateChatConfig("chat-1", (current) => ({
+      ...current,
+      output_visibility: { thinking: false },
+    }));
+
     /** @type {Array<{ chatId: string, payload: unknown }>} */
     const enqueued = [];
     /** @type {Array<{ chatId: string, event: OutboundEvent, outputVisibility: unknown }>} */
@@ -20,9 +31,7 @@ describe("WhatsApp outbound durability", () => {
 
     const durability = createWhatsAppOutboundDurability({
       getSocket: () => socket,
-      store: {
-        getChat: async () => ({ output_visibility: { thinking: false } }),
-      },
+      store,
       persistDelayMs: 0,
       replayDelayMs: 0,
       sleep: async () => {},
@@ -42,7 +51,11 @@ describe("WhatsApp outbound durability", () => {
             kind: "event",
             event: {
               kind: "runtime_event",
-              event: { type: "turn.started" },
+              event: {
+                type: "turn.started",
+                provider: "codex",
+                turn: { id: "turn-1", chatId: "chat-1", status: "started" },
+              },
             },
           }),
         },
@@ -56,7 +69,11 @@ describe("WhatsApp outbound durability", () => {
       chatId: "chat-1",
       event: {
         kind: "runtime_event",
-        event: { type: "turn.started" },
+        event: {
+          type: "turn.started",
+          provider: "codex",
+          turn: { id: "turn-1", chatId: "chat-1", status: "started" },
+        },
       },
     });
 

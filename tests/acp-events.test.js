@@ -2,6 +2,44 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createAcpRuntimeModel, normalizeAcpSessionUpdate } from "../harnesses/acp-events.js";
 
+/**
+ * @param {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEventInput | undefined} event
+ * @returns {import("../harnesses/harness-runtime-events.js").HarnessRuntimeContentDeltaEvent & import("../harnesses/harness-runtime-events.js").HarnessRuntimeDiagnosticInput}
+ */
+function requireContentDeltaEvent(event) {
+  if (event?.type !== "content.delta") {
+    assert.fail(`expected content.delta event, got ${event?.type ?? "none"}`);
+  }
+  return event;
+}
+
+/**
+ * @param {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEventInput | undefined} event
+ * @returns {import("../harnesses/harness-runtime-events.js").HarnessRuntimeUsageEvent}
+ */
+function requireUsageEvent(event) {
+  if (event?.type !== "usage.updated") {
+    assert.fail(`expected usage.updated event, got ${event?.type ?? "none"}`);
+  }
+  return event;
+}
+
+/**
+ * @param {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEventInput | undefined} event
+ * @returns {import("../harnesses/harness-runtime-events.js").HarnessRuntimeToolEvent}
+ */
+function requireToolEvent(event) {
+  if (
+    event?.type !== "tool.started"
+    && event?.type !== "tool.updated"
+    && event?.type !== "tool.completed"
+    && event?.type !== "tool.failed"
+  ) {
+    assert.fail(`expected tool event, got ${event?.type ?? "none"}`);
+  }
+  return event;
+}
+
 describe("ACP event normalization", () => {
   it("normalizes ACP read display facts onto the canonical tool event", () => {
     const events = normalizeAcpSessionUpdate({
@@ -145,10 +183,11 @@ describe("ACP event normalization", () => {
       },
     });
     assert.deepEqual(assistantEvents.map((event) => event.type), ["item.started", "content.delta"]);
-    assert.equal(assistantEvents[1]?.provider, "acp");
-    assert.equal(assistantEvents[1]?.text, "Done.");
-    assert.equal(assistantEvents[1]?.contentType, "markdown");
-    assert.deepEqual(assistantEvents[1]?.diagnosticRaw?.payload, {
+    const assistantDelta = requireContentDeltaEvent(assistantEvents[1]);
+    assert.equal(assistantDelta.provider, "acp");
+    assert.equal(assistantDelta.text, "Done.");
+    assert.equal(assistantDelta.contentType, "markdown");
+    assert.deepEqual(assistantDelta.diagnosticRaw?.payload, {
       sessionId: "s1",
       update: {
         sessionUpdate: "agent_message_chunk",
@@ -383,7 +422,7 @@ describe("ACP event normalization", () => {
   });
 
   it("normalizes Codex ACP camelCase prompt usage", () => {
-    assert.deepEqual(normalizeAcpSessionUpdate({
+    const [event] = normalizeAcpSessionUpdate({
       sessionId: "s1",
       update: {
         sessionUpdate: "usage_update",
@@ -394,7 +433,8 @@ describe("ACP event normalization", () => {
         thoughtTokens: 12,
         contextWindow: 200000,
       },
-    })[0]?.usage, {
+    });
+    assert.deepEqual(requireUsageEvent(event).usage, {
       promptTokens: 3617,
       completionTokens: 22,
       cachedTokens: 11136,
@@ -494,7 +534,7 @@ describe("ACP event normalization", () => {
         content: [{ type: "text", text: "ok" }],
       },
     });
-    assert.deepEqual(completed[0]?.tool, {
+    assert.deepEqual(requireToolEvent(completed[0]).tool, {
       id: "edit-2",
       name: "Edit app.js",
       arguments: { path: "app.js" },

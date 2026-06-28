@@ -3,6 +3,81 @@ import assert from "node:assert/strict";
 import { createHarnessSessionDirectory } from "../harnesses/session-directory.js";
 import { createHarnessSessionBindingService } from "../conversation/harness-session-binding.js";
 
+/** @typedef {Parameters<HarnessAdapter["startSession"]>[0]} StartSessionInput */
+
+/**
+ * @param {unknown} client
+ * @returns {LlmClient}
+ */
+function llmClient(client) {
+  return /** @type {LlmClient} */ (/** @type {unknown} */ (client));
+}
+
+/**
+ * @param {Partial<import("../store.js").ChatRow>} overrides
+ * @returns {import("../store.js").ChatRow}
+ */
+function chatInfo(overrides) {
+  return {
+    chat_id: "test-chat",
+    is_enabled: true,
+    system_prompt: null,
+    model: null,
+    respond_on_any: false,
+    respond_on_mention: true,
+    respond_on_reply: false,
+    respond_on: "mention",
+    debug: false,
+    media_to_text_models: {},
+    model_roles: {},
+    memory: false,
+    memory_threshold: null,
+    active_persona: null,
+    harness: null,
+    harness_cwd: null,
+    output_visibility: {},
+    harness_config: {},
+    harness_session_id: null,
+    harness_session_kind: null,
+    harness_session_history: [],
+    harness_fork_stack: [],
+    timestamp: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/**
+ * @param {HarnessAdapter} adapter
+ * @returns {import("../harnesses/registry.js").HarnessInstance}
+ */
+function harnessInstance(adapter) {
+  return /** @type {import("../harnesses/registry.js").HarnessInstance} */ ({
+    name: "codex",
+    instanceId: "work",
+    displayName: "Codex",
+    supportsInstances: true,
+    continuationKey: "codex:instance:work",
+    capabilities: {
+      supportsResume: true,
+      supportsCancel: false,
+      supportsLiveInput: false,
+      supportsApprovals: false,
+      supportsWorkdir: true,
+      supportsSandboxConfig: false,
+      supportsModelSelection: true,
+      supportsReasoningEffort: false,
+      supportsSessionFork: false,
+      sessionModelSwitch: "unsupported",
+      supportsRollback: false,
+      supportsUserInputRequests: false,
+    },
+    available: true,
+    status: { availability: "available" },
+    harness: /** @type {AgentHarness} */ ({}),
+    adapter,
+  });
+}
+
 /**
  * @param {{
  *   resumeCursor?: string | null,
@@ -11,13 +86,16 @@ import { createHarnessSessionBindingService } from "../conversation/harness-sess
  * }} [options]
  * @returns {{
  *   adapter: HarnessAdapter,
- *   started: unknown[],
+ *   started: StartSessionInput[],
  *   stopped: string[],
  * }}
  */
 function createAdapterFixture(options = {}) {
+  /** @type {StartSessionInput[]} */
   const started = [];
+  /** @type {string[]} */
   const stopped = [];
+  /** @type {Map<string, HarnessRuntimeSession>} */
   const sessions = new Map();
   return {
     started,
@@ -25,33 +103,51 @@ function createAdapterFixture(options = {}) {
     adapter: {
       async startSession(input) {
         started.push(input);
-        const session = {
+        const session = /** @type {HarnessRuntimeSession} */ ({
           chatId: input.chatId,
+          harnessName: "codex",
+          instanceId: "work",
+          continuationKey: "codex:instance:work",
           status: "ready",
           resumeCursor: options.resumeCursor ?? input.resumeCursor ?? null,
-        };
+        });
         sessions.set(input.chatId, session);
         return session;
       },
       async sendTurn() {
         throw new Error("not used");
       },
+      interruptTurn: async () => false,
+      respondToRequest: async () => false,
+      respondToUserInput: async () => false,
       injectMessage: async () => false,
       stopSession: async (chatId) => {
         stopped.push(String(chatId));
         return options.stopResult ?? true;
       },
       hasSession: () => true,
+      stopAll: async () => {},
       listSessions: () => [...sessions.values()].map((session) => ({
         ...session,
         status: options.stoppedStatus ?? session.status,
       })),
+      rollbackThread: async () => null,
+      streamEvents: {
+        async *[Symbol.asyncIterator]() {},
+      },
       subscribeEvents: () => () => {},
     },
   };
 }
 
+/**
+ * @param {{
+ *   resolveHarnessInstanceForChat?: (chatInfo: import("../store.js").ChatRow | undefined) => Promise<import("../harnesses/registry.js").HarnessInstance | null>,
+ *   log?: Pick<Console, "info" | "warn">,
+ * }} [options]
+ */
 function createService(options = {}) {
+  /** @type {Array<{ chatId: string, session: HarnessSessionRef | null }>} */
   const saved = [];
   const directory = createHarnessSessionDirectory();
   const service = createHarnessSessionBindingService({
@@ -65,7 +161,7 @@ function createService(options = {}) {
     pushHarnessForkStack: async () => {},
     popHarnessForkStack: async () => null,
     getMessages: async () => [],
-    llmClient: {},
+    llmClient: llmClient({}),
     resolveHarnessInstanceForChat: options.resolveHarnessInstanceForChat ?? (async () => null),
     ...(options.log ? { log: options.log } : {}),
   });
@@ -78,7 +174,7 @@ function createLogSink() {
   return {
     entries,
     log: {
-      info: (message, data) => entries.push({ message, data: data ?? {} }),
+      info: (/** @type {string} */ message, /** @type {Record<string, unknown>} */ data = {}) => entries.push({ message, data }),
       warn: () => {},
     },
   };
@@ -91,15 +187,12 @@ describe("createHarnessSessionBindingService", () => {
 
     const binding = await service.beginTurn({
       chatId: "chat-1",
-      chatInfo: {
+      chatInfo: chatInfo({
         harness_session_kind: "codex",
         harness_session_id: "stored-cursor",
-      },
+      }),
       harnessName: "codex",
-      harnessInstance: {
-        instanceId: "work",
-        adapter,
-      },
+      harnessInstance: harnessInstance(adapter),
       runConfig: { workdir: "/repo", model: "gpt-test", sandboxMode: "workspace-write" },
       turnId: "turn-1",
     });
@@ -142,15 +235,12 @@ describe("createHarnessSessionBindingService", () => {
 
     await service.beginTurn({
       chatId: "chat-2",
-      chatInfo: {
+      chatInfo: chatInfo({
         harness_session_kind: "claude",
         harness_session_id: "wrong-kind-cursor",
-      },
+      }),
       harnessName: "codex",
-      harnessInstance: {
-        instanceId: "work",
-        adapter,
-      },
+      harnessInstance: harnessInstance(adapter),
       runConfig: {},
       turnId: "turn-2",
     });
@@ -165,15 +255,12 @@ describe("createHarnessSessionBindingService", () => {
 
     await service.beginTurn({
       chatId: "chat-reattach",
-      chatInfo: {
+      chatInfo: chatInfo({
         harness_session_kind: "codex",
         harness_session_id: "stored-cursor",
-      },
+      }),
       harnessName: "codex",
-      harnessInstance: {
-        instanceId: "work",
-        adapter,
-      },
+      harnessInstance: harnessInstance(adapter),
       runConfig: { workdir: "/repo" },
       turnId: "turn-reattach-1",
     });
@@ -200,7 +287,7 @@ describe("createHarnessSessionBindingService", () => {
   it("clears runtime and durable session state through one seam", async () => {
     const { adapter, stopped } = createAdapterFixture({ stopResult: true });
     const { service, directory, saved } = createService({
-      resolveHarnessInstanceForChat: async () => ({ adapter }),
+      resolveHarnessInstanceForChat: async () => harnessInstance(adapter),
     });
     directory.upsert({
       chatId: "chat-3",
@@ -210,7 +297,7 @@ describe("createHarnessSessionBindingService", () => {
       resumeCursor: "cursor",
     });
 
-    const stoppedSession = await service.clearActiveSession("chat-3", {});
+    const stoppedSession = await service.clearActiveSession("chat-3", chatInfo({}));
 
     assert.equal(stoppedSession, true);
     assert.deepEqual(stopped, ["chat-3"]);

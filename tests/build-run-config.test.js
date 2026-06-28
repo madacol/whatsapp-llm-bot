@@ -5,6 +5,38 @@ import os from "node:os";
 import path from "node:path";
 import { buildRunConfig } from "../conversation/build-run-config.js";
 
+/**
+ * @param {Partial<import("../store.js").ChatRow> & { chat_id: string }} overrides
+ * @returns {import("../store.js").ChatRow}
+ */
+function createChatRow(overrides) {
+  return {
+    is_enabled: true,
+    system_prompt: null,
+    model: null,
+    respond_on_any: false,
+    respond_on_mention: true,
+    respond_on_reply: true,
+    respond_on: "mention",
+    debug: false,
+    media_to_text_models: {},
+    model_roles: {},
+    memory: false,
+    memory_threshold: null,
+    active_persona: null,
+    harness: null,
+    harness_cwd: null,
+    output_visibility: {},
+    harness_config: {},
+    harness_session_id: null,
+    harness_session_kind: null,
+    harness_session_history: [],
+    harness_fork_stack: [],
+    timestamp: "2026-03-23T20:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("buildRunConfig", () => {
   /** @type {string | undefined} */
   let originalChatDir;
@@ -113,7 +145,7 @@ describe("buildRunConfig", () => {
   it("uses explicit harness_cwd over project bindings", () => {
     const config = buildRunConfig(
       "repo-chat-with-folder",
-      /** @type {import("../store.js").ChatRow} */ ({
+      createChatRow({
         chat_id: "repo-chat-with-folder",
         harness_cwd: "/explicit/folder",
         harness_config: {},
@@ -139,7 +171,7 @@ describe("buildRunConfig", () => {
   it("uses explicit harness_cwd over workspace bindings", () => {
     const config = buildRunConfig(
       "workspace-chat-with-folder",
-      /** @type {import("../store.js").ChatRow} */ ({
+      createChatRow({
         chat_id: "workspace-chat-with-folder",
         harness_cwd: "/explicit/worktree",
         harness_config: {},
@@ -177,7 +209,7 @@ describe("buildRunConfig", () => {
   });
 
   it("reads the active harness namespace instead of a shared model field", () => {
-    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+    const config = buildRunConfig("chat-1", createChatRow({
       chat_id: "chat-1",
       harness: "codex",
       harness_cwd: null,
@@ -194,7 +226,7 @@ describe("buildRunConfig", () => {
   });
 
   it("uses the active provider instance config when one is selected", () => {
-    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+    const config = buildRunConfig("chat-1", createChatRow({
       chat_id: "chat-1",
       harness: "codex",
       harness_cwd: null,
@@ -220,7 +252,7 @@ describe("buildRunConfig", () => {
   });
 
   it("reads canonical provider instance envelopes keyed by instance id", () => {
-    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+    const config = buildRunConfig("chat-1", createChatRow({
       chat_id: "chat-1",
       harness: "codex",
       harness_cwd: null,
@@ -247,7 +279,7 @@ describe("buildRunConfig", () => {
   });
 
   it("passes protected path policies from harness config", () => {
-    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+    const config = buildRunConfig("chat-1", createChatRow({
       chat_id: "chat-1",
       harness: "codex",
       harness_cwd: null,
@@ -262,7 +294,7 @@ describe("buildRunConfig", () => {
   });
 
   it("passes ignored file-change policies from harness config", () => {
-    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+    const config = buildRunConfig("chat-1", createChatRow({
       chat_id: "chat-1",
       harness: "codex",
       harness_cwd: null,
@@ -277,13 +309,13 @@ describe("buildRunConfig", () => {
   });
 
   it("does not leak a legacy Claude model into Codex runs", () => {
-    const codexConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+    const codexConfig = buildRunConfig("chat-1", createChatRow({
       chat_id: "chat-1",
       harness: "codex",
       harness_cwd: null,
       harness_config: { model: "sonnet" },
     }), "Project Alpha", "codex");
-    const claudeConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+    const claudeConfig = buildRunConfig("chat-1", createChatRow({
       chat_id: "chat-1",
       harness: "codex",
       harness_cwd: null,

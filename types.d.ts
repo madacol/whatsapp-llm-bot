@@ -24,6 +24,7 @@ type WhatsAppSocketIdentityPort = {
   user?: {
     id?: string | null;
     lid?: string | null;
+    name?: string | null;
   } | null;
 };
 
@@ -41,11 +42,18 @@ type WhatsAppSocketEventPort = {
 };
 
 type WhatsAppSocketSendMessagePort = {
-  sendMessage: BaileysSocket["sendMessage"];
+  sendMessage: (
+    chatId: string,
+    message: any,
+    options?: any,
+  ) => Promise<BaileysMessage | undefined>;
 };
 
 type WhatsAppSocketPresencePort = {
-  sendPresenceUpdate: BaileysSocket["sendPresenceUpdate"];
+  sendPresenceUpdate: (
+    presence: "composing" | "paused",
+    chatId: string,
+  ) => Promise<void>;
 };
 
 type WhatsAppSocketLidMappingPort = {
@@ -57,11 +65,22 @@ type WhatsAppSocketLidMappingPort = {
 };
 
 type WhatsAppSocketGroupMetadataPort = {
-  groupMetadata: BaileysSocket["groupMetadata"];
+  groupMetadata: (chatId: string) => Promise<{
+    subject?: string;
+    linkedParent?: string | null;
+    participants?: Array<{
+      id: string;
+      admin?: "admin" | "superadmin" | null;
+    }>;
+  }>;
 };
 
 type WhatsAppSocketRelayMessagePort = {
-  relayMessage: BaileysSocket["relayMessage"];
+  relayMessage: (
+    chatId: string,
+    message: any,
+    options: any,
+  ) => Promise<unknown>;
 };
 
 type WhatsAppRawRelaySocketPort = WhatsAppSocketIdentityPort & WhatsAppSocketRelayMessagePort & {

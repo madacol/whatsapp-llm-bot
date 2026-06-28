@@ -7,30 +7,83 @@ import {
   parseStructuredQuestion,
 } from "../message-formatting.js";
 
+/** @typedef {import("../store.js").ChatRow} ChatRow */
+/** @typedef {{ message_data: Message, sender_id: string }} StoredMessageFixture */
+
+/**
+ * @param {Partial<ChatRow>} overrides
+ * @returns {ChatRow}
+ */
+function chatInfo(overrides) {
+  return {
+    chat_id: "test-chat",
+    is_enabled: true,
+    system_prompt: null,
+    model: null,
+    respond_on_any: false,
+    respond_on_mention: true,
+    respond_on_reply: false,
+    respond_on: "mention",
+    debug: false,
+    media_to_text_models: {},
+    model_roles: {},
+    memory: false,
+    memory_threshold: null,
+    active_persona: null,
+    harness: null,
+    harness_cwd: null,
+    output_visibility: {},
+    harness_config: {},
+    harness_session_id: null,
+    harness_session_kind: null,
+    harness_session_history: [],
+    harness_fork_stack: [],
+    timestamp: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/**
+ * @param {unknown} messages
+ * @returns {StoredMessageFixture[]}
+ */
+function asStoredMessages(messages) {
+  return /** @type {StoredMessageFixture[]} */ (/** @type {unknown} */ (messages));
+}
+
+/**
+ * @param {unknown} block
+ * @returns {{ type: string, path: string }}
+ */
+function storedMediaBlock(block) {
+  assert.ok(block && typeof block === "object" && "type" in block && typeof block.type === "string" && "path" in block && typeof block.path === "string", "Expected stored media block");
+  return /** @type {{ type: string, path: string }} */ (block);
+}
+
 // ── shouldRespond ──
 
 describe("shouldRespond", () => {
   it("returns false for disabled or missing chat", () => {
-    assert.equal(shouldRespond({ is_enabled: false }, { isGroup: false, addressedToBot: false, repliedToBot: false }), false);
+    assert.equal(shouldRespond(chatInfo({ is_enabled: false }), { isGroup: false, addressedToBot: false, repliedToBot: false }), false);
     assert.equal(shouldRespond(undefined, { isGroup: false, addressedToBot: false, repliedToBot: false }), false);
   });
 
   it("returns true for enabled private chat", () => {
     assert.equal(
-      shouldRespond({ is_enabled: true }, { isGroup: false, addressedToBot: false, repliedToBot: false }),
+      shouldRespond(chatInfo({ is_enabled: true }), { isGroup: false, addressedToBot: false, repliedToBot: false }),
       true,
     );
   });
 
   it("respond_on=any: responds to every group message", () => {
     assert.equal(
-      shouldRespond({ is_enabled: true, respond_on: "any" }, { isGroup: true, addressedToBot: false, repliedToBot: false }),
+      shouldRespond(chatInfo({ is_enabled: true, respond_on: "any" }), { isGroup: true, addressedToBot: false, repliedToBot: false }),
       true,
     );
   });
 
   it("respond_on=mention: responds only when bot is @-mentioned", () => {
-    const chat = { is_enabled: true, respond_on: "mention" };
+    const chat = chatInfo({ is_enabled: true, respond_on: "mention" });
     // Mentioned → true
     assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: true, repliedToBot: false }), true);
     assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: true, repliedToBot: false }), true);
@@ -41,7 +94,7 @@ describe("shouldRespond", () => {
   });
 
   it("respond_on=mention+reply: responds to mentions and replies to bot", () => {
-    const chat = { is_enabled: true, respond_on: "mention+reply" };
+    const chat = chatInfo({ is_enabled: true, respond_on: "mention+reply" });
     // Mentioned → true
     assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: true, repliedToBot: false }), true);
     // Reply to bot → true
@@ -102,7 +155,7 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
@@ -121,7 +174,7 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { messages: result, mediaRegistry } = prepareMessages(messages);
+    const { messages: result, mediaRegistry } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
@@ -132,7 +185,7 @@ describe("prepareMessages", () => {
     const [[mediaPath, mediaBlock]] = [...mediaRegistry.entries()];
     assert.match(mediaPath, /^[a-f0-9]{64}\.png$/);
     assert.equal(mediaBlock.type, "image");
-    assert.equal(mediaBlock.path, mediaPath);
+    assert.equal(storedMediaBlock(mediaBlock).path, mediaPath);
   });
 
   it("preserves user quote message", () => {
@@ -150,7 +203,7 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result[0].role, "user");
     assert.equal(result[0].content[0].type, "quote");
@@ -177,7 +230,7 @@ describe("prepareMessages", () => {
         sender_id: "bot",
       },
     ];
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     // Only the assistant — no placeholder; stubs ensure tool results exist in DB
     assert.equal(result.length, 1);
@@ -209,7 +262,7 @@ describe("prepareMessages", () => {
       },
     ];
     // Input is newest-first; after reverse: assistant, then tool
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 2);
     const toolMsg = result.find(m => m.role === "tool");
@@ -230,7 +283,7 @@ describe("prepareMessages", () => {
       },
     ];
     const originalFirst = messages[0];
-    prepareMessages(messages);
+    prepareMessages(asStoredMessages(messages));
 
     assert.strictEqual(messages[0], originalFirst, "input array should not be reversed");
     assert.equal(messages.length, 2, "input array length should not change");
@@ -243,7 +296,7 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { mediaRegistry } = prepareMessages(messages);
+    const { mediaRegistry } = prepareMessages(asStoredMessages(messages));
     assert.equal(mediaRegistry.size, 0);
   });
 
@@ -259,7 +312,7 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { messages: result, mediaRegistry } = prepareMessages(messages);
+    const { messages: result, mediaRegistry } = prepareMessages(asStoredMessages(messages));
     assert.equal(result.length, 1);
     assert.equal(result[0].content[0].type, "audio");
     // Audio should be registered
@@ -279,7 +332,7 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { messages: result, mediaRegistry } = prepareMessages(messages);
+    const { messages: result, mediaRegistry } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 1);
     assert.equal(result[0].content[0].type, "video");
@@ -316,11 +369,11 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { mediaRegistry } = prepareMessages(messages);
+    const { mediaRegistry } = prepareMessages(asStoredMessages(messages));
 
     // Tool image should be tagged in the registry
     assert.equal(mediaRegistry.size, 1);
-    const registeredBlock = [...mediaRegistry.values()][0];
+    const registeredBlock = storedMediaBlock([...mediaRegistry.values()][0]);
     assert.equal(registeredBlock.type, "image");
     assert.match(registeredBlock.path, /^[a-f0-9]{64}\.png$/);
   });
@@ -338,7 +391,7 @@ describe("prepareMessages", () => {
       },
     ];
     // After reverse: tool first, then user. Tool should be stripped.
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
@@ -351,7 +404,7 @@ describe("prepareMessages", () => {
       { message_data: { role: "tool", tool_id: "orphan_id", content: [{ type: "text", text: "res" }] }, sender_id: "bot" },
       { message_data: { role: "user", content: [{ type: "text", text: "hi" }] }, sender_id: "user-1" },
     ]);
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 2);
     assert.ok(result.every(m => m.role === "user"));
@@ -364,7 +417,7 @@ describe("prepareMessages", () => {
       { message_data: { role: "tool", tool_id: "id_B", content: [{ type: "text", text: "res2" }] }, sender_id: "bot" },
       { message_data: { role: "tool", tool_id: "id_A", content: [{ type: "text", text: "res1" }] }, sender_id: "bot" },
     ]);
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
@@ -384,7 +437,7 @@ describe("prepareMessages", () => {
       },
       { message_data: { role: "tool", tool_id: "orphan_id", content: [{ type: "text", text: "stale" }] }, sender_id: "bot" },
     ]);
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 3);
     assert.ok(!result.some(m => m.role === "tool" && /** @type {ToolMessage} */ (m).tool_id === "orphan_id"));
@@ -403,7 +456,7 @@ describe("prepareMessages", () => {
       },
       { message_data: { role: "user", content: [{ type: "text", text: "go" }] }, sender_id: "user-1" },
     ]);
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 3);
   });
@@ -426,7 +479,7 @@ describe("prepareMessages", () => {
       },
       { message_data: { role: "user", content: [{ type: "text", text: "go" }] }, sender_id: "user-1" },
     ]);
-    const { messages: result } = prepareMessages(messages);
+    const { messages: result } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(result.length, 3);
     assert.ok(result.some(m => m.role === "user"));
@@ -458,12 +511,12 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ]);
-    const { mediaRegistry } = prepareMessages(messages);
+    const { mediaRegistry } = prepareMessages(asStoredMessages(messages));
 
     // First message (after reverse) has image + video → IDs 1, 2
     // Second message has image → ID 3
     assert.equal(mediaRegistry.size, 3);
-    const blocks = [...mediaRegistry.values()];
+    const blocks = [...mediaRegistry.values()].map(storedMediaBlock);
     assert.equal(blocks[0].path.endsWith(".png"), true);
     assert.equal(blocks[1].path.endsWith(".mp4"), true);
     assert.equal(blocks[2].path.endsWith(".jpg"), true);
@@ -486,10 +539,10 @@ describe("prepareMessages", () => {
         sender_id: "user-1",
       },
     ];
-    const { mediaRegistry } = prepareMessages(messages);
+    const { mediaRegistry } = prepareMessages(asStoredMessages(messages));
 
     assert.equal(mediaRegistry.size, 1);
-    assert.match([...mediaRegistry.values()][0].path, /^[a-f0-9]{64}\.png$/);
+    assert.match(storedMediaBlock([...mediaRegistry.values()][0]).path, /^[a-f0-9]{64}\.png$/);
   });
 });
 

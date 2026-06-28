@@ -92,10 +92,6 @@ export function createChannelInput(overrides = {}) {
     /** @type {SendContent} */
     let content;
     switch (event.kind) {
-      case "content":
-        source = event.source;
-        content = event.content;
-        break;
       case "app_message":
         switch (event.role) {
           case "tool_result":
@@ -661,7 +657,7 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
 
 /**
  * @typedef {{
- *   sock: BaileysSocket;
+ *   sock: WhatsAppTransportSocketPort;
  *   getSentMessages: () => SentSocketMessage[];
  *   getRelayedMessages: () => RelayedSocketMessage[];
  *   getTextMessages: () => string[];
@@ -712,22 +708,23 @@ export function createMockBaileysSocket(options = {}) {
     return !!value && typeof value === "object" && !Array.isArray(value);
   }
 
-  const sock = /** @type {BaileysSocket} */ (/** @type {unknown} */ ({
+  /** @type {WhatsAppTransportSocketPort} */
+  const sock = {
     user: { id: `${selfId}:0@s.whatsapp.net`, lid: `${selfLid}:0@lid`, name: selfName },
     ev: {
-      on: ee.on.bind(ee),
-      off: ee.removeListener.bind(ee),
-      listenerCount: ee.listenerCount.bind(ee),
+      process: (handler) => {
+        ee.on("events", handler);
+      },
     },
     /** @param {string} chatId @param {Record<string, unknown>} msg @param {Record<string, unknown>} [opts] */
     sendMessage: async (chatId, msg, opts) => {
       if (msg.react) {
         reactions.push({ text: /** @type {{ text: string }} */ (msg.react).text, key: /** @type {{ key: Record<string, unknown> }} */ (msg.react).key ?? {} });
-        return null;
+        return undefined;
       }
       const key = { id: `sent-msg-${msgCounter++}`, remoteJid: chatId };
       sentMessages.push({ chatId, msg, options: opts });
-      return { key };
+      return /** @type {BaileysMessage} */ ({ key });
     },
     /** @param {string} chatId @param {Record<string, unknown>} msg @param {Record<string, unknown>} [opts] */
     relayMessage: async (chatId, msg, opts) => {
@@ -748,7 +745,7 @@ export function createMockBaileysSocket(options = {}) {
         ? [{ id: `${selfId}@s.whatsapp.net`, admin: "admin" }]
         : [],
     }),
-  }));
+  };
 
   return {
     sock,
@@ -775,7 +772,7 @@ export function createMockBaileysSocket(options = {}) {
     getReactions: () => reactions,
     getPresenceUpdates: () => presenceUpdates,
     emitReaction: (key, reaction) => {
-      ee.emit("messages.reaction", [{ key, reaction }]);
+      ee.emit("events", { "messages.reaction": [{ key, reaction }] });
     },
     clearCaptures: () => {
       sentMessages = [];

@@ -13,7 +13,6 @@ import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 import { runtimeEvent } from "../outbound-events.js";
-import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import { createFixtureCapture, setDefaultFixtureCaptureForTesting } from "../diagnostics/capture.js";
@@ -318,7 +317,7 @@ describe("sendEvent – runtime events", () => {
         change: {
           path: "/tmp/src/app.js",
           cwd: "/tmp",
-          source: "provider",
+          source: "tool",
           kind: "update",
           summary: "Editing files",
           oldText: "before\n",
@@ -787,7 +786,7 @@ describe("sendEvent – runtime events", () => {
   });
 
   it("observes pinned status delivery at the socket boundary", async () => {
-    const { sock, sent } = createMockSock();
+    const { sock } = createMockSock();
     /** @type {Array<Record<string, unknown>>} */
     const deliveryTrace = [];
     const sendOptions = {
@@ -812,10 +811,8 @@ describe("sendEvent – runtime events", () => {
         type: "command.completed",
         provider: "codex",
         command: {
-          id: "cmd-1",
           command: "pnpm test:fast",
           status: "completed",
-          cwd: "/repo",
         },
       },
     }, undefined, undefined, sendOptions);
@@ -844,7 +841,7 @@ describe("sendEvent – runtime events", () => {
   });
 
   it("observes live pin failures instead of silently trusting the payload shape", async () => {
-    const { sock, sent } = createMockSock();
+    const { sock } = createMockSock();
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (chatId, msg) => {
       if (msg.pin && msg.type === 1) {
@@ -1518,7 +1515,12 @@ describe("sendEvent – runtime events", () => {
       event: {
         type: "session.started",
         provider: "acp",
-        session: { id: "session-1", status: "running" },
+        session: {
+          chatId: "runtime-chat",
+          harnessName: "acp",
+          instanceId: "session-1",
+          status: "running",
+        },
       },
     });
     await sendEvent(sock, "runtime-chat", {
@@ -1566,7 +1568,12 @@ describe("sendEvent – runtime events", () => {
       event: {
         type: "session.started",
         provider: "acp",
-        session: { id: "session-1", status: "running" },
+        session: {
+          chatId: "runtime-expired-chat",
+          harnessName: "acp",
+          instanceId: "session-1",
+          status: "running",
+        },
       },
     }, undefined, undefined, {
       editHandleStore: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ (store)),
@@ -1992,6 +1999,7 @@ Second block:
     const { sock } = createMockSock();
     const originalLevel = process.env.LOG_LEVEL;
     const originalLog = console.log;
+    /** @type {string[]} */
     const captured = [];
 
     process.env.LOG_LEVEL = "info";
@@ -2277,6 +2285,8 @@ Second block:
 
     await sendBlocks(sock, "test-chat", "tool-call", [{
       type: "diff",
+      oldStr: "",
+      newStr: "",
       diffText: buildMultiBatchDiffText(),
       language: "javascript",
       caption: "*Update*  `huge.js`",
@@ -2578,7 +2588,7 @@ describe("sendBlocks – MessageHandle tracking", () => {
     const { sock } = createMockSock();
 
     const handle = await sendBlocks(sock, "test-chat", "llm", [
-      { type: "audio", data: Buffer.from("fake").toString("base64"), mime_type: "audio/mp4" },
+      { type: "audio", encoding: "base64", data: Buffer.from("fake").toString("base64"), mime_type: "audio/mp4" },
     ]);
 
     assert.equal(handle, undefined);
@@ -2802,17 +2812,18 @@ describe("sendBlocks – outbound diagnostics", () => {
 describe("sendBlocks – tool-call → edit pipeline", () => {
   /**
    * Create a mock socket that records both sendMessage and relayMessage calls.
-   * @returns {{ sock: any, calls: Array<{ method: string; args: unknown[] }> }}
+   * @returns {{ sock: WhatsAppOutboundSocketPort & WhatsAppSocketRelayMessagePort, calls: Array<{ method: string; args: unknown[] }> }}
    */
   function createCaptureSock() {
     /** @type {Array<{ method: string; args: unknown[] }>} */
     const calls = [];
     let counter = 0;
+    /** @type {WhatsAppOutboundSocketPort & WhatsAppSocketRelayMessagePort} */
     const sock = {
       sendMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown> | undefined} */ opts) => {
         calls.push({ method: "sendMessage", args: [chatId, msg, opts] });
         counter++;
-        return { key: { id: `msg-${counter}`, remoteJid: chatId } };
+        return /** @type {BaileysMessage} */ ({ key: { id: `msg-${counter}`, remoteJid: chatId } });
       },
       relayMessage: async (/** @type {string} */ jid, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown>} */ opts) => {
         calls.push({ method: "relayMessage", args: [jid, msg, opts] });
@@ -2823,13 +2834,14 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
   /**
    * @param {Array<{ method: string; args: unknown[] }>} calls
-   * @returns {Record<string, unknown>[]}
+   * @returns {Array<Record<string, unknown> & { text: string, edit?: unknown }>}
    */
   function sentTextMessages(calls) {
     return calls
       .filter((call) => call.method === "sendMessage")
       .map((call) => /** @type {Record<string, unknown>} */ (call.args[1]))
-      .filter((msg) => typeof msg.text === "string");
+      .filter((msg) => typeof msg.text === "string")
+      .map((msg) => /** @type {Record<string, unknown> & { text: string, edit?: unknown }} */ (msg));
   }
 
   it("text tool-call: send → progress update → final update uses sendMessage with edit key", async () => {
@@ -3593,7 +3605,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     await assert.rejects(
       () => editWhatsAppMessageByHandle(sock, "expired-handle", "Restarted.", {
         now,
-        store: /** @type {import("../store.js").Store} */ ({
+        store: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ ({
           getWhatsAppEditHandle: async () => ({
             id: "expired-handle",
             chat_id: "chat-1",
@@ -3602,7 +3614,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
             created_at: "2026-05-26T12:00:00.000Z",
             expires_at: "2026-05-26T12:14:00.000Z",
           }),
-        }),
+        })),
       }),
       /WhatsApp edit handle expired-handle expired\./,
     );
@@ -3615,7 +3627,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
     await editWhatsAppMessageByHandle(sock, "persisted-handle", "Restarted.", {
       now: new Date("2026-05-26T12:05:00.000Z"),
-      store: /** @type {import("../store.js").Store} */ ({
+      store: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ ({
         getWhatsAppEditHandle: async () => ({
           id: "persisted-handle",
           chat_id: "chat-1",
@@ -3624,7 +3636,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
           created_at: "2026-05-26T12:00:00.000Z",
           expires_at: "2026-05-26T12:14:00.000Z",
         }),
-      }),
+      })),
     });
 
     assert.equal(calls.length, 1);
