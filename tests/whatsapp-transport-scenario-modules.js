@@ -88,6 +88,143 @@ export function whatsappTextMessage({
 
 /**
  * @param {{
+ *   chatId: string,
+ *   targetMessageId: string,
+ *   reaction: string,
+ *   senderLidJid: string,
+ *   senderPhoneJid?: string,
+ *   id?: string,
+ *   timestamp?: number,
+ *   targetParticipantJid?: string,
+ * }} input
+ * @returns {import("@whiskeysockets/baileys").WAMessage}
+ */
+export function whatsappReactionMessage({
+  chatId,
+  targetMessageId,
+  reaction,
+  senderLidJid,
+  senderPhoneJid,
+  id = "MSG-SCENARIO-REACTION-1",
+  timestamp = 1782322730,
+  targetParticipantJid,
+}) {
+  return /** @type {import("@whiskeysockets/baileys").WAMessage} */ (/** @type {unknown} */ ({
+    key: {
+      remoteJid: chatId,
+      fromMe: false,
+      id,
+      participant: senderLidJid,
+      ...(senderPhoneJid ? { participantAlt: senderPhoneJid } : {}),
+      addressingMode: "lid",
+    },
+    messageTimestamp: timestamp,
+    message: {
+      reactionMessage: {
+        key: {
+          remoteJid: chatId,
+          fromMe: true,
+          id: targetMessageId,
+          ...(targetParticipantJid ? { participant: targetParticipantJid } : {}),
+        },
+        text: reaction,
+        senderTimestampMs: timestamp * 1_000,
+      },
+    },
+  }));
+}
+
+/**
+ * Set up the WhatsApp transport and reply to the next inbound turn with one
+ * inspectable message.
+ * @param {{
+ *   botPhoneJid: string,
+ *   botLidJid?: string,
+ *   replyEvent: OutboundEvent,
+ *   inspect: MessageInspectState,
+ *   update?: MessageHandleUpdate,
+ *   inboundCoalesceDelayMs?: number,
+ * }} input
+ * @returns {ScenarioStep}
+ */
+export function whatsappInspectableReplyModule(input) {
+  return scenarioStep("whatsappInspectableReplyModule", async (ctx) => {
+    /** @type {{ current: ProcessEvents | null }} */
+    const processEventsRef = { current: null };
+    /** @type {WhatsAppTransportSocketPort} */
+    const socket = {
+      user: {
+        id: input.botPhoneJid,
+        ...(input.botLidJid ? { lid: input.botLidJid } : {}),
+      },
+      ev: {
+        /**
+         * @param {ProcessEvents} handler
+         */
+        process(handler) {
+          processEventsRef.current = async (events) => {
+            await handler(events);
+          };
+        },
+      },
+      /**
+       * @param {string} targetChatId
+       * @param {Record<string, unknown>} message
+       * @returns {Promise<BaileysMessage>}
+       */
+      sendMessage: async (targetChatId, message) => {
+        const id = `sent-${ctx.sentMessages.length + 1}`;
+        ctx.sentMessages.push({ id, chatId: targetChatId, message });
+        return /** @type {BaileysMessage} */ ({ key: { id, remoteJid: targetChatId, fromMe: true } });
+      },
+      sendPresenceUpdate: async () => {},
+    };
+
+    let stopped = false;
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: input.inboundCoalesceDelayMs ?? 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          stopped = false;
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {
+          stopped = true;
+        },
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => stopped,
+      }),
+    });
+
+    ctx.cleanup(async () => {
+      await transport.stop();
+    });
+
+    await transport.start(async (turn) => {
+      const handle = await turn.io.reply(input.replyEvent);
+      if (!handle) {
+        throw new Error("Expected inspectable reply to return a message handle.");
+      }
+      handle.setInspect(input.inspect);
+      if (input.update) {
+        await handle.update(input.update);
+      }
+    });
+
+    const registeredProcessEvents = processEventsRef.current;
+    if (!registeredProcessEvents) {
+      throw new Error("Expected connection event processor to be registered.");
+    }
+
+    ctx.set("whatsapp.processEvents", registeredProcessEvents);
+    await registeredProcessEvents({ "connection.update": { connection: "open" } });
+    ctx.current = { seam: "whatsapp.transport", event: "connection.open" };
+  });
+}
+
+/**
+ * @param {{
  *   fixture: RawLidPollFixture,
  *   selectedOption: string,
  *   id?: string,

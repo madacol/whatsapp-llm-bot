@@ -61,6 +61,7 @@ Capture or inspect the latest outbound diagnostics/reaction normalization for an
 
 - Red proof: `pnpm test tests/sendBlocks.test.js --test-name-pattern "alternate sender id matches the bot"` failed in both the reasoning placeholder and audio transcription status cases because inspect output was edited into the visible message.
 - Green proof: `pnpm test tests/sendBlocks.test.js --test-name-pattern "alternate sender id matches the bot|edits the original message to full plain-text inspect output after user|reveals inspect data attached after an earlier user"`
+- Vertical green proof: `pnpm test tests/whatsapp-transport-scenarios.test.js`
 - Green proof: `pnpm test tests/create-whatsapp-transport.test.js --test-name-pattern "reaction"`
 - Support test: `pnpm test tests/conversation-runner-prompt-formatting.test.js --test-name-pattern "shows an inspectable transcribing status for audio live input"`
 - Support test: `pnpm test tests/reaction-handler.test.js`
@@ -72,4 +73,5 @@ Capture or inspect the latest outbound diagnostics/reaction normalization for an
 
 - Completed by preserving alternate reaction sender ids through the WhatsApp reaction normalization/runtime path and checking those ids in the outbound inspect self-filter.
 - Added regressions for both reasoning/thinking placeholders and audio transcription status messages.
+- Added scenario-runner vertical coverage for both reasoning/thinking placeholders and audio transcription status messages after the testing policy was clarified to require vertical proof for changes and bug fixes.
 - Preserved explicit user inspection behavior, including reveal when inspect data already exists and reveal when a user reacted before inspect data arrived.
