@@ -120,11 +120,14 @@ function getSocketSelfIds(sock) {
 /**
  * @param {string} senderId
  * @param {WhatsAppOutboundSocketPort} sock
+ * @param {import("../runtime/reaction-runtime.js").ReactionMetadata} [metadata]
  * @returns {boolean}
  */
-function isReactionFromSelf(senderId, sock) {
-  const normalizedSenderId = senderId.split(":")[0].split("@")[0];
-  return getSocketSelfIds(sock).includes(normalizedSenderId);
+function isReactionFromSelf(senderId, sock, metadata = {}) {
+  const selfIds = getSocketSelfIds(sock);
+  const senderIds = [senderId, ...(metadata.senderIds ?? [])]
+    .map((id) => id.split(":")[0].split("@")[0]);
+  return senderIds.some((id) => selfIds.includes(id));
 }
 
 /**
@@ -2472,6 +2475,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         reason,
         senderId,
         reactionFromMe: metadata.fromMe ?? null,
+        reactionSenderIds: metadata.senderIds ?? [senderId],
         selfIds: getSocketSelfIds(sock),
         inspectStatePresent: !!inspectState,
         displayMode,
@@ -2490,7 +2494,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         appendInspectReactionDecisionDiagnostic("ignored", "reaction-from-me", senderId, metadata);
         return;
       }
-      if (isReactionFromSelf(senderId, sock)) {
+      if (isReactionFromSelf(senderId, sock, metadata)) {
         appendInspectReactionDecisionDiagnostic("ignored", "sender-matches-self", senderId, metadata);
         return;
       }

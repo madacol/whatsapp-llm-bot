@@ -6,7 +6,7 @@
  */
 
 /**
- * @typedef {{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, fromMe?: boolean }} NormalizedReactionEvent
+ * @typedef {{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, senderIds?: string[], fromMe?: boolean }} NormalizedReactionEvent
  */
 
 /**
@@ -30,11 +30,47 @@
  */
 
 /**
- * @param {{ remoteJid?: string | null, participant?: string | null, participantAlt?: string | null }} key
- * @returns {string}
+ * @param {string | null | undefined} jid
+ * @returns {string | null}
  */
-function getReactionSenderId(key) {
-  return (key.participant || key.participantAlt || key.remoteJid || "unknown").split("@")[0];
+function normalizeReactionSenderId(jid) {
+  return typeof jid === "string" && jid.trim() ? jid.split("@")[0] : null;
+}
+
+/**
+ * @param {string | null} id
+ * @returns {id is string}
+ */
+function isReactionSenderId(id) {
+  return typeof id === "string" && id.length > 0;
+}
+
+/**
+ * @param {{ remoteJid?: string | null, participant?: string | null, participantAlt?: string | null }} key
+ * @returns {string[]}
+ */
+function getReactionSenderIds(key) {
+  const participantIds = [
+    normalizeReactionSenderId(key.participant),
+    normalizeReactionSenderId(key.participantAlt),
+  ].filter(isReactionSenderId);
+  const ids = participantIds.length > 0
+    ? participantIds
+    : [normalizeReactionSenderId(key.remoteJid)].filter(isReactionSenderId);
+  const uniqueIds = [...new Set(ids)];
+  return uniqueIds.length > 0 ? uniqueIds : ["unknown"];
+}
+
+/**
+ * @param {{ remoteJid?: string | null, participant?: string | null, participantAlt?: string | null }} key
+ * @returns {{ senderId: string, senderIds?: string[] }}
+ */
+function getReactionSenderIdentity(key) {
+  const senderIds = getReactionSenderIds(key);
+  return {
+    senderId: senderIds[0],
+    ...(senderIds.length > 1 ? { senderIds } : {}),
+  };
 }
 
 /**
@@ -59,7 +95,7 @@ export function normalizeReactionEvents(events) {
     normalized.push({
       key: { id: key.id, remoteJid: key.remoteJid },
       reaction: { text: reaction.text },
-      senderId: getReactionSenderId(key),
+      ...getReactionSenderIdentity(key),
       ...(typeof key.fromMe === "boolean" ? { fromMe: key.fromMe } : {}),
     });
   }
@@ -88,7 +124,7 @@ export function normalizeUpsertReactionMessage(message) {
   return [{
     key: { id: reactedKey.id, remoteJid },
     reaction: { text: reactionMessage.text },
-    senderId: getReactionSenderId(/** @type {{ remoteJid?: string | null, participant?: string | null, participantAlt?: string | null }} */ (message.key)),
+    ...getReactionSenderIdentity(/** @type {{ remoteJid?: string | null, participant?: string | null, participantAlt?: string | null }} */ (message.key)),
     ...(typeof message.key.fromMe === "boolean" ? { fromMe: message.key.fromMe } : {}),
   }];
 }
