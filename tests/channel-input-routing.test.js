@@ -4,11 +4,34 @@ import { decideChannelInputRoute } from "../conversation/channel-input-routing.j
 
 const enabledChat = Object.freeze({ is_enabled: true });
 const disabledChat = Object.freeze({ is_enabled: false });
-const readyBinding = Object.freeze({ kind: "project" });
-const archivedWorkspaceBinding = Object.freeze({
-  kind: "workspace",
-  workspace: { status: "archived" },
+/** @type {ProjectRow} */
+const project = Object.freeze({
+  project_id: "project-1",
+  name: "Checkout",
+  root_path: "/repo",
+  default_base_branch: "main",
+  control_chat_id: null,
+  timestamp: "2026-03-23T20:00:00.000Z",
 });
+/** @type {ResolvedChatBinding} */
+const readyBinding = Object.freeze({ kind: "project", project });
+/** @type {WorkspaceRow} */
+const archivedWorkspace = Object.freeze({
+  workspace_id: "workspace-1",
+  project_id: "project-1",
+  name: "payments",
+  branch: "workspace/payments",
+  base_branch: "main",
+  worktree_path: "/repo-workspaces/payments",
+  status: "archived",
+  last_test_status: "not_run",
+  last_commit_oid: null,
+  conflicted_files: [],
+  archived_at: "2026-03-23T20:00:00.000Z",
+  timestamp: "2026-03-23T20:00:00.000Z",
+});
+/** @type {ResolvedChatBinding} */
+const archivedWorkspaceBinding = Object.freeze({ kind: "workspace", project, workspace: archivedWorkspace });
 
 describe("decideChannelInputRoute", () => {
   it("routes bang commands before archived workspace coding rejection", () => {

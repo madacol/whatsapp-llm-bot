@@ -3,7 +3,7 @@
  */
 
 /**
- * @typedef {import("./store.js").Store} Store
+ * @typedef {Pick<import("./store.js").Store, "listActiveWorkspaces">} WorkspaceListStore
  */
 
 /**
@@ -18,7 +18,7 @@ function formatLastTestStatus(lastTestStatus) {
 }
 
 /**
- * @param {Store} store
+ * @param {WorkspaceListStore} store
  * @param {ProjectRow} repo
  * @returns {Promise<string>}
  */

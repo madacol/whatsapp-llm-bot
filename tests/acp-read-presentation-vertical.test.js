@@ -94,53 +94,6 @@ async function observeAcpReadPayloadsThroughBaileys(payloads, sendOptions = {}) 
   return { sent, runtimeEvents };
 }
 
-/**
- * @param {Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>} events
- * @returns {Promise<{
- *   sent: Array<{ chatId: string, msg: Record<string, unknown> }>,
- *   outboundEvents: SendContent[],
- * }>}
- */
-async function observeRuntimeReadEventsThroughBaileys(events) {
-  const chatId = "runtime-read-presentation@s.whatsapp.net";
-  const cwd = "/home/mada/whatsapp-llm-bot";
-  const { sock, sent } = createMockSock();
-  /** @type {SendContent[]} */
-  const outboundEvents = [];
-  const hooks = buildAgentIoHooks(
-    {
-      send: async (event) => {
-        outboundEvents.push(event);
-        return sendEvent(sock, chatId, event, undefined, undefined, {
-          outputVisibility: DEFAULT_OUTPUT_VISIBILITY,
-        });
-      },
-      reply: async (event) => {
-        outboundEvents.push(event);
-        return sendEvent(sock, chatId, event, undefined, undefined, {
-          outputVisibility: DEFAULT_OUTPUT_VISIBILITY,
-        });
-      },
-      select: async () => "",
-      confirm: async () => true,
-    },
-    cwd,
-    DEFAULT_OUTPUT_VISIBILITY,
-  );
-  const dispatcher = createHarnessRuntimeEventDispatcher({
-    provider: "acp",
-    messages: [],
-    hooks,
-    workdir: cwd,
-  });
-
-  for (const event of events) {
-    await dispatcher.handleEvent(event);
-  }
-
-  return { sent, outboundEvents };
-}
-
 describe("ACP read presentation vertical slice", () => {
   it("edits a live-shaped ACP read payload to completed Read text through Baileys", async () => {
     const chatId = "acp-read-presentation@s.whatsapp.net";

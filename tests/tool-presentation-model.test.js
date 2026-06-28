@@ -6,6 +6,17 @@ import {
   formatToolPresentationSummary,
 } from "../whatsapp/tool-presenter.js";
 
+/**
+ * @param {ToolPresentation | null} presentation
+ * @returns {ToolPresentation}
+ */
+function requireToolPresentation(presentation) {
+  if (!presentation) {
+    assert.fail("expected tool presentation");
+  }
+  return presentation;
+}
+
 describe("tool presentation model", () => {
   it("renders file tool starts as direct file actions", () => {
     const editPresentation = buildToolPresentation("Edit", {
@@ -18,8 +29,8 @@ describe("tool presentation model", () => {
       content: "export const value = 1;\n",
     }, undefined, "/repo", undefined);
 
-    assert.equal(formatToolPresentationSummary(editPresentation), "Editing `src/app.js`");
-    assert.equal(formatToolPresentationSummary(writePresentation), "Writing `src/new.js`");
+    assert.equal(formatToolPresentationSummary(requireToolPresentation(editPresentation)), "Editing `src/app.js`");
+    assert.equal(formatToolPresentationSummary(requireToolPresentation(writePresentation)), "Writing `src/new.js`");
   });
 
   it("renders full plan details for inspect from the semantic presentation", () => {
@@ -32,7 +43,7 @@ describe("tool presentation model", () => {
     }, undefined, null, undefined);
 
     assert.equal(
-      formatToolPresentationInspect(presentation, "Plan updated"),
+      formatToolPresentationInspect(requireToolPresentation(presentation), "Plan updated"),
       [
         "_Tighten the display labels_",
         "[~] Patch the formatter",

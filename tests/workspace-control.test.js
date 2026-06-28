@@ -2,6 +2,59 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createWorkspaceControl } from "../workspace-control.js";
 
+/**
+ * @param {Partial<Parameters<typeof createWorkspaceControl>[0]["store"]>} [overrides]
+ * @returns {Parameters<typeof createWorkspaceControl>[0]["store"]}
+ */
+function createStore(overrides = {}) {
+  return {
+    listActiveWorkspaces: async () => [],
+    getWorkspaceByName: async () => null,
+    createWorkspace: async () => {
+      throw new Error("createWorkspace not implemented by this test");
+    },
+    resetWorkspace: async () => {
+      throw new Error("resetWorkspace not implemented by this test");
+    },
+    archiveWorkspace: async () => null,
+    copyChatCustomizations: async () => {},
+    setChatEnabled: async () => {},
+    ...overrides,
+  };
+}
+
+/**
+ * @param {Partial<NonNullable<Parameters<typeof createWorkspaceControl>[0]["workspacePresentation"]>>} [overrides]
+ * @returns {NonNullable<Parameters<typeof createWorkspaceControl>[0]["workspacePresentation"]>}
+ */
+function createWorkspacePresentation(overrides = {}) {
+  return {
+    ensureWorkspaceVisible: async () => {
+      throw new Error("ensureWorkspaceVisible not implemented by this test");
+    },
+    presentWorkspaceBootstrap: async () => {},
+    archiveWorkspaceSurface: async () => {},
+    ...overrides,
+  };
+}
+
+/**
+ * @param {Partial<NonNullable<Parameters<typeof createWorkspaceControl>[0]["workspaceRepo"]>>} [overrides]
+ * @returns {NonNullable<Parameters<typeof createWorkspaceControl>[0]["workspaceRepo"]>}
+ */
+function createWorkspaceRepo(overrides = {}) {
+  return {
+    createWorkspaceCheckout: async () => {
+      throw new Error("createWorkspaceCheckout not implemented by this test");
+    },
+    replaceWorkspaceCheckout: async () => {
+      throw new Error("replaceWorkspaceCheckout not implemented by this test");
+    },
+    diffWorkspace: async () => "",
+    ...overrides,
+  };
+}
+
 describe("workspace control", () => {
   it("replaces duplicate workspaces when create is called unbound", async () => {
     /** @type {WorkspaceRow} */
@@ -30,7 +83,7 @@ describe("workspace control", () => {
     const calls = [];
 
     const control = createWorkspaceControl({
-      store: /** @type {import("../store.js").Store} */ ({
+      store: createStore({
         getWorkspaceByName: async () => existing,
         resetWorkspace: async () => {
           calls.push("resetWorkspace");
@@ -43,7 +96,7 @@ describe("workspace control", () => {
           calls.push("setChatEnabled");
         },
       }),
-      workspacePresentation: {
+      workspacePresentation: createWorkspacePresentation({
         ensureWorkspaceVisible: async () => {
           calls.push("ensureWorkspaceVisible");
           return {
@@ -54,8 +107,8 @@ describe("workspace control", () => {
         presentWorkspaceBootstrap: async () => {
           calls.push("presentWorkspaceBootstrap");
         },
-      },
-      workspaceRepo: {
+      }),
+      workspaceRepo: createWorkspaceRepo({
         replaceWorkspaceCheckout: async () => {
           calls.push("replaceWorkspaceCheckout");
           return {
@@ -63,7 +116,7 @@ describe("workspace control", () => {
             worktreePath: "/repo/.madabot/worktrees/payments-refresh",
           };
         },
-      },
+      }),
     });
 
     const { create } = control;
@@ -126,18 +179,18 @@ describe("workspace control", () => {
     const calls = [];
 
     const control = createWorkspaceControl({
-      store: /** @type {import("../store.js").Store} */ ({
+      store: createStore({
         getWorkspaceByName: async () => workspace,
         archiveWorkspace: async () => {
           calls.push("archiveWorkspace");
           return workspace;
         },
       }),
-      workspacePresentation: {
+      workspacePresentation: createWorkspacePresentation({
         archiveWorkspaceSurface: async () => {
           calls.push("archiveWorkspaceSurface");
         },
-      },
+      }),
     });
 
     const { archiveByName } = control;

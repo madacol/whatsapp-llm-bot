@@ -27,7 +27,10 @@ import {
 import { makeTextMessage } from "../whatsapp/message-payloads.js";
 import { createEncryptedPollVote, RAW_LID_POLL_FIXTURE } from "./poll-vote-fixtures.js";
 
-/** @type {import("@electric-sql/pglite").PGlite | null} */
+/** @typedef {Partial<import("@whiskeysockets/baileys").BaileysEventMap>} BaileysEvents */
+/** @typedef {(events: BaileysEvents) => Promise<void>} BaileysEventHandler */
+
+/** @type {import("../sqlite-db.js").SqliteDb | null} */
 let testDb = null;
 /** @type {import("../store.js").Store | null} */
 let testStore = null;
@@ -63,7 +66,7 @@ after(() => {
 });
 
 /**
- * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {import("../sqlite-db.js").SqliteDb} db
  * @param {string} chatId
  * @returns {Promise<Array<{ id: number, chat_id: string, payload_json: unknown }>>}
  */
@@ -82,7 +85,7 @@ async function getQueuedRows(db, chatId) {
 }
 
 /**
- * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {import("../sqlite-db.js").SqliteDb} db
  * @param {string} chatId
  * @returns {Promise<Array<{ original_queue_id: number, chat_id: string, reason: string }>>}
  */
@@ -101,7 +104,7 @@ async function getDeadLetterRows(db, chatId) {
 }
 
 /**
- * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {import("../sqlite-db.js").SqliteDb} db
  * @param {string} chatId
  * @returns {Promise<Array<{ source_event_type: string, state: string, last_error: string | null }>>}
  */
@@ -161,6 +164,29 @@ async function waitForTransportBackgroundWork() {
   }
 }
 
+/** @type {BaileysEventHandler} */
+const missingProcessEvents = async () => {
+  throw new Error("Expected connection event processor to be registered");
+};
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {{ values: unknown[] }}
+ */
+function requirePollPayload(message) {
+  const poll = message.poll;
+  assert.ok(poll && typeof poll === "object" && Array.isArray(/** @type {{ values?: unknown }} */ (poll).values), "expected poll values");
+  return /** @type {{ values: unknown[] }} */ (poll);
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {import("@whiskeysockets/baileys").WAMessage}
+ */
+function asWAMessage(message) {
+  return /** @type {import("@whiskeysockets/baileys").WAMessage} */ (/** @type {unknown} */ (message));
+}
+
 /**
  * @param {() => boolean} predicate
  * @param {string} failureMessage
@@ -184,7 +210,7 @@ describe("WhatsApp transport community creation", () => {
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -226,14 +252,14 @@ describe("WhatsApp transport community creation", () => {
   });
 
   it("coalesces rapid same-chat turn messages before invoking the app handler", async () => {
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {ChannelInput[]} */
     const turns = [];
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
@@ -281,8 +307,8 @@ describe("WhatsApp transport community creation", () => {
 
   it("resolves selectMany poll votes delivered through messages.update", async () => {
     const chatId = `poll-update-select-${Date.now()}@g.us`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {(value: unknown) => void} */
@@ -294,11 +320,11 @@ describe("WhatsApp transport community creation", () => {
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         const id = `sent-${sentMessages.length + 1}`;
         sentMessages.push({ id, chatId: targetChatId, message });
         if ("poll" in message) {
@@ -338,6 +364,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     await transport.start(async (turn) => {
+      assert.ok(turn.io.selectMany, "Expected WhatsApp transport turn IO to provide selectMany");
       const selection = await turn.io.selectMany(
         "Pick outputs",
         [{ id: "toolStatus", label: "⚪ Show pinned tool status" }],
@@ -366,8 +393,7 @@ describe("WhatsApp transport community creation", () => {
     );
     const pollEntry = sentMessages.find((entry) => "poll" in entry.message);
     assert.ok(pollEntry, "expected poll entry");
-    const poll = pollEntry.message.poll;
-    assert.ok(poll && typeof poll === "object" && Array.isArray(poll.values), "expected poll values");
+    const poll = requirePollPayload(pollEntry.message);
     const selectedOption = poll.values[0];
     assert.equal(selectedOption, "⚪ Show pinned tool status");
 
@@ -416,8 +442,8 @@ describe("WhatsApp transport community creation", () => {
       pollEncKey,
       encIv,
     } = RAW_LID_POLL_FIXTURE;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {(value: unknown) => void} */
@@ -429,11 +455,11 @@ describe("WhatsApp transport community creation", () => {
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         const id = "poll" in message ? pollMsgId : `sent-${sentMessages.length + 1}`;
         sentMessages.push({ id, chatId: targetChatId, message });
         if ("poll" in message) {
@@ -513,7 +539,7 @@ describe("WhatsApp transport community creation", () => {
       "messages.upsert": {
         type: "notify",
         messages: [
-          /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+          asWAMessage({
             key: {
               remoteJid: chatId,
               fromMe: false,
@@ -581,8 +607,8 @@ describe("WhatsApp transport community creation", () => {
       { id: "hide_sub_agent_output", label: "🟢 Hide sub-agent output" },
       { id: "hide_all_extras", label: "⚪ Hide all extras" },
     ];
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {(value: unknown) => void} */
@@ -594,11 +620,11 @@ describe("WhatsApp transport community creation", () => {
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         const id = "poll" in message ? pollMsgId : `sent-${sentMessages.length + 1}`;
         sentMessages.push({ id, chatId: targetChatId, message });
         if ("poll" in message) {
@@ -644,6 +670,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     await transport.start(async (turn) => {
+      assert.ok(turn.io.selectMany, "Expected WhatsApp transport turn IO to provide selectMany");
       const selection = await turn.io.selectMany(
         "Choose which extra agent progress outputs are shown in chat.",
         pollOptions,
@@ -675,7 +702,7 @@ describe("WhatsApp transport community creation", () => {
       "messages.upsert": {
         type: "notify",
         messages: [
-          /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+          asWAMessage({
             key: {
               remoteJid: chatId,
               fromMe: false,
@@ -741,8 +768,8 @@ describe("WhatsApp transport community creation", () => {
     const chatId = `poll-echo-secret-${Date.now()}@g.us`;
     const staleSendSecret = Buffer.from("ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100", "hex");
     const selectedOption = "⚪ Show pinned tool status";
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ id: string, chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {(value: unknown) => void} */
@@ -754,11 +781,11 @@ describe("WhatsApp transport community creation", () => {
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         const id = "poll" in message ? pollMsgId : `sent-${sentMessages.length + 1}`;
         sentMessages.push({ id, chatId: targetChatId, message });
         if ("poll" in message) {
@@ -804,6 +831,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     await transport.start(async (turn) => {
+      assert.ok(turn.io.selectMany, "Expected WhatsApp transport turn IO to provide selectMany");
       const selection = await turn.io.selectMany(
         "Choose which extra agent progress outputs are shown in chat.",
         [
@@ -839,7 +867,7 @@ describe("WhatsApp transport community creation", () => {
       "messages.upsert": {
         type: "notify",
         messages: [
-          /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+          asWAMessage({
             key: {
               remoteJid: chatId,
               fromMe: true,
@@ -872,7 +900,7 @@ describe("WhatsApp transport community creation", () => {
       "messages.upsert": {
         type: "notify",
         messages: [
-          /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+          asWAMessage({
             key: {
               remoteJid: chatId,
               fromMe: false,
@@ -937,15 +965,15 @@ describe("WhatsApp transport community creation", () => {
     /** @type {Array<ChannelInput>} */
     const deliveredTurns = [];
     let attempts = 0;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let firstProcessEvents = null;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let secondProcessEvents = null;
+    /** @type {BaileysEventHandler} */
+    let firstProcessEvents = missingProcessEvents;
+    /** @type {BaileysEventHandler} */
+    let secondProcessEvents = missingProcessEvents;
 
     const firstSocket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           firstProcessEvents = handler;
         },
       },
@@ -988,7 +1016,7 @@ describe("WhatsApp transport community creation", () => {
     const secondSocket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           secondProcessEvents = handler;
         },
       },
@@ -1037,15 +1065,15 @@ describe("WhatsApp transport community creation", () => {
     const dispatchReady = new Promise((resolve) => {
       markReady = () => resolve(undefined);
     });
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<ChannelInput>} */
     const deliveredTurns = [];
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
@@ -1086,7 +1114,8 @@ describe("WhatsApp transport community creation", () => {
 
     assert.equal(deliveredTurns.length, 0);
 
-    markReady?.();
+    const signalReady = /** @type {() => void} */ (/** @type {unknown} */ (markReady));
+    signalReady();
     await delay(25);
 
     assert.equal(deliveredTurns.length, 1);
@@ -1102,19 +1131,19 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-transport-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failSends = true;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (failSends) {
           throw new Error("Connection Closed");
         }
@@ -1174,19 +1203,19 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-open-retry-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failSends = false;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (failSends) {
           throw new Error("Connection Closed");
         }
@@ -1246,19 +1275,19 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-open-text-retry-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failSends = false;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (failSends) {
           throw new Error("Connection Closed");
         }
@@ -1314,19 +1343,19 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-update-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failSends = true;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (failSends) {
           throw new Error("Connection Closed");
         }
@@ -1385,19 +1414,19 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-1006-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failSends = true;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (failSends) {
           throw new Error("1006");
         }
@@ -1462,7 +1491,7 @@ describe("WhatsApp transport community creation", () => {
     const sentMessages = [];
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         throw createBaileysRateOverlimitError();
       },
@@ -1474,7 +1503,7 @@ describe("WhatsApp transport community creation", () => {
       event: runtimeEvent({
         type: "turn.started",
         provider: "codex",
-        turn: { status: "started" },
+        turn: { id: "turn-started-1", chatId, status: "started" },
       }),
       store: testStore,
     });
@@ -1501,7 +1530,7 @@ describe("WhatsApp transport community creation", () => {
       const sentMessages = [];
       let liveSocket = /** @type {import("@whiskeysockets/baileys").WASocket | null} */ (null);
       const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-        sendMessage: async (targetChatId, message) => {
+        sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
           sentMessages.push({ chatId: targetChatId, message });
           return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
         },
@@ -1543,7 +1572,7 @@ describe("WhatsApp transport community creation", () => {
     /** @type {Array<{ chatId: string, message: Record<string, unknown>, options?: Record<string, unknown> }>} */
     const sentMessages = [];
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-      sendMessage: async (targetChatId, message, options) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message, /** @type {Record<string, unknown> | undefined} */ options) => {
         sentMessages.push({ chatId: targetChatId, message, options });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -1576,19 +1605,19 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-group-metadata-${Date.now()}@g.us`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failSends = true;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (failSends) {
           throw new Error("Connection was lost");
         }
@@ -1663,7 +1692,7 @@ describe("WhatsApp transport community creation", () => {
     });
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -1692,8 +1721,8 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-replay-rate-overlimit-${Date.now()}@g.us`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failSends = true;
@@ -1708,11 +1737,11 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (failSends) {
           throw createBaileysRateOverlimitError();
         }
@@ -1770,8 +1799,8 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `quarantine-${Date.now()}@g.us`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let failMetadataRow = true;
@@ -1793,11 +1822,11 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (message.text === "🤖 old blocked answer" && failMetadataRow) {
           failMetadataRow = false;
           throw createBaileysGroupMetadataAttrsError();
@@ -1847,8 +1876,8 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `runtime-replay-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
 
@@ -1869,11 +1898,11 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -1930,14 +1959,15 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `acp-expired-edit-replay-${Date.now()}@g.us`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
+    const store = testStore;
     const expiredEditHandleStore = {
-      ...testStore,
+      ...store,
       getWhatsAppEditHandle: async (/** @type {string} */ id) => {
-        const row = await testStore.getWhatsAppEditHandle(id);
+        const row = await store.getWhatsAppEditHandle(id);
         return row ? { ...row, expires_at: "2000-01-01T00:00:00.000Z" } : null;
       },
     };
@@ -1981,11 +2011,11 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId, fromMe: true } };
       },
@@ -2031,7 +2061,10 @@ describe("WhatsApp transport community creation", () => {
         message: makeTextMessage("✅ *Task*  Review mock code"),
       },
     ]);
-    assert.ok(sentMessages.some((entry) => entry.message.react?.text === "👁" && entry.message.react.key?.id === "sent-1"));
+    assert.ok(sentMessages.some((entry) => {
+      const react = /** @type {{ text?: string, key?: { id?: string } } | undefined} */ (entry.message.react);
+      return react?.text === "👁" && react.key?.id === "sent-1";
+    }));
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
     assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
   });
@@ -2042,8 +2075,8 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `restart-open-hook-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {string[]} */
@@ -2053,11 +2086,11 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -2082,9 +2115,10 @@ describe("WhatsApp transport community creation", () => {
           throw new Error("Expected queued handle id before connection open");
         }
         const recoveredHandle = recoverQueuedMessage({ chatId, queueId: queuedAckId });
-        assert.equal(typeof recoveredHandle?.transportHandleId, "string");
+        const transportHandleId = recoveredHandle?.transportHandleId;
+        assert.ok(typeof transportHandleId === "string", "Expected recovered queued handle to have a transport handle id");
         await editMessage({
-          transportHandleId: recoveredHandle.transportHandleId,
+          transportHandleId,
           text: "Restarted.",
         });
       },
@@ -2129,8 +2163,8 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `restart-open-before-buffer-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {string[]} */
@@ -2139,14 +2173,14 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
         isBuffering() {
           return buffering;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -2216,8 +2250,8 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `restart-open-hook-fifo-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {string[]} */
@@ -2238,11 +2272,11 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         if (message.text === "🤖 queued unrelated output") {
           await queuedSendWait;
         }
@@ -2304,8 +2338,8 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `restart-open-buffering-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {string[]} */
@@ -2322,14 +2356,14 @@ describe("WhatsApp transport community creation", () => {
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
         isBuffering() {
           return buffering;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -2385,22 +2419,22 @@ describe("WhatsApp transport community creation", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-transport-"));
     const restartAckStore = createRestartAckStore(path.join(dir, "ack.json"));
     const chatId = `restart-e2e-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     let buffering = false;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
         isBuffering() {
           return buffering;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },
@@ -2440,7 +2474,6 @@ describe("WhatsApp transport community creation", () => {
         restartAckStore,
         restartRuntime: {
           listActiveTurns: () => [],
-          waitForIdle: async () => [],
         },
       });
       const result = await restartCommandHandler({
@@ -2452,8 +2485,9 @@ describe("WhatsApp transport community creation", () => {
       assert.equal(scheduled, 1);
 
       const pendingAck = await restartAckStore.read();
-      assert.equal(typeof pendingAck?.transportHandleId, "string");
-      assert.ok(await testStore.getWhatsAppEditHandle(pendingAck.transportHandleId));
+      const pendingAckTransportHandleId = pendingAck?.transportHandleId;
+      assert.ok(typeof pendingAckTransportHandleId === "string", "Expected restart ack to persist a transport handle id");
+      assert.ok(await testStore.getWhatsAppEditHandle(pendingAckTransportHandleId));
 
       const secondTransport = await createWhatsAppTransport({
         createConnectionSupervisor: async ({ onSocketReady }) => ({
@@ -2476,7 +2510,7 @@ describe("WhatsApp transport community creation", () => {
         outboundStore: testStore,
       });
 
-      processEvents = null;
+      processEvents = missingProcessEvents;
       buffering = true;
       await secondTransport.start(async () => {});
       if (!processEvents) {
@@ -2513,24 +2547,24 @@ describe("WhatsApp transport community creation", () => {
     }
 
     const chatId = `queued-before-open-${Date.now()}`;
-    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
-    let processEvents = null;
+    /** @type {BaileysEventHandler} */
+    let processEvents = missingProcessEvents;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
     /** @type {() => void} */
     let resolveReplyHandled = () => {};
     const replyHandled = new Promise((resolve) => {
-      resolveReplyHandled = resolve;
+      resolveReplyHandled = () => resolve(undefined);
     });
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
       ev: {
-        process(handler) {
+        process(/** @type {BaileysEventHandler} */ handler) {
           processEvents = handler;
         },
       },
-      sendMessage: async (targetChatId, message) => {
+      sendMessage: async (/** @type {string} */ targetChatId, /** @type {Record<string, unknown>} */ message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
       },

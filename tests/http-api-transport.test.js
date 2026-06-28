@@ -6,6 +6,18 @@ import { createHttpApiTransport } from "../http-api-transport.js";
 
 const TOKEN = "test-api-token";
 
+/**
+ * @typedef {{ events: Array<{ kind: string, event: { content?: unknown } }> }} HttpEventsResponse
+ * @typedef {{
+ *   turnId: string,
+ *   requestId: string,
+ *   chatId: string,
+ *   status: string,
+ *   createdAt: string,
+ *   updatedAt: string,
+ * }} HttpTurnStatusResponse
+ */
+
 /** @type {Array<{ stop: () => Promise<void> }>} */
 const transports = [];
 
@@ -16,12 +28,22 @@ afterEach(async () => {
   }
 });
 
+/**
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * @param {() => void | Promise<void>} assertion
+ * @param {number} [timeoutMs]
+ * @returns {Promise<void>}
+ */
 async function waitFor(assertion, timeoutMs = 1000) {
   const deadline = Date.now() + timeoutMs;
+  /** @type {unknown} */
   let lastError;
   while (Date.now() < deadline) {
     try {
@@ -33,7 +55,7 @@ async function waitFor(assertion, timeoutMs = 1000) {
     }
   }
   await assertion();
-  throw lastError;
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 /**
@@ -177,9 +199,10 @@ describe("http-api transport", () => {
     });
     transports.push(transport);
 
+    /** @type {() => void} */
     let releaseHandler = () => {};
     const handlerReleased = new Promise((resolve) => {
-      releaseHandler = resolve;
+      releaseHandler = () => resolve(undefined);
     });
     let handlerStarted = false;
     let handlerCompleted = false;
@@ -283,14 +306,17 @@ describe("http-api transport", () => {
     assert.equal(turns.length, 1);
     assert.equal(turns[0]?.senderName, "Android User");
     assert.deepEqual(turns[0]?.senderIds, ["android-user"]);
+    const inboundAudioBlock = turns[0]?.content[0];
+    assert.equal(inboundAudioBlock?.type, "audio");
+    assert.ok("path" in inboundAudioBlock);
     assert.deepEqual(turns[0]?.content, [
       {
         type: "audio",
-        path: turns[0]?.content[0]?.path,
+        path: inboundAudioBlock.path,
         mime_type: "audio/ogg; codecs=opus",
       },
     ]);
-    assert.match(turns[0]?.content[0]?.path ?? "", /^[a-f0-9]{64}\.ogg$/);
+    assert.match(inboundAudioBlock.path, /^[a-f0-9]{64}\.ogg$/);
 
     const audioRes = await fetch(body.audio.url, {
       headers: { authorization: `Bearer ${TOKEN}` },
@@ -302,7 +328,7 @@ describe("http-api transport", () => {
     const eventsRes = await fetch(`${transport.baseUrl}/api/transports/voice/events?chatId=${encodeURIComponent("api:client-1")}`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     });
-    const eventsBody = await eventsRes.json();
+    const eventsBody = /** @type {HttpEventsResponse} */ (await eventsRes.json());
     assert.equal(eventsBody.events.length, 2);
     assert.deepEqual(eventsBody.events.map((event) => event.kind), ["assistant_output", "assistant_output"]);
     assert.deepEqual(eventsBody.events[1].event.content, [
@@ -319,20 +345,23 @@ describe("http-api transport", () => {
     const res = await postTurn(transport, turnPayload("status-request"));
     const accepted = await res.json();
 
-    let status = null;
+    /** @type {{ value: HttpTurnStatusResponse | null }} */
+    const status = { value: null };
     await waitFor(async () => {
       const statusRes = await fetch(`${transport.baseUrl}/api/transports/voice/turns/${accepted.turnId}`, {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       assert.equal(statusRes.status, 200);
-      status = await statusRes.json();
-      assert.equal(status.status, "completed");
+      status.value = /** @type {HttpTurnStatusResponse} */ (await statusRes.json());
+      assert.equal(status.value.status, "completed");
     });
-    assert.equal(status.turnId, accepted.turnId);
-    assert.equal(status.requestId, "status-request");
-    assert.equal(status.chatId, "api:client-1");
-    assert.equal(typeof status.createdAt, "string");
-    assert.equal(typeof status.updatedAt, "string");
+    const completedStatus = status.value;
+    assert.ok(completedStatus);
+    assert.equal(completedStatus.turnId, accepted.turnId);
+    assert.equal(completedStatus.requestId, "status-request");
+    assert.equal(completedStatus.chatId, "api:client-1");
+    assert.equal(typeof completedStatus.createdAt, "string");
+    assert.equal(typeof completedStatus.updatedAt, "string");
   });
 
   it("flushes event stream headers before any events are available", async () => {

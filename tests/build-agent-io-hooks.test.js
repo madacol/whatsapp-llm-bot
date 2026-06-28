@@ -122,6 +122,15 @@ function assertSingleSentEvent(sent, messageKind, eventKind) {
 }
 
 /**
+ * @param {ToolPresentation | null} presentation
+ * @returns {import("../plan-presentation.js").PlanPresentation}
+ */
+function requirePlanPresentation(presentation) {
+  assert.equal(presentation?.kind, "plan");
+  return /** @type {import("../plan-presentation.js").PlanPresentation} */ (presentation);
+}
+
+/**
  * @param {AgentIOHooks} hooks
  * @param {string} command
  * @param {"started" | "completed" | "failed"} status
@@ -227,13 +236,13 @@ describe("buildAgentIoHooks", () => {
 
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
-    await hooks.onPlan?.(buildToolPresentation("update_plan", {
+    await hooks.onPlan?.(requirePlanPresentation(buildToolPresentation("update_plan", {
       explanation: "Keep the user informed.",
       plan: [
         { step: "Patch the formatter", status: "in_progress" },
         { step: "Run tests", status: "pending" },
       ],
-    }, undefined, undefined, undefined));
+    }, undefined, undefined, undefined)));
 
     assertSingleSentEvent(sent, "reply", "plan");
     if (sent[0].event.kind !== "plan") {
@@ -773,9 +782,9 @@ describe("buildAgentIoHooks", () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
     await emitRuntimeCommand(hooks, "pwd", "started");
-    await hooks.onPlan?.(buildToolPresentation("update_plan", {
+    await hooks.onPlan?.(requirePlanPresentation(buildToolPresentation("update_plan", {
       plan: [{ step: "Inspect output", status: "in_progress" }],
-    }));
+    }, undefined, undefined, undefined)));
     await emitRuntimeCommand(hooks, "pnpm test", "started");
     await hooks.onUsage?.("0.000000", { prompt: 1, completion: 1, cached: 0 });
     await emitRuntimeCommand(hooks, "git diff", "started");
@@ -800,7 +809,7 @@ describe("buildAgentIoHooks", () => {
   it("suppresses tool result progress events when visibility disables full tool details", async () => {
     const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
-    await hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
+    await hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }], "tool", {});
 
     assert.equal(sent.length, 0);
   });
@@ -941,7 +950,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("asks in the WhatsApp hook before presenting large snapshot file-change batches", async () => {
-    /** @type {Array<{ question: string, options: string[] }>} */
+    /** @type {Array<{ question: string, options: SelectOption[] }>} */
     const prompts = [];
     /** @type {Array<OutboundEvent>} */
     const sent = [];
@@ -999,6 +1008,7 @@ describe("buildAgentIoHooks", () => {
     const hooks = buildAgentIoHooks(
       {
         send: async (_event) => {
+          /** @type {{ inspects: MessageInspectState[], updates: MessageHandleUpdate[] }} */
           const entry = {
             inspects: [],
             updates: [],
@@ -1036,6 +1046,7 @@ describe("buildAgentIoHooks", () => {
     const hooks = buildAgentIoHooks(
       {
         send: async (_event) => {
+          /** @type {{ inspects: MessageInspectState[] }} */
           const entry = {
             inspects: [],
           };
@@ -1068,6 +1079,7 @@ describe("buildAgentIoHooks", () => {
     const hooks = buildAgentIoHooks(
       {
         send: async (_event) => {
+          /** @type {{ inspects: MessageInspectState[] }} */
           const entry = {
             inspects: [],
           };

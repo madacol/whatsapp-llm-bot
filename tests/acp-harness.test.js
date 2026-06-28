@@ -28,6 +28,85 @@ function createDeferred() {
   return { promise, resolve, reject };
 }
 
+/**
+ * @returns {MessageHandle}
+ */
+function createNoopMessageHandle() {
+  return {
+    update: async () => {},
+    setInspect: () => {},
+  };
+}
+
+/**
+ * @param {string[]} replies
+ * @returns {ExecuteActionContext["reply"]}
+ */
+function recordReplyContent(replies) {
+  return async (event) => {
+    replies.push(event.kind === "app_message" && typeof event.content === "string"
+      ? event.content
+      : JSON.stringify(event));
+    return createNoopMessageHandle();
+  };
+}
+
+/**
+ * @param {{ chatId: string, kind: HarnessSessionRef["kind"], sessionId: string }} input
+ * @returns {import("../store.js").ChatRow}
+ */
+function createHarnessChatInfo(input) {
+  return {
+    chat_id: input.chatId,
+    is_enabled: true,
+    system_prompt: null,
+    model: null,
+    respond_on_any: false,
+    respond_on_mention: true,
+    respond_on_reply: true,
+    respond_on: "mention",
+    debug: false,
+    media_to_text_models: {},
+    model_roles: {},
+    memory: false,
+    memory_threshold: null,
+    active_persona: null,
+    harness: null,
+    harness_cwd: null,
+    output_visibility: {},
+    harness_config: {},
+    harness_session_kind: input.kind,
+    harness_session_id: input.sessionId,
+    harness_session_history: [],
+    harness_fork_stack: [],
+    timestamp: "2026-03-23T20:00:00.000Z",
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} event
+ * @returns {string | null}
+ */
+function eventRequestId(event) {
+  const request = event.request;
+  if (!request || typeof request !== "object" || !("id" in request)) {
+    return null;
+  }
+  const id = /** @type {{ id?: unknown }} */ (request).id;
+  return typeof id === "string" ? id : null;
+}
+
+/**
+ * @param {ToolContentBlock | undefined} block
+ * @returns {string}
+ */
+function contentBlockText(block) {
+  if (block && "text" in block && typeof block.text === "string") {
+    return block.text;
+  }
+  return "";
+}
+
 describe("ACP harness", () => {
   it("runs an ACP stdio agent and emits canonical runtime events", async () => {
     const harness = createAcpHarness({
@@ -126,11 +205,13 @@ describe("ACP harness", () => {
   });
 
   it("forks provider sessions through the ACP session/fork RFD", async () => {
-    for (const [name, kind, label] of [
+    /** @type {Array<[string, HarnessSessionRef["kind"], string]>} */
+    const harnessCases = [
       ["codex", "codex", "Codex"],
       ["claude", "claude", "Claude"],
       ["pi", "pi", "Pi"],
-    ]) {
+    ];
+    for (const [name, kind, label] of harnessCases) {
       const harness = createAcpHarness({
         name,
         label,
@@ -150,26 +231,19 @@ describe("ACP harness", () => {
       const handled = await harness.handleCommand({
         chatId: `${name}-chat`,
         command: "fork",
-        chatInfo: {
-          chat_id: `${name}-chat`,
-          harness_session_kind: kind,
-          harness_session_id: "mock-session-1",
-        },
+        chatInfo: createHarnessChatInfo({ chatId: `${name}-chat`, kind, sessionId: "mock-session-1" }),
         context: /** @type {ExecuteActionContext} */ ({
           chatId: `${name}-chat`,
           senderIds: [],
           content: [],
           getIsAdmin: async () => true,
           send: async () => undefined,
-          reply: async (event) => {
-            replies.push(event.kind === "content" && typeof event.content === "string" ? event.content : JSON.stringify(event));
-          },
+          reply: recordReplyContent(replies),
           reactToMessage: async () => {},
           select: async () => "",
           confirm: async () => true,
         }),
         sessionForkControl: {
-          getHistory: async () => [],
           save: async (_chatId, session) => {
             saved = session;
           },
@@ -266,26 +340,19 @@ describe("ACP harness", () => {
     const handled = await harness.handleCommand({
       chatId: "minimal-fork-chat",
       command: "fork",
-      chatInfo: {
-        chat_id: "minimal-fork-chat",
-        harness_session_kind: "codex",
-        harness_session_id: "mock-session-1",
-      },
+      chatInfo: createHarnessChatInfo({ chatId: "minimal-fork-chat", kind: "codex", sessionId: "mock-session-1" }),
       context: /** @type {ExecuteActionContext} */ ({
         chatId: "minimal-fork-chat",
         senderIds: [],
         content: [],
         getIsAdmin: async () => true,
         send: async () => undefined,
-        reply: async (event) => {
-          replies.push(event.kind === "content" && typeof event.content === "string" ? event.content : JSON.stringify(event));
-        },
+        reply: recordReplyContent(replies),
         reactToMessage: async () => {},
         select: async () => "",
         confirm: async () => true,
       }),
       sessionForkControl: {
-        getHistory: async () => [],
         save: async () => {
           throw new Error("fork should not save without provider support");
         },
@@ -355,9 +422,10 @@ describe("ACP harness", () => {
     const events = [];
     const unsubscribe = adapter.subscribeEvents?.((event) => {
       events.push(event);
-      if (event.type === "request.opened" && event.request && typeof event.request === "object" && "id" in event.request && typeof event.request.id === "string") {
+      const requestId = eventRequestId(event);
+      if (event.type === "request.opened" && requestId) {
         setTimeout(() => {
-          void adapter.respondToRequest(event.request.id, { optionId: "allow-once" });
+          void adapter.respondToRequest(requestId, { optionId: "allow-once" });
         }, 0);
       }
     });
@@ -557,9 +625,10 @@ describe("ACP harness", () => {
     assert.ok(adapter);
 
     const unsubscribe = adapter.subscribeEvents?.((event) => {
-      if (event.type === "user-input.requested" && event.request && typeof event.request === "object" && "id" in event.request && typeof event.request.id === "string") {
+      const requestId = eventRequestId(event);
+      if (event.type === "user-input.requested" && requestId) {
         setTimeout(() => {
-          void adapter.respondToUserInput(event.request.id, {
+          void adapter.respondToUserInput(requestId, {
             action: "accept",
             content: { strategy: "conservative" },
           });
@@ -653,7 +722,7 @@ describe("ACP harness", () => {
         messages: [{ role: "user", content: [{ type: "text", text: "unknown extension" }] }],
       });
 
-      assert.match(result.response[0]?.text ?? "", /Unsupported ACP client request method: madabot\/unknown/);
+      assert.match(contentBlockText(result.response[0]), /Unsupported ACP client request method: madabot\/unknown/);
       assert.ok(events.some((event) => event.type === "extension.request" && event.method === "madabot/unknown"));
     } finally {
       unsubscribe?.();

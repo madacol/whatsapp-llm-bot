@@ -5,7 +5,7 @@
 /**
  * @returns {{
  *   hooks: RuntimeHookRecorderHooks,
- *   toolCalls: ToolCall[],
+ *   toolCalls: Array<LlmChatResponse["toolCalls"][0]>,
  *   toolErrors: string[],
  *   fileChanges: Array<Parameters<Required<AgentIOHooks>["onFileChange"]>[0]>,
  *   responses: string[],
@@ -13,7 +13,7 @@
  * }}
  */
 export function createRuntimeHookRecorder() {
-  /** @type {ToolCall[]} */
+  /** @type {Array<LlmChatResponse["toolCalls"][0]>} */
   const toolCalls = [];
   /** @type {string[]} */
   const toolErrors = [];

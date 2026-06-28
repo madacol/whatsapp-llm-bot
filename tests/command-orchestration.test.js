@@ -5,6 +5,16 @@ import { createCommandOrchestration } from "../conversation/command-orchestratio
 import { createMessageActionContext } from "../execute-action-context.js";
 import { createChannelInput } from "./helpers.js";
 
+/**
+ * @typedef {Pick<ReturnType<typeof import("../conversation/agent-runtime.js").createAgentRuntime>,
+ *   "cancelActiveRun" | "clearActiveSession" | "resolveSelection" | "resolveWorkdir" | "handleCommand"
+ * >} TestAgentRuntime
+ */
+
+/**
+ * @param {Partial<TestAgentRuntime>} [overrides]
+ * @returns {TestAgentRuntime}
+ */
 function createAgentRuntime(overrides = {}) {
   return {
     cancelActiveRun: async () => false,
@@ -23,6 +33,46 @@ function createAgentRuntime(overrides = {}) {
   };
 }
 
+/**
+ * @returns {import("../store.js").Store["addMessage"]}
+ */
+function createAddMessage() {
+  return async (chatId, messageData, senderIds = null, displayKey = null) => ({
+    message_id: 1,
+    chat_id: chatId,
+    sender_id: senderIds?.[0] ?? "",
+    message_data: messageData,
+    timestamp: new Date(0),
+    display_key: displayKey,
+  });
+}
+
+/**
+ * @returns {import("../workspace-command-router.js").WorkspaceControl}
+ */
+function createWorkspaceControl() {
+  return {
+    list: async () => {
+      throw new Error("workspace list should not run");
+    },
+    createWorkspace: async () => {
+      throw new Error("workspace create should not run");
+    },
+    status: async () => {
+      throw new Error("workspace status should not run");
+    },
+    diff: async () => {
+      throw new Error("workspace diff should not run");
+    },
+    archiveByName: async () => {
+      throw new Error("workspace archive-by-name should not run");
+    },
+    archiveCurrent: async () => {
+      throw new Error("workspace archive-current should not run");
+    },
+  };
+}
+
 describe("Command Orchestration", () => {
   it("owns slash diff workdir errors and reports the command as handled", async () => {
     const { context: turn, responses } = createChannelInput({
@@ -34,8 +84,8 @@ describe("Command Orchestration", () => {
       },
     });
     const commands = createCommandOrchestration({
-      addMessage: async () => {},
-      workspaceControl: {},
+      addMessage: createAddMessage(),
+      workspaceControl: createWorkspaceControl(),
       agentRuntime,
     });
 
@@ -57,8 +107,8 @@ describe("Command Orchestration", () => {
     });
     let handledCommand = "";
     const commands = createCommandOrchestration({
-      addMessage: async () => {},
-      workspaceControl: {},
+      addMessage: createAddMessage(),
+      workspaceControl: createWorkspaceControl(),
       agentRuntime: createAgentRuntime({
         handleCommand: async ({ command }) => {
           handledCommand = command;

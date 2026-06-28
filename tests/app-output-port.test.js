@@ -3,6 +3,18 @@ import assert from "node:assert/strict";
 import { createAppOutputPort } from "../app-output-port.js";
 
 /**
+ * @param {string} transportHandleId
+ * @returns {MessageHandle}
+ */
+function createReplyHandle(transportHandleId) {
+  return {
+    transportHandleId,
+    update: async () => {},
+    setInspect: () => {},
+  };
+}
+
+/**
  * @returns {{
  *   context: ExecuteActionContext,
  *   replies: OutboundEvent[],
@@ -20,7 +32,7 @@ function createSubject() {
     send: async () => undefined,
     reply: async (event) => {
       replies.push(event);
-      return { transportHandleId: `reply-${replies.length}` };
+      return createReplyHandle(`reply-${replies.length}`);
     },
     reactToMessage: async () => {},
     select: async () => "",

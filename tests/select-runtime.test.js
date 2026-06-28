@@ -7,9 +7,7 @@ import { createEncryptedPollVote, RAW_LID_POLL_FIXTURE } from "./poll-vote-fixtu
 /**
  * Create a mock socket that captures poll payloads.
  * @returns {{
- *   sock: {
- *     sendMessage: (chatId: string, message: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
- *   };
+ *   sock: WhatsAppPollSocketPort;
  *   sentMessages: Array<{ chatId: string, message: Record<string, unknown> }>;
  * }}
  */
@@ -17,29 +15,52 @@ function createMockSock() {
   /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
   const sentMessages = [];
 
-  return {
-    sock: {
-      async sendMessage(chatId, message) {
-        sentMessages.push({ chatId, message });
-        if ("react" in message) {
-          return null;
-        }
-        return {
-          key: {
-            id: "poll-1",
-            remoteJid: chatId,
+  /** @type {WhatsAppPollSocketPort} */
+  const sock = {
+    user: { id: "bot@s.whatsapp.net" },
+    async sendMessage(chatId, message) {
+      sentMessages.push({ chatId, message });
+      if ("react" in message) {
+        return undefined;
+      }
+      const rawValues = /** @type {{ poll?: { values?: unknown } }} */ (message).poll?.values;
+      const values = Array.isArray(rawValues) ? rawValues : [];
+      return /** @type {BaileysMessage} */ ({
+        key: {
+          id: "poll-1",
+          remoteJid: chatId,
+        },
+        message: {
+          pollCreationMessageV3: {
+            options: values
+              .filter((value) => typeof value === "string")
+              .map((value) => ({ optionName: value })),
           },
-          message: {
-            pollCreationMessageV3: {
-              options: (/** @type {{ poll?: { values?: unknown } }} */ (message).poll?.values ?? [])
-                .filter((value) => typeof value === "string")
-                .map((value) => ({ optionName: value })),
-            },
-          },
-        };
-      },
+        },
+      });
     },
+  };
+
+  return {
+    sock,
     sentMessages,
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {{ values: string[], selectableCount?: number }}
+ */
+function getPollPayload(message) {
+  const poll = message.poll;
+  assert.ok(poll && typeof poll === "object", "expected poll payload");
+  const values = /** @type {{ values?: unknown, selectableCount?: unknown }} */ (poll).values;
+  assert.ok(Array.isArray(values), "expected poll values array");
+  return {
+    values: values.filter((value) => typeof value === "string"),
+    selectableCount: typeof /** @type {{ selectableCount?: unknown }} */ (poll).selectableCount === "number"
+      ? /** @type {{ selectableCount: number }} */ (poll).selectableCount
+      : undefined,
   };
 }
 
@@ -112,9 +133,7 @@ describe("createSelectRuntime", () => {
     const pollMessage = sentMessages.find((entry) => "poll" in entry.message);
     assert.ok(pollMessage, "expected select() to send a poll message");
 
-    const poll = pollMessage.message.poll;
-    assert.ok(poll && typeof poll === "object", "expected poll payload");
-    assert.ok(Array.isArray(poll.values), "expected poll values array");
+    const poll = getPollPayload(pollMessage.message);
     assert.equal(poll.values.length, 2);
     assert.notEqual(
       poll.values[0],
@@ -150,9 +169,7 @@ describe("createSelectRuntime", () => {
     const pollMessage = sentMessages.find((entry) => "poll" in entry.message);
     assert.ok(pollMessage, "expected selectMany() to send a poll message");
 
-    const poll = pollMessage.message.poll;
-    assert.ok(poll && typeof poll === "object", "expected poll payload");
-    assert.ok(Array.isArray(poll.values), "expected poll values array");
+    const poll = getPollPayload(pollMessage.message);
     assert.equal(poll.selectableCount, 2);
     assert.deepEqual(poll.values, ["✅ commands", "thinking"]);
 
@@ -239,9 +256,7 @@ describe("createSelectRuntime", () => {
     const pollMessage = sentMessages.find((entry) => "poll" in entry.message);
     assert.ok(pollMessage, "expected selectMany() to send a poll message");
 
-    const poll = pollMessage.message.poll;
-    assert.ok(poll && typeof poll === "object", "expected poll payload");
-    assert.ok(Array.isArray(poll.values), "expected poll values array");
+    const poll = getPollPayload(pollMessage.message);
     assert.equal(poll.values[0], "commands");
 
     const selectedOptionHash = createHash("sha256").update(poll.values[0]).digest();
@@ -257,7 +272,7 @@ describe("createSelectRuntime", () => {
           vote: { selectedOptions: [selectedOptionHash] },
         }],
       },
-    }, /** @type {import("@whiskeysockets/baileys").WASocket} */ (sock));
+    }, sock);
 
     assert.deepEqual(pollVoteEvent, {
       chatId: "chat-1",
@@ -287,15 +302,17 @@ describe("createSelectRuntime", () => {
     } = RAW_LID_POLL_FIXTURE;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
+    /** @type {WhatsAppPollSocketPort} */
     const sock = {
       user: { id: botPhoneJid },
+      /** @param {string} targetChatId @param {any} message */
       async sendMessage(targetChatId, message) {
         sentMessages.push({ chatId: targetChatId, message });
         if ("react" in message) {
-          return null;
+          return undefined;
         }
         const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
-        return {
+        return /** @type {BaileysMessage} */ ({
           key: { id: pollMsgId, remoteJid: targetChatId, fromMe: true },
           message: {
             messageContextInfo: {
@@ -309,13 +326,10 @@ describe("createSelectRuntime", () => {
               selectableOptionsCount: 1,
             },
           },
-        };
+        });
       },
     };
-    const select = registry.createSelect(
-      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
-      chatId,
-    );
+    const select = registry.createSelect(sock, chatId);
 
     const selectionPromise = select("When should the bot reply in group chats?", [
       { id: "any", label: "any" },
@@ -326,7 +340,7 @@ describe("createSelectRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const pollVoteEvent = await registry.resolvePollVoteMessage(
-      /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+      /** @type {import("@whiskeysockets/baileys").WAMessage} */ (/** @type {unknown} */ ({
         key: {
           remoteJid: chatId,
           fromMe: false,
@@ -355,8 +369,8 @@ describe("createSelectRuntime", () => {
             senderTimestampMs: "1782318719966",
           },
         },
-      }),
-      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
+      })),
+      sock,
     );
 
     assert.deepEqual(pollVoteEvent, {
@@ -381,14 +395,16 @@ describe("createSelectRuntime", () => {
       pollEncKey,
       encIv,
     } = RAW_LID_POLL_FIXTURE;
+    /** @type {WhatsAppPollSocketPort} */
     const sock = {
       user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
+      /** @param {string} targetChatId @param {any} message */
       async sendMessage(targetChatId, message) {
         if ("react" in message) {
-          return null;
+          return undefined;
         }
         const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
-        return {
+        return /** @type {BaileysMessage} */ ({
           key: { id: pollMsgId, remoteJid: targetChatId, fromMe: true },
           message: {
             messageContextInfo: {
@@ -402,13 +418,10 @@ describe("createSelectRuntime", () => {
               selectableOptionsCount: 1,
             },
           },
-        };
+        });
       },
     };
-    const select = registry.createSelect(
-      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
-      chatId,
-    );
+    const select = registry.createSelect(sock, chatId);
 
     const selectionPromise = select("When should the bot reply in group chats?", [
       { id: "any", label: "any" },
@@ -419,7 +432,7 @@ describe("createSelectRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const pollVoteEvent = await registry.resolvePollVoteMessage(
-      /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+      /** @type {import("@whiskeysockets/baileys").WAMessage} */ (/** @type {unknown} */ ({
         key: {
           remoteJid: chatId,
           fromMe: false,
@@ -448,8 +461,8 @@ describe("createSelectRuntime", () => {
             senderTimestampMs: "1782320253495",
           },
         },
-      }),
-      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
+      })),
+      sock,
     );
 
     assert.deepEqual(pollVoteEvent, {
@@ -481,14 +494,16 @@ describe("createSelectRuntime", () => {
       { id: "hide_sub_agent_output", label: "🟢 Hide sub-agent output" },
       { id: "hide_all_extras", label: "⚪ Hide all extras" },
     ];
+    /** @type {WhatsAppPollSocketPort} */
     const sock = {
       user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
+      /** @param {string} targetChatId @param {any} message */
       async sendMessage(targetChatId, message) {
         if ("react" in message) {
-          return null;
+          return undefined;
         }
         const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
-        return {
+        return /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
           key: { id: pollMsgId, remoteJid: targetChatId, fromMe: true },
           message: {
             messageContextInfo: {
@@ -503,13 +518,10 @@ describe("createSelectRuntime", () => {
             },
           },
           participant: botPhoneJid,
-        };
+        }));
       },
     };
-    const selectMany = registry.createSelectMany(
-      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
-      chatId,
-    );
+    const selectMany = registry.createSelectMany(sock, chatId);
 
     const selectionPromise = selectMany(
       "Choose which extra agent progress outputs are shown in chat.",
@@ -520,7 +532,7 @@ describe("createSelectRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const pollVoteEvent = await registry.resolvePollVoteMessage(
-      /** @type {import("@whiskeysockets/baileys").WAMessage} */ ({
+      /** @type {import("@whiskeysockets/baileys").WAMessage} */ (/** @type {unknown} */ ({
         key: {
           remoteJid: chatId,
           fromMe: false,
@@ -549,8 +561,8 @@ describe("createSelectRuntime", () => {
             senderTimestampMs: "1782322728220",
           },
         },
-      }),
-      /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ (sock)),
+      })),
+      sock,
     );
 
     assert.deepEqual(pollVoteEvent, {

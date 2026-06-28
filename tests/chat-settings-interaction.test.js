@@ -20,7 +20,7 @@ describe("Chat Settings interaction", () => {
       rootDb: db,
       senderIds: ["master-user"],
       select: async (_question, options, config) => {
-        assert.deepEqual(options.map((option) => option.id), ["on", "off"]);
+        assert.deepEqual(options.map((option) => typeof option === "string" ? option : option.id), ["on", "off"]);
         assert.equal(config?.currentId, "off");
         return "on";
       },

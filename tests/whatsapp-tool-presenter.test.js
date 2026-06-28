@@ -9,6 +9,17 @@ import {
   getToolCallSummary,
 } from "../whatsapp/tool-presenter.js";
 
+/**
+ * @param {ToolPresentation | null} presentation
+ * @returns {import("../plan-presentation.js").PlanPresentation}
+ */
+function requirePlanPresentation(presentation) {
+  if (presentation?.kind !== "plan") {
+    assert.fail(`expected plan presentation, got ${presentation?.kind ?? "null"}`);
+  }
+  return presentation;
+}
+
 describe("WhatsApp tool presenter", () => {
   it("keeps semantic labels for explicit tools", () => {
     assert.equal(
@@ -162,7 +173,7 @@ describe("WhatsApp tool presenter", () => {
     }, undefined, undefined, undefined);
 
     assert.equal(
-      formatPlanPresentationText(presentation),
+      formatPlanPresentationText(requirePlanPresentation(presentation)),
       [
         "*Plan*",
         "",

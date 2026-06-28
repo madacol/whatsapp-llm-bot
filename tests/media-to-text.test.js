@@ -5,12 +5,49 @@ import { createTestDb, createMockLlmServer, withModelsCache } from "./helpers.js
 import { createLlmClient } from "../llm.js";
 import config from "../config.js";
 
-/** @type {PGlite} */
+/** @typedef {import("../store.js").MessageRow} MessageRow */
+/** @typedef {{ model?: string, messages: unknown[] }} MockLlmRequest */
+
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let db;
 
 before(async () => {
   db = await createTestDb();
 });
+
+/**
+ * @param {readonly unknown[]} content
+ * @param {number} index
+ * @returns {TextContentBlock}
+ */
+function textBlockAt(content, index) {
+  const block = content[index];
+  assert.ok(block && typeof block === "object" && "type" in block && block.type === "text" && "text" in block && typeof block.text === "string", `Expected text block at index ${index}`);
+  return /** @type {TextContentBlock} */ (block);
+}
+
+/**
+ * @param {readonly unknown[]} content
+ * @param {number} index
+ * @returns {QuoteContentBlock}
+ */
+function quoteBlockAt(content, index) {
+  const block = content[index];
+  assert.ok(block && typeof block === "object" && "type" in block && block.type === "quote" && "content" in block && Array.isArray(block.content), `Expected quote block at index ${index}`);
+  return /** @type {QuoteContentBlock} */ (block);
+}
+
+/**
+ * @param {Awaited<ReturnType<typeof createMockLlmServer>>} mockServer
+ * @param {number} index
+ * @returns {MockLlmRequest}
+ */
+function mockRequestAt(mockServer, index) {
+  const request = mockServer.getRequests()[index];
+  assert.ok(request && typeof request === "object", `Expected mock LLM request at index ${index}`);
+  assert.ok("messages" in request && Array.isArray(request.messages), `Expected mock LLM request ${index} to include messages`);
+  return /** @type {MockLlmRequest} */ (request);
+}
 
 describe("media-to-text", () => {
   describe("ensureMediaToTextSchema", () => {
@@ -96,6 +133,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -155,6 +193,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -227,6 +266,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -239,12 +279,11 @@ describe("media-to-text", () => {
           db,
         );
 
-        const translatedAudio = result.messages[0].message_data.content[1];
-        assert.equal(translatedAudio.type, "text");
+        const translatedAudio = textBlockAt(result.messages[0].message_data.content, 1);
         assert.equal(translatedAudio.text, "Audio transcript:\nWhat time is it?");
         assert.equal(translatedAudio.text.includes("[Audio description:"), false);
 
-        const translationRequest = mockServer.getRequests()[requestsBefore];
+        const translationRequest = mockRequestAt(mockServer, requestsBefore);
         const requestText = JSON.stringify(translationRequest.messages);
         assert.ok(requestText.includes("User's message: Please inspect this voice note"));
         assert.ok(requestText.includes("cleaned transcript"));
@@ -299,6 +338,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -309,7 +349,7 @@ describe("media-to-text", () => {
           llmClient,
           db,
         );
-        assert.ok(result1.messages[0].message_data.content[0].text.includes("Cached image description"));
+        assert.ok(textBlockAt(result1.messages[0].message_data.content, 0).text.includes("Cached image description"));
 
         // Second call — should use cached value, no new LLM call
         const result2 = await convertUnsupportedMedia(
@@ -319,7 +359,7 @@ describe("media-to-text", () => {
           llmClient,
           db,
         );
-        assert.ok(result2.messages[0].message_data.content[0].text.includes("Cached image description"));
+        assert.ok(textBlockAt(result2.messages[0].message_data.content, 0).text.includes("Cached image description"));
       });
     });
 
@@ -372,6 +412,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -383,7 +424,7 @@ describe("media-to-text", () => {
           db,
         );
 
-        const text = result.messages[0].message_data.content[0].text;
+        const text = textBlockAt(result.messages[0].message_data.content, 0).text;
         assert.ok(text.includes("Fresh post-boundary description"), `Should bypass stale cache entry, got: ${text}`);
         assert.ok(!text.includes("Stale pre-boundary description"));
       });
@@ -427,6 +468,7 @@ describe("media-to-text", () => {
                 ],
               },
               timestamp: new Date(),
+              display_key: null,
             },
           ];
 
@@ -443,7 +485,7 @@ describe("media-to-text", () => {
           const content = result.messages[0].message_data.content;
           assert.equal(content.length, 2);
           assert.equal(content[1].type, "text");
-          assert.ok(content[1].text.includes("[Unsupported"));
+          assert.ok(textBlockAt(content, 1).text.includes("[Unsupported"));
 
           // Should report skipped content types
           assert.deepEqual(result.skippedTypes, new Set(["image"]));
@@ -495,6 +537,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -508,10 +551,10 @@ describe("media-to-text", () => {
 
         const content = result.messages[0].message_data.content;
         assert.equal(content.length, 2);
-        assert.equal(content[0].text, "check this video");
+        assert.equal(textBlockAt(content, 0).text, "check this video");
         assert.equal(content[1].type, "text");
-        assert.equal(content[1].text, "Video description:\nA short video showing a person waving");
-        assert.equal(content[1].text.includes("[Video description:"), false);
+        assert.equal(textBlockAt(content, 1).text, "Video description:\nA short video showing a person waving");
+        assert.equal(textBlockAt(content, 1).text.includes("[Video description:"), false);
         assert.deepEqual(result.skippedTypes, new Set());
       });
     });
@@ -550,6 +593,7 @@ describe("media-to-text", () => {
               content: [{ type: "text", text: "hola que tal" }],
             },
             timestamp: new Date(),
+            display_key: null,
           },
           {
             message_id: 2,
@@ -560,6 +604,7 @@ describe("media-to-text", () => {
               content: [{ type: "text", text: "Hola! Todo bien, y tu?" }],
             },
             timestamp: new Date(),
+            display_key: null,
           },
           {
             message_id: 3,
@@ -578,6 +623,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -591,7 +637,7 @@ describe("media-to-text", () => {
         );
 
         // Check the LLM request included conversation context
-        const translationRequest = mockServer.getRequests()[requestsBefore];
+        const translationRequest = mockRequestAt(mockServer, requestsBefore);
         const reqMessages = translationRequest.messages;
 
         // Should have context messages before the translation prompt
@@ -638,6 +684,7 @@ describe("media-to-text", () => {
               content: [{ type: "text", text: "Old context about .git-local and purchase-manager." }],
             },
             timestamp: new Date(),
+            display_key: null,
           },
           {
             message_id: 2,
@@ -648,6 +695,7 @@ describe("media-to-text", () => {
               content: [{ type: "text", text: "/clear" }],
             },
             timestamp: new Date(),
+            display_key: null,
           },
           {
             message_id: 3,
@@ -658,6 +706,7 @@ describe("media-to-text", () => {
               content: [{ type: "text", text: "New context about markdown table rendering." }],
             },
             timestamp: new Date(),
+            display_key: null,
           },
           {
             message_id: 4,
@@ -676,6 +725,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -688,7 +738,7 @@ describe("media-to-text", () => {
           db,
         );
 
-        const translationRequest = mockServer.getRequests()[requestsBefore];
+        const translationRequest = mockRequestAt(mockServer, requestsBefore);
         const allText = JSON.stringify(translationRequest.messages);
         assert.ok(allText.includes("New context about markdown table rendering."), "Should keep context after /clear");
         assert.ok(allText.includes("What does this screenshot show?"), "Should include current user text");
@@ -722,6 +772,7 @@ describe("media-to-text", () => {
               content: [{ type: "text", text: "I am an assistant" }],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -778,6 +829,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -790,7 +842,7 @@ describe("media-to-text", () => {
           db,
         );
 
-        assert.ok(result.messages[0].message_data.content[0].text.includes("General model translation"));
+        assert.ok(textBlockAt(result.messages[0].message_data.content, 0).text.includes("General model translation"));
         assert.deepEqual(result.skippedTypes, new Set());
       });
     });
@@ -843,6 +895,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -855,10 +908,10 @@ describe("media-to-text", () => {
           db,
         );
 
-        assert.ok(result.messages[0].message_data.content[0].text.includes("Specific model translation"));
+        assert.ok(textBlockAt(result.messages[0].message_data.content, 0).text.includes("Specific model translation"));
 
         // Verify the LLM request used the specific model
-        const translationRequest = mockServer.getRequests()[requestsBefore];
+        const translationRequest = mockRequestAt(mockServer, requestsBefore);
         assert.equal(translationRequest.model, "specific/model");
       });
     });
@@ -911,6 +964,7 @@ describe("media-to-text", () => {
                 ],
               },
               timestamp: new Date(),
+              display_key: null,
             },
           ];
 
@@ -922,7 +976,7 @@ describe("media-to-text", () => {
             db,
           );
 
-          assert.ok(result.messages[0].message_data.content[0].text.includes("Env image model translation"));
+          assert.ok(textBlockAt(result.messages[0].message_data.content, 0).text.includes("Env image model translation"));
         });
       } finally {
         config.image_to_text_model = origImageModel;
@@ -985,6 +1039,7 @@ describe("media-to-text", () => {
                 ],
               },
               timestamp: new Date(),
+              display_key: null,
             },
           ];
 
@@ -997,10 +1052,10 @@ describe("media-to-text", () => {
             db,
           );
 
-          assert.ok(result.messages[0].message_data.content[0].text.includes("Env image specific translation"));
+          assert.ok(textBlockAt(result.messages[0].message_data.content, 0).text.includes("Env image specific translation"));
 
           // Verify the LLM request used the per-type env var model
-          const translationRequest = mockServer.getRequests()[requestsBefore];
+          const translationRequest = mockRequestAt(mockServer, requestsBefore);
           assert.equal(translationRequest.model, "env-image/model");
         });
       } finally {
@@ -1056,6 +1111,7 @@ describe("media-to-text", () => {
                 ],
               },
               timestamp: new Date(),
+              display_key: null,
             },
           ];
 
@@ -1068,7 +1124,7 @@ describe("media-to-text", () => {
             db,
           );
 
-          assert.ok(result.messages[0].message_data.content[0].text.includes("Fallback translation"));
+          assert.ok(textBlockAt(result.messages[0].message_data.content, 0).text.includes("Fallback translation"));
         });
       } finally {
         config.media_to_text_model = origContentModel;
@@ -1124,6 +1180,7 @@ describe("media-to-text", () => {
               ],
             },
             timestamp: new Date(),
+            display_key: null,
           },
         ];
 
@@ -1138,22 +1195,21 @@ describe("media-to-text", () => {
         // Should not be the same reference
         assert.notEqual(result.messages, messages);
         // Original quote should still have the image block
-        assert.equal(messages[0].message_data.content[0].content[1].type, "image");
+        assert.equal(quoteBlockAt(messages[0].message_data.content, 0).content[1].type, "image");
 
         // Translated message should have text replacement inside the quote
         const translated = result.messages[0];
-        const quoteBlock = translated.message_data.content[0];
-        assert.equal(quoteBlock.type, "quote");
+        const quoteBlock = quoteBlockAt(translated.message_data.content, 0);
         assert.equal(quoteBlock.content.length, 2);
         assert.equal(quoteBlock.content[0].type, "text");
-        assert.equal(quoteBlock.content[0].text, "Edit tool-display.js");
+        assert.equal(textBlockAt(quoteBlock.content, 0).text, "Edit tool-display.js");
         assert.equal(quoteBlock.content[1].type, "text");
-        assert.equal(quoteBlock.content[1].text, "Image description:\nA screenshot of code showing echo commands.");
-        assert.equal(quoteBlock.content[1].text.includes("[Image description:"), false);
+        assert.equal(textBlockAt(quoteBlock.content, 1).text, "Image description:\nA screenshot of code showing echo commands.");
+        assert.equal(textBlockAt(quoteBlock.content, 1).text.includes("[Image description:"), false);
 
         // The text after the quote should be untouched
         assert.equal(translated.message_data.content[1].type, "text");
-        assert.equal(translated.message_data.content[1].text, "can u see this image?");
+        assert.equal(textBlockAt(translated.message_data.content, 1).text, "can u see this image?");
       });
     });
   });

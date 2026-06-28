@@ -10,6 +10,25 @@ import { createWorkspaceRepoService } from "./workspace-repo-service.js";
 
 /**
  * @typedef {import("./store.js").Store} Store
+ * @typedef {Pick<Store,
+ *   "listActiveWorkspaces"
+ *   | "getWorkspaceByName"
+ *   | "createWorkspace"
+ *   | "resetWorkspace"
+ *   | "archiveWorkspace"
+ *   | "copyChatCustomizations"
+ *   | "setChatEnabled"
+ * >} WorkspaceControlStore
+ * @typedef {Pick<WorkspacePresentationPort,
+ *   "ensureWorkspaceVisible"
+ *   | "presentWorkspaceBootstrap"
+ *   | "archiveWorkspaceSurface"
+ * >} WorkspaceControlPresentationPort
+ * @typedef {Pick<ReturnType<typeof createWorkspaceRepoService>,
+ *   "createWorkspaceCheckout"
+ *   | "replaceWorkspaceCheckout"
+ *   | "diffWorkspace"
+ * >} WorkspaceControlRepo
  *
  * @typedef {{
  *   message: string,
@@ -59,7 +78,7 @@ function canReplaceWorkspace(repo, workspace) {
 }
 
 /**
- * @param {{ store: Store, workspacePresentation?: WorkspacePresentationPort, workspaceRepo?: ReturnType<typeof createWorkspaceRepoService> }} input
+ * @param {{ store: WorkspaceControlStore, workspacePresentation?: WorkspaceControlPresentationPort, workspaceRepo?: WorkspaceControlRepo }} input
  */
 export function createWorkspaceControl({ store, workspacePresentation, workspaceRepo = createWorkspaceRepoService() }) {
   /**

@@ -37,14 +37,8 @@ describe("workspace lifecycle service", () => {
         },
         status: async () => "",
         diff: async () => "",
-        test: async () => "",
-        commit: async () => "",
         archiveByName: async () => "",
         archiveCurrent: async () => "",
-        merge: async () => "",
-        showConflict: async () => "",
-        resolveConflicts: async () => "",
-        abortMerge: async () => "",
       },
       workspacePresentation: {
         ensureWorkspaceVisible: async () => {
@@ -84,6 +78,7 @@ describe("workspace lifecycle service", () => {
       control_chat_id: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
     });
     const context = /** @type {ExecuteActionContext} */ ({
       chatId: "repo-chat",

@@ -24,7 +24,9 @@ describe("reminder daemon", () => {
 
     /** @type {Array<{chatId: string, text: string}>} */
     const sent = [];
-    await pollChatReminders(db, async (chatId, text) => sent.push({ chatId, text }));
+    await pollChatReminders(db, async (chatId, text) => {
+      sent.push({ chatId, text });
+    });
 
     // Only the due reminder should fire
     assert.equal(sent.length, 1);

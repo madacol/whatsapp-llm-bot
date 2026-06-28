@@ -4,14 +4,29 @@ import { createRestartCommandHandler } from "../commands/restart-command.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
 import config from "../config.js";
 
+/**
+ * @param {Partial<MessageHandle>} [overrides]
+ * @returns {MessageHandle}
+ */
+function createMessageHandle(overrides = {}) {
+  return {
+    update: async () => {},
+    setInspect: () => {},
+    ...overrides,
+  };
+}
+
 function createLogSink() {
   /** @type {Array<{ level: string, message: string, data: Record<string, unknown> }>} */
   const entries = [];
   return {
     entries,
     log: {
+      /** @param {string} message @param {Record<string, unknown>} [data] */
       info: (message, data) => entries.push({ level: "info", message, data: data ?? {} }),
+      /** @param {string} message @param {Record<string, unknown>} [data] */
       warn: (message, data) => entries.push({ level: "warn", message, data: data ?? {} }),
+      /** @param {string} message @param {Record<string, unknown>} [data] */
       error: (message, data) => entries.push({ level: "error", message, data: data ?? {} }),
     },
   };
@@ -21,6 +36,7 @@ describe("restart command observability", () => {
   it("schedules restart immediately while active sidecar turns keep running", async () => {
     const originalMasterIds = config.MASTER_IDs;
     config.MASTER_IDs = ["master-user"];
+    /** @type {import("../restart/restart-ack-store.js").RestartAckRecord[]} */
     const savedRecords = [];
     const { entries, log } = createLogSink();
     /** @type {Array<{ restartId?: string } | undefined>} */
@@ -49,12 +65,10 @@ describe("restart command observability", () => {
       });
       const result = await handler({ chatId: "restart-chat@g.us", senderIds: ["master-user"] }, {});
       await result.afterResponse({
-        handle: {
+        handle: createMessageHandle({
           queueId: 42,
-          update: async () => {},
-          setInspect: () => {},
-          waitUntilSent: async () => ({ transportHandleId: "transport-restart-1" }),
-        },
+          waitUntilSent: async () => createMessageHandle({ transportHandleId: "transport-restart-1" }),
+        }),
       });
 
       assert.deepEqual(scheduled, [{ restartId: "restart-test-1" }]);
@@ -102,6 +116,7 @@ describe("restart command observability", () => {
   it("ignores legacy force parameters instead of recording interrupted turns", async () => {
     const originalMasterIds = config.MASTER_IDs;
     config.MASTER_IDs = ["master-user"];
+    /** @type {import("../restart/restart-ack-store.js").RestartAckRecord[]} */
     const savedRecords = [];
     try {
       const restartAckStore = createRestartAckStore();

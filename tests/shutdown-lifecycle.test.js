@@ -2,9 +2,14 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createGracefulShutdownHandler } from "../shutdown-lifecycle.js";
 
+/**
+ * @typedef {{ ms: number, callback: () => void, cleared: boolean, unrefCalled: boolean }} TestTimer
+ * @typedef {{ unref: () => void, readonly _timer: TestTimer }} TestTimerHandle
+ */
+
 function deferred() {
   /** @type {(value: unknown) => void} */
-  let resolve;
+  let resolve = () => {};
   const promise = new Promise((done) => {
     resolve = done;
   });
@@ -12,10 +17,15 @@ function deferred() {
 }
 
 function createTimerHarness() {
-  /** @type {{ ms: number, callback: () => void, cleared: boolean, unrefCalled: boolean }[]} */
+  /** @type {TestTimer[]} */
   const timers = [];
   return {
     timers,
+    /**
+     * @param {() => void} callback
+     * @param {number} ms
+     * @returns {TestTimerHandle}
+     */
     setTimeoutFn(callback, ms) {
       const timer = { ms, callback, cleared: false, unrefCalled: false };
       timers.push(timer);
@@ -28,12 +38,26 @@ function createTimerHarness() {
         },
       };
     },
+    /**
+     * @param {unknown} handle
+     * @returns {void}
+     */
     clearTimeoutFn(handle) {
-      handle._timer.cleared = true;
+      if (handle && typeof handle === "object" && "_timer" in handle) {
+        const timer = /** @type {{ _timer?: TestTimer }} */ (handle)._timer;
+        if (timer) {
+          timer.cleared = true;
+        }
+      }
     },
   };
 }
 
+/**
+ * @param {TestTimer[]} timers
+ * @param {number} ms
+ * @returns {Promise<TestTimer | undefined>}
+ */
 async function waitForTimer(timers, ms) {
   for (let index = 0; index < 10; index += 1) {
     const timer = timers.find((entry) => entry.ms === ms && !entry.cleared);
@@ -48,6 +72,7 @@ async function waitForTimer(timers, ms) {
 describe("graceful shutdown lifecycle", () => {
   it("does not apply the cleanup force-exit timer while active agent turns are draining", async () => {
     const activeDrain = deferred();
+    /** @type {string[]} */
     const events = [];
     const timers = createTimerHarness();
     const shutdown = createGracefulShutdownHandler({
@@ -96,6 +121,7 @@ describe("graceful shutdown lifecycle", () => {
 
   it("force-exits if resource cleanup hangs after active agent turns drain", async () => {
     const cleanup = deferred();
+    /** @type {string[]} */
     const events = [];
     const timers = createTimerHarness();
     const shutdown = createGracefulShutdownHandler({

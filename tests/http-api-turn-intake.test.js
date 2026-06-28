@@ -4,6 +4,18 @@ import assert from "node:assert/strict";
 import { createHttpApiTurnFlow } from "../http-api-turn-flow.js";
 import { createHttpApiTurnIntake } from "../http-api-turn-intake.js";
 
+/**
+ * @param {string} [requestId]
+ * @returns {{
+ *   requestId: string,
+ *   chatId: string,
+ *   senderIds: string[],
+ *   senderName: string,
+ *   timestamp: Date,
+ *   content: IncomingContentBlock[],
+ *   facts: ChannelInputFacts,
+ * }}
+ */
 function textPayload(requestId = "request-1") {
   return {
     requestId,
@@ -28,15 +40,15 @@ describe("HTTP API turn intake", () => {
       getBaseUrl: () => "http://127.0.0.1:3200",
       log: { error: () => {} },
     });
-    /** @type {ChannelInput | null} */
-    let receivedTurn = null;
+    /** @type {{ turn: ChannelInput | null }} */
+    const received = { turn: null };
 
     const response = await intake.submitTurn({
       transportId: "voice",
       payload: textPayload(),
       waitForCompletion: true,
       runTurn: async (turn) => {
-        receivedTurn = turn;
+        received.turn = turn;
         assert.equal(flow.getActiveTurnId(turn.chatId), "turn-1");
         await turn.io.reply({
           kind: "assistant_output",
@@ -52,6 +64,8 @@ describe("HTTP API turn intake", () => {
       status: "completed",
       text: "Done.",
     });
+    const receivedTurn = received.turn;
+    assert.ok(receivedTurn);
     assert.equal(receivedTurn?.channelId, "api:client-1");
     assert.equal(flow.getActiveTurnId("api:client-1"), null);
   });

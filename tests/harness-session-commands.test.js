@@ -52,6 +52,7 @@ describe("handleSessionControlCommand", () => {
       sessionControl: {
         archive: async (chatId) => {
           calls.push(`archive:${chatId}`);
+          return null;
         },
         getHistory: async () => [],
         restore: async () => null,
@@ -108,8 +109,9 @@ describe("handleSessionControlCommand", () => {
 
     assert.equal(handled, true);
     assert.deepEqual(calls, ["archive:chat-1", "restore:chat-1:sess-newer"]);
-    assert.equal(seenOptions[0]?.label, "Fixing WhatsApp parser (1h ago)");
-    assert.equal(seenOptions[0]?.id, "sess-newer");
+    const firstOption = seenOptions[0];
+    assert.equal(typeof firstOption === "string" ? firstOption : firstOption?.label, "Fixing WhatsApp parser (1h ago)");
+    assert.equal(typeof firstOption === "string" ? firstOption : firstOption?.id, "sess-newer");
     assert.ok(replies[0]?.includes("Session restored"));
     assert.ok(replies[0]?.includes("Fixing WhatsApp parser"));
   });

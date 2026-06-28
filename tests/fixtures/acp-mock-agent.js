@@ -30,6 +30,59 @@ function notify(method, params) {
 }
 
 /**
+ * @param {Record<string, unknown>} message
+ * @returns {Record<string, unknown>}
+ */
+function messageParams(message) {
+  return message.params && typeof message.params === "object" && !Array.isArray(message.params)
+    ? /** @type {Record<string, unknown>} */ (message.params)
+    : {};
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @param {string} key
+ * @returns {string | null}
+ */
+function stringParam(message, key) {
+  const value = messageParams(message)[key];
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @param {string} key
+ * @returns {number | null}
+ */
+function numberParam(message, key) {
+  const value = messageParams(message)[key];
+  return typeof value === "number" ? value : null;
+}
+
+/**
+ * @param {unknown} block
+ * @returns {string | null}
+ */
+function promptBlockText(block) {
+  if (!block || typeof block !== "object" || !("text" in block)) {
+    return null;
+  }
+  const text = /** @type {{ text?: unknown }} */ (block).text;
+  return typeof text === "string" ? text : null;
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {string}
+ */
+function promptText(message) {
+  const prompt = messageParams(message).prompt;
+  return Array.isArray(prompt)
+    ? prompt.map(promptBlockText).filter((text) => text !== null).join("\n")
+    : "";
+}
+
+/**
  * @returns {Promise<void>}
  */
 function settleNotifications() {
@@ -204,18 +257,22 @@ async function handleMessage(message) {
   }
   if (message.method === "session/load") {
     lastSessionOpenMethod = "session/load";
-    sessionId = message.params?.sessionId ?? "mock-session-1";
+    sessionId = stringParam(message, "sessionId") ?? "mock-session-1";
     send({ id: message.id, result: buildSessionOpenResult() });
     return;
   }
   if (message.method === "session/resume") {
     lastSessionOpenMethod = "session/resume";
-    sessionId = message.params?.sessionId ?? "mock-session-1";
+    sessionId = stringParam(message, "sessionId") ?? "mock-session-1";
     send({ id: message.id, result: buildSessionOpenResult() });
     return;
   }
   if (message.method === "session/set_config_option") {
-    configSelections[message.params?.configId] = message.params?.value;
+    const configId = stringParam(message, "configId");
+    const value = messageParams(message).value;
+    if (configId && (typeof value === "string" || typeof value === "boolean")) {
+      configSelections[configId] = value;
+    }
     send({ id: message.id, result: { configOptions: buildConfigOptions() } });
     return;
   }
@@ -225,7 +282,13 @@ async function handleMessage(message) {
     return;
   }
   if (message.method === "session/rollback") {
-    send({ id: message.id, result: { sessionId: message.params?.sessionId, rolledBackTurns: message.params?.numTurns } });
+    send({
+      id: message.id,
+      result: {
+        sessionId: stringParam(message, "sessionId"),
+        rolledBackTurns: numberParam(message, "numTurns"),
+      },
+    });
     return;
   }
   if (message.method === "session/prompt") {
@@ -580,9 +643,7 @@ async function handleRuntimeErrorStatusPrompt(message) {
  * @returns {Promise<void>}
  */
 async function handlePrompt(message) {
-  const prompt = Array.isArray(message.params?.prompt)
-    ? message.params.prompt.map((block) => block?.text).filter(Boolean).join("\n")
-    : "";
+  const prompt = promptText(message);
   const scenario = promptScenarios.find((entry) => prompt.includes(entry.match));
   if (scenario) {
     await scenario.handle(message);
@@ -689,7 +750,7 @@ async function handlePermissionPrompt(message) {
 /**
  * @param {Record<string, unknown>} message
  * @param {string} filePath
- * @returns {Promise<unknown>}
+ * @returns {Promise<void>}
  */
 async function requestEditPermission(message, filePath) {
   const sid = sessionId ?? "mock-session-1";

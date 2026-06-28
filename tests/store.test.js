@@ -17,6 +17,27 @@ describe("store with injected DB", () => {
     store = await initStore(db);
   });
 
+  /**
+   * @param {readonly unknown[]} content
+   * @param {number} index
+   * @returns {TextContentBlock}
+   */
+  function textBlockAt(content, index) {
+    const block = content[index];
+    assert.ok(block && typeof block === "object" && "type" in block && block.type === "text" && "text" in block && typeof block.text === "string", `Expected text block at index ${index}`);
+    return /** @type {TextContentBlock} */ (block);
+  }
+
+  /**
+   * @param {string} chatId
+   * @returns {Promise<import("../store.js").ChatRow>}
+   */
+  async function requireChat(chatId) {
+    const chat = await store.getChat(chatId);
+    assert.ok(chat, `Expected chat ${chatId} to exist`);
+    return chat;
+  }
+
   it("does not create chat-owned tables in the root DB", async () => {
     // Use a fresh DB to avoid pollution from other test files sharing createTestDb()
     const freshDb = new SqliteDb(":memory:");
@@ -325,8 +346,8 @@ describe("store with injected DB", () => {
       const messages = await store.getMessages("msg-test-2");
       assert.equal(messages.length, 2);
       // Newest first (DESC order)
-      assert.equal(messages[0].message_data.content[0].text, "second");
-      assert.equal(messages[1].message_data.content[0].text, "first");
+      assert.equal(textBlockAt(messages[0].message_data.content, 0).text, "second");
+      assert.equal(textBlockAt(messages[1].message_data.content, 0).text, "first");
     });
 
     it("respects the limit parameter", async () => {
@@ -364,7 +385,7 @@ describe("store with injected DB", () => {
 
       const messages = await store.getMessages("msg-test-time-2");
       assert.equal(messages.length, 1, "message within 8h should be included");
-      assert.equal(messages[0].message_data.content[0].text, "recent msg");
+      assert.equal(textBlockAt(messages[0].message_data.content, 0).text, "recent msg");
     });
 
     it("caps results at 300 by default", async () => {
@@ -393,7 +414,7 @@ describe("store with injected DB", () => {
       const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
       const messages = await store.getMessages("msg-test-time-4", twelveHoursAgo);
       assert.equal(messages.length, 1, "custom since should override default 8h");
-      assert.equal(messages[0].message_data.content[0].text, "old but wanted");
+      assert.equal(textBlockAt(messages[0].message_data.content, 0).text, "old but wanted");
     });
 
     it("excludes cleared messages by default", async () => {
@@ -410,7 +431,7 @@ describe("store with injected DB", () => {
 
       const messages = await store.getMessages("msg-test-cleared");
       assert.equal(messages.length, 1);
-      assert.equal(messages[0].message_data.content[0].text, "after clear");
+      assert.equal(textBlockAt(messages[0].message_data.content, 0).text, "after clear");
     });
 
     it("stores tool output that contains a virtual module NUL byte", async () => {
@@ -427,7 +448,7 @@ describe("store with injected DB", () => {
       const messages = await store.getMessages("msg-test-nul-tool-output");
       assert.equal(messages.length, 1);
       assert.equal(
-        /** @type {ToolMessage} */ (messages[0].message_data).content[0].text,
+        textBlockAt(/** @type {ToolMessage} */ (messages[0].message_data).content, 0).text,
         'RollupError: "\\0virtual:$env/static/private"',
       );
     });
@@ -456,12 +477,12 @@ describe("store with injected DB", () => {
       assert.ok(result, "should return the updated row");
       assert.equal(result.message_data.role, "tool");
       assert.equal(/** @type {ToolMessage} */ (result.message_data).tool_id, "call_xyz");
-      assert.equal(result.message_data.content[0].text, "real result");
+      assert.equal(textBlockAt(result.message_data.content, 0).text, "real result");
 
       // Verify via getMessages
       const messages = await store.getMessages("msg-test-update-tool");
       assert.equal(messages.length, 1);
-      assert.equal(messages[0].message_data.content[0].text, "real result");
+      assert.equal(textBlockAt(messages[0].message_data.content, 0).text, "real result");
     });
 
     it("returns null when no matching tool message exists", async () => {
@@ -501,7 +522,7 @@ describe("store with injected DB", () => {
       // Original should be unchanged
       const messages = await store.getMessages("msg-test-update-a");
       assert.equal(messages.length, 1);
-      assert.equal(messages[0].message_data.content[0].text, "[executing...]");
+      assert.equal(textBlockAt(messages[0].message_data.content, 0).text, "[executing...]");
     });
   });
 
@@ -510,12 +531,12 @@ describe("store with injected DB", () => {
       await store.createChat("harness-session-1");
 
       await store.saveHarnessSession("harness-session-1", { id: "sess-123", kind: "claude-sdk" });
-      let chat = await store.getChat("harness-session-1");
+      let chat = await requireChat("harness-session-1");
       assert.equal(chat.harness_session_id, "sess-123");
       assert.equal(chat.harness_session_kind, "claude-sdk");
 
       await store.saveHarnessSession("harness-session-1", null);
-      chat = await store.getChat("harness-session-1");
+      chat = await requireChat("harness-session-1");
       assert.equal(chat.harness_session_id, null);
       assert.equal(chat.harness_session_kind, null);
     });
@@ -546,7 +567,7 @@ describe("store with injected DB", () => {
       assert.equal(restored.kind, "codex");
       assert.equal(restored.title, null);
 
-      const chat = await store.getChat("harness-session-2");
+      const chat = await requireChat("harness-session-2");
       assert.equal(chat.harness_session_id, "sess-b");
       assert.equal(chat.harness_session_kind, "codex");
       assert.equal(chat.harness_session_history.length, 1);
@@ -565,7 +586,7 @@ describe("store with injected DB", () => {
       assert.equal(archived.id, "sess-unbound");
       assert.equal(archived.title, "Unbound archive");
 
-      const chat = await store.getChat("harness-session-unbound");
+      const chat = await requireChat("harness-session-unbound");
       assert.equal(chat.harness_session_id, null);
       assert.equal(chat.harness_session_kind, null);
       assert.equal(chat.harness_session_history.length, 1);

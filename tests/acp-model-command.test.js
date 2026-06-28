@@ -3,6 +3,16 @@ import assert from "node:assert/strict";
 import { __testAcpModelCommand } from "../harnesses/acp.js";
 
 /**
+ * @returns {MessageHandle}
+ */
+function createNoopMessageHandle() {
+  return {
+    update: async () => {},
+    setInspect: () => {},
+  };
+}
+
+/**
  * @returns {ExecuteActionContext}
  */
 function createContext() {
@@ -11,8 +21,8 @@ function createContext() {
     senderIds: [],
     content: [],
     getIsAdmin: async () => true,
-    send: async () => undefined,
-    reply: async () => undefined,
+    send: async () => createNoopMessageHandle(),
+    reply: async () => createNoopMessageHandle(),
     reactToMessage: async () => {},
     select: async () => "",
     confirm: async () => true,
@@ -21,6 +31,7 @@ function createContext() {
 
 /**
  * @param {(sessionId: string | null, commandSpec: { command: string, args: string[] }) => Promise<{ configOptions: Record<string, unknown>[], modelState: { currentModelId?: string, availableModels: Array<{ modelId: string, name: string, description?: string }> } | null }>} loadControlState
+ * @param {(() => Promise<string>) | undefined} [readCodexStatus]
  * @returns {(input: HarnessCommandContext) => Promise<boolean>}
  */
 function createModelCommandHandler(loadControlState, readCodexStatus = undefined) {
@@ -125,7 +136,8 @@ describe("ACP /model command option derivation", () => {
 
     const context = createContext();
     context.reply = async (event) => {
-      replies.push(event.kind === "content" && typeof event.content === "string" ? event.content : JSON.stringify(event));
+      replies.push(event.kind === "app_message" && typeof event.content === "string" ? event.content : JSON.stringify(event));
+      return createNoopMessageHandle();
     };
 
     assert.equal(await handler({

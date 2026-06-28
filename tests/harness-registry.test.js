@@ -111,6 +111,15 @@ function createTestHarness(name, overrides = {}) {
   };
 }
 
+/**
+ * @param {ReturnType<typeof resolveHarnessInstance>} instance
+ * @returns {ReturnType<typeof resolveHarnessInstance> & { adapter: HarnessAdapter }}
+ */
+function requireHarnessAdapter(instance) {
+  assert.ok(instance.adapter);
+  return /** @type {ReturnType<typeof resolveHarnessInstance> & { adapter: HarnessAdapter }} */ (instance);
+}
+
 describe("harness driver registry", () => {
   it("lists default driver metadata separately from harness instances", () => {
     const drivers = listHarnessDrivers();
@@ -132,13 +141,13 @@ describe("harness driver registry", () => {
   });
 
   it("runs the production codex driver through ACP", async () => {
-    const instance = resolveHarnessInstance("codex", {
+    const instance = requireHarnessAdapter(resolveHarnessInstance("codex", {
       instanceId: "acp-work",
       config: {
         command: process.execPath,
         args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
       },
-    });
+    }));
 
     assert.equal(instance.harness.getName(), "codex");
     assert.equal(instance.capabilities.supportsSessionFork, true);
@@ -172,13 +181,13 @@ describe("harness driver registry", () => {
     await registerOptionalHarnesses();
 
     for (const name of ["claude", "pi"]) {
-      const instance = resolveHarnessInstance(name, {
+      const instance = requireHarnessAdapter(resolveHarnessInstance(name, {
         instanceId: `${name}-acp-work`,
         config: {
           command: process.execPath,
           args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
         },
-      });
+      }));
 
       assert.equal(instance.harness.getName(), name);
       const result = await instance.adapter.sendTurn({
@@ -201,7 +210,7 @@ describe("harness driver registry", () => {
       sessionKind: "cursor",
     });
 
-    const instance = resolveHarnessInstance("cursor", { instanceId: "cursor-work" });
+    const instance = requireHarnessAdapter(resolveHarnessInstance("cursor", { instanceId: "cursor-work" }));
 
     assert.equal(instance.name, "cursor");
     assert.equal(instance.displayName, "Cursor");
@@ -236,7 +245,7 @@ describe("harness driver registry", () => {
       const drivers = listHarnessDrivers();
       assert.ok(drivers.some((driver) => driver.name === "env-agent" && driver.displayName === "Env Agent"));
 
-      const instance = resolveHarnessInstance("env-agent", { instanceId: "env-agent-work" });
+      const instance = requireHarnessAdapter(resolveHarnessInstance("env-agent", { instanceId: "env-agent-work" }));
       const result = await instance.adapter.sendTurn({
         chatId: "env-agent-chat",
         input: "Run env ACP",

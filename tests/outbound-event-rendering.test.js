@@ -49,6 +49,7 @@ describe("semantic outbound event rendering", () => {
   });
 
   it("renders tool call events through transport tool presentation", () => {
+    /** @type {ToolCallEvent} */
     const event = {
       kind: "tool_call",
       cwd: "/repo",

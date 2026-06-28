@@ -8,10 +8,32 @@ import { setTimeout as delay } from "node:timers/promises";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
+ * @typedef {{ type?: string } & Record<string, unknown>} ShutdownChildMessage
+ */
+
+/**
+ * @param {unknown} message
+ * @returns {ShutdownChildMessage}
+ */
+function toChildMessage(message) {
+  return message && typeof message === "object"
+    ? /** @type {ShutdownChildMessage} */ (message)
+    : {};
+}
+
+/**
+ * @param {unknown} message
+ * @returns {string | undefined}
+ */
+function messageType(message) {
+  return toChildMessage(message).type;
+}
+
+/**
  * @param {import("node:child_process").ChildProcess} child
  * @param {(message: unknown) => boolean} predicate
  * @param {number} timeoutMs
- * @returns {Promise<unknown>}
+ * @returns {Promise<ShutdownChildMessage>}
  */
 function waitForMessage(child, predicate, timeoutMs = 1_000) {
   return new Promise((resolve, reject) => {
@@ -24,13 +46,15 @@ function waitForMessage(child, predicate, timeoutMs = 1_000) {
       child.off("message", onMessage);
       child.off("exit", onExit);
     }
+    /** @param {unknown} message */
     function onMessage(message) {
       if (!predicate(message)) {
         return;
       }
       cleanup();
-      resolve(message);
+      resolve(toChildMessage(message));
     }
+    /** @param {number | null} code @param {NodeJS.Signals | null} signal */
     function onExit(code, signal) {
       cleanup();
       reject(new Error(`Child exited before expected message: code=${code} signal=${signal}`));
@@ -56,28 +80,29 @@ describe("shutdown lifecycle process boundary", () => {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       execArgv: [],
     });
+    /** @type {ShutdownChildMessage[]} */
     const messages = [];
-    child.on("message", (message) => messages.push(message));
+    child.on("message", (message) => messages.push(toChildMessage(message)));
     t.after(() => {
       if (child.exitCode == null && child.signalCode == null) {
         child.kill("SIGKILL");
       }
     });
 
-    await waitForMessage(child, (message) => message?.type === "ready");
+    await waitForMessage(child, (message) => messageType(message) === "ready");
     assert.equal(child.kill("SIGTERM"), true);
-    await waitForMessage(child, (message) => message?.type === "active-wait-started");
+    await waitForMessage(child, (message) => messageType(message) === "active-wait-started");
 
     await delay(250);
     assert.equal(child.exitCode, null, `Expected child to stay alive while active turn drains, got messages ${JSON.stringify(messages)}`);
     assert.equal(child.signalCode, null);
-    assert.ok(!messages.some((message) => message?.type === "cleanup"), `Cleanup started before active turn finished: ${JSON.stringify(messages)}`);
+    assert.ok(!messages.some((message) => message.type === "cleanup"), `Cleanup started before active turn finished: ${JSON.stringify(messages)}`);
 
     child.send("release-active-turn");
     const exit = await waitForExit(child);
 
     assert.deepEqual(exit, { code: 0, signal: null });
-    assert.deepEqual(messages.map((message) => message?.type), [
+    assert.deepEqual(messages.map((message) => message.type), [
       "ready",
       "log",
       "active-wait-started",

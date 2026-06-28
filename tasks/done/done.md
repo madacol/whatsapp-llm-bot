@@ -29,3 +29,4 @@ Completed task details are archived here instead of deleted.
 - Idempotent chat workspace adoption. [details](chat-workspace-adoption-idempotence.md)
 - Cleaner audio transcription prompt. [details](cleaner-audio-transcriptions.md)
 - Vertical scenario runner proof. [details](vertical-scenario-runner.md)
+- Test type-checking migration. [details](test-type-checking.md)

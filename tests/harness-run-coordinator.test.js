@@ -4,6 +4,18 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createHarnessRunCoordinator } from "../harnesses/run-coordinator.js";
 
 /**
+ * @typedef {{
+ *   supportsLiveInput: boolean;
+ *   injectMessage?: (chatId: string | HarnessSessionRef, text: string) => boolean | Promise<boolean>;
+ * }} TestLiveInputTarget
+ *
+ * @typedef {{
+ *   enqueue: (input: { chatId: string, turnId: string, text: string }) => Promise<{ id: number }>,
+ *   markAccepted: (id: number) => Promise<void>,
+ * }} TestLiveInputJournal
+ */
+
+/**
  * @param {string} chatId
  * @param {string} text
  * @returns {ChannelInput}
@@ -77,6 +89,7 @@ describe("createHarnessRunCoordinator", () => {
   it("injects into an active adapter query before starting a second run", async () => {
     /** @type {string[]} */
     const injected = [];
+    /** @type {TestLiveInputTarget} */
     const liveInputTarget = {
       supportsLiveInput: true,
       injectMessage: (chatId, text) => {
@@ -104,6 +117,7 @@ describe("createHarnessRunCoordinator", () => {
     const sidecarAck = createDeferred();
     /** @type {string[]} */
     const events = [];
+    /** @type {TestLiveInputTarget} */
     const liveInputTarget = {
       supportsLiveInput: true,
       injectMessage: async (_chatId, text) => {
@@ -113,6 +127,7 @@ describe("createHarnessRunCoordinator", () => {
         return true;
       },
     };
+    /** @type {TestLiveInputJournal} */
     const liveInputJournal = {
       enqueue: async ({ chatId, turnId, text }) => {
         events.push(`enqueue:${chatId}:${turnId}:${text}`);
@@ -154,6 +169,7 @@ describe("createHarnessRunCoordinator", () => {
     const firstInjected = [];
     /** @type {string[]} */
     const secondInjected = [];
+    /** @type {TestLiveInputTarget} */
     const firstTarget = {
       supportsLiveInput: true,
       injectMessage: (_chatId, text) => {
@@ -161,6 +177,7 @@ describe("createHarnessRunCoordinator", () => {
         return true;
       },
     };
+    /** @type {TestLiveInputTarget} */
     const secondTarget = {
       supportsLiveInput: true,
       injectMessage: (_chatId, text) => {
@@ -195,6 +212,7 @@ describe("createHarnessRunCoordinator", () => {
     /** @type {string[]} */
     const injected = [];
     let ready = false;
+    /** @type {TestLiveInputTarget} */
     const liveInputTarget = {
       supportsLiveInput: true,
       injectMessage: async (_chatId, text) => {
@@ -227,6 +245,7 @@ describe("createHarnessRunCoordinator", () => {
     /** @type {string[]} */
     const events = [];
     let ready = false;
+    /** @type {TestLiveInputTarget} */
     const liveInputTarget = {
       supportsLiveInput: true,
       injectMessage: async (_chatId, text) => {
@@ -237,6 +256,7 @@ describe("createHarnessRunCoordinator", () => {
         return true;
       },
     };
+    /** @type {TestLiveInputJournal} */
     const liveInputJournal = {
       enqueue: async ({ text }) => {
         events.push(`enqueue:${text}`);
@@ -271,6 +291,7 @@ describe("createHarnessRunCoordinator", () => {
   });
 
   it("returns a fallback turn when live input loses the race with turn completion", async () => {
+    /** @type {TestLiveInputTarget} */
     const liveInputTarget = {
       supportsLiveInput: true,
       injectMessage: async () => false,
@@ -298,6 +319,7 @@ describe("createHarnessRunCoordinator", () => {
   });
 
   it("prepares the latest failed live-input turn for replay on finish", async () => {
+    /** @type {TestLiveInputTarget} */
     const liveInputTarget = {
       supportsLiveInput: true,
       injectMessage: async () => false,

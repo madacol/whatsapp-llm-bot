@@ -2240,8 +2240,8 @@ function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, 
  * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {OutboundEvent} event
- * @param {{ quoted?: BaileysMessage } | undefined} options
- * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ quoted?: BaileysMessage } | undefined} [options]
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} [reactionRuntime]
  * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} [sendOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
@@ -2272,8 +2272,8 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime, s
  * @param {string} chatId
  * @param {MessageSource} source
  * @param {SendContent} content
- * @param {{ quoted?: BaileysMessage } | undefined} options
- * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ quoted?: BaileysMessage } | undefined} [options]
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} [reactionRuntime]
  * @param {OutboundEvent | undefined} [event]
  * @param {{ workdir?: string | null, editHandleStore?: import("../../store.js").Store, pin?: boolean, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} [renderOptions]
  * @returns {Promise<MessageHandle | undefined>}

@@ -17,6 +17,7 @@ describe("createActiveSessionDirectory", () => {
     const handle = {
       abortController,
       done,
+      /** @param {string} text */
       steer: async (text) => {
         steered.push(text);
         return true;

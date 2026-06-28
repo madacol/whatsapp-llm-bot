@@ -22,6 +22,7 @@ describe("index restart process wait", () => {
         if (probes >= 3) {
           throw new Error("process exited");
         }
+        return true;
       },
     });
 

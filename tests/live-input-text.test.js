@@ -13,9 +13,10 @@ describe("buildLiveInputText", () => {
     const db = await createTestDb();
     /** @type {unknown[]} */
     const requests = [];
-    const llmClient = /** @type {LlmClient} */ ({
+    const llmClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       chat: {
         completions: {
+          /** @param {unknown} request */
           create: async (request) => {
             requests.push(request);
             return {
@@ -24,7 +25,7 @@ describe("buildLiveInputText", () => {
           },
         },
       },
-    });
+    }));
 
     const text = await buildLiveInputText({
       content: [

@@ -1,4 +1,4 @@
-import { describe, it, before, after, afterEach } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -21,14 +21,33 @@ const tempDirs = [];
 
 /** @type {import("../models-cache.js").OpenRouterModel[]} */
 const fakeModels = [
-  { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
-  { id: "openai/gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
-  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", context_length: 200000, pricing: { prompt: "0.000003", completion: "0.000015" } },
+  { id: "openai/gpt-4o", name: "GPT-4o", description: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+  { id: "openai/gpt-4.1-mini", name: "GPT-4.1 Mini", description: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", description: "Claude 3.5 Sonnet", context_length: 200000, pricing: { prompt: "0.000003", completion: "0.000015" } },
 ];
 
 async function writeFakeCache() {
   await fs.mkdir(path.dirname(CACHE_PATH), { recursive: true });
   await fs.writeFile(CACHE_PATH, JSON.stringify(fakeModels));
+}
+
+/**
+ * @param {string} chatId
+ * @returns {Promise<NonNullable<Awaited<ReturnType<typeof readChatConfig>>>>}
+ */
+async function readRequiredChatConfig(chatId) {
+  const chat = await readChatConfig(chatId);
+  assert.ok(chat, `Expected chat config ${chatId} to exist`);
+  return chat;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function requireString(value) {
+  assert.ok(typeof value === "string", "Expected string value");
+  return value;
 }
 
 /**
@@ -95,7 +114,7 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("openai/gpt-4.1-mini"));
 
-      const chat = await readChatConfig("chat-set-1");
+      const chat = await readRequiredChatConfig("chat-set-1");
       assert.equal(chat.model, "openai/gpt-4.1-mini");
     });
 
@@ -107,7 +126,7 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("default"));
 
-      const chat = await readChatConfig("chat-set-2");
+      const chat = await readRequiredChatConfig("chat-set-2");
       assert.equal(chat.model, null);
     });
 
@@ -120,7 +139,7 @@ describe("per-chat model selection", () => {
       assert.ok(typeof result === "string");
       assert.ok(result.includes("not found"));
 
-      const chat = await readChatConfig("chat-set-3");
+      const chat = await readRequiredChatConfig("chat-set-3");
       assert.equal(chat.model, null);
     });
 
@@ -152,7 +171,7 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
 
-      const chat = await readChatConfig("mem-on-1");
+      const chat = await readRequiredChatConfig("mem-on-1");
       assert.equal(chat.memory, true);
     });
 
@@ -164,7 +183,7 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("disabled"), `expected 'disabled' in: ${result}`);
 
-      const chat = await readChatConfig("mem-off-1");
+      const chat = await readRequiredChatConfig("mem-off-1");
       assert.equal(chat.memory, false);
     });
 
@@ -198,7 +217,7 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("Debug on"), `expected 'Debug on' in: ${result}`);
 
-      const chat = await readChatConfig("dbg-on-1");
+      const chat = await readRequiredChatConfig("dbg-on-1");
       assert.equal(chat.debug, true, "debug should be true");
     });
   });
@@ -216,7 +235,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
 
-        const chat = await readChatConfig("en-1");
+        const chat = await readRequiredChatConfig("en-1");
         assert.equal(chat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -235,7 +254,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("disabled"), `expected 'disabled' in: ${result}`);
 
-        const chat = await readChatConfig("en-2");
+        const chat = await readRequiredChatConfig("en-2");
         assert.equal(chat.is_enabled, false);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -265,7 +284,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("remote-chat@s.whatsapp.net"), `expected target chat in response, got: ${result}`);
 
-        const chat = await readChatConfig("remote-chat@s.whatsapp.net");
+        const chat = await readRequiredChatConfig("remote-chat@s.whatsapp.net");
         assert.equal(chat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -301,7 +320,7 @@ describe("per-chat model selection", () => {
         const { rows: [rootChat] } = await rootDb.sql`
           SELECT chat_id FROM chats WHERE chat_id = 'remote-isolated@g.us'
         `;
-        const targetChat = await readChatConfig("remote-isolated@g.us");
+        const targetChat = await readRequiredChatConfig("remote-isolated@g.us");
         assert.equal(rootChat.chat_id, "remote-isolated@g.us");
         assert.equal(targetChat.is_enabled, true);
       } finally {
@@ -321,7 +340,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("remote-off@g.us"), `expected target chat in response, got: ${result}`);
 
-        const chat = await readChatConfig("remote-off@g.us");
+        const chat = await readRequiredChatConfig("remote-off@g.us");
         assert.equal(chat.is_enabled, false);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -430,11 +449,12 @@ describe("per-chat model selection", () => {
         { setting: "harness" },
       );
 
-      assert.equal(result, promptText);
-      assert.ok(promptText?.includes("*Harness*"), `expected titled header, got: ${promptText}`);
-      assert.ok(promptText?.includes("- Current: codex"), `expected current bullet, got: ${promptText}`);
-      assert.ok(!promptText?.includes("*Options*"), `picker prompt should omit options, got: ${promptText}`);
-      assert.ok(!promptText?.includes("*Examples*"), `picker prompt should omit examples, got: ${promptText}`);
+      const prompt = requireString(promptText);
+      assert.equal(result, prompt);
+      assert.ok(prompt.includes("*Harness*"), `expected titled header, got: ${prompt}`);
+      assert.ok(prompt.includes("- Current: codex"), `expected current bullet, got: ${prompt}`);
+      assert.ok(!prompt.includes("*Options*"), `picker prompt should omit options, got: ${prompt}`);
+      assert.ok(!prompt.includes("*Examples*"), `picker prompt should omit examples, got: ${prompt}`);
     });
 
     it("resets a friendly key through the reset verb", async () => {
@@ -446,7 +466,7 @@ describe("per-chat model selection", () => {
 
       assert.ok(result.toLowerCase().includes("default") || result.toLowerCase().includes("workspace"), `expected reset confirmation, got: ${result}`);
 
-      const chat = await readChatConfig("cfg-reset-1");
+      const chat = await readRequiredChatConfig("cfg-reset-1");
       assert.equal(chat.harness_cwd, null);
     });
 
@@ -477,7 +497,7 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("Use `!s show`"), `expected picker guidance, got: ${result}`);
       assert.ok(result.includes("!s reset show"), `expected reset guidance, got: ${result}`);
 
-      const chat = await readChatConfig("cfg-show-2");
+      const chat = await readRequiredChatConfig("cfg-show-2");
       assert.deepEqual(chat.output_visibility, {});
     });
 
@@ -502,10 +522,11 @@ describe("per-chat model selection", () => {
         { setting: "show" },
       );
 
+      const prompt = requireString(promptText);
       assert.equal(
-        promptText,
+        prompt,
         "Choose which extra agent progress outputs are shown in chat.",
-        `expected concise show prompt, got: ${promptText}`,
+        `expected concise show prompt, got: ${prompt}`,
       );
       assert.deepEqual(
         pickerOptions,
@@ -521,7 +542,7 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("Hide file changes"), `expected hide summary, got: ${result}`);
       assert.ok(!result.includes("thinking"), `did not expect unchanged thinking summary, got: ${result}`);
 
-      const chat = await readChatConfig("cfg-show-3");
+      const chat = await readRequiredChatConfig("cfg-show-3");
       assert.deepEqual(chat.output_visibility, {
         toolStatus: true,
         changes: false,
@@ -542,7 +563,7 @@ describe("per-chat model selection", () => {
 
       assert.equal(result, "");
 
-      const chat = await readChatConfig("cfg-show-4");
+      const chat = await readRequiredChatConfig("cfg-show-4");
       assert.deepEqual(chat.output_visibility, {});
     });
   });
