@@ -2,7 +2,7 @@
 
 ## Subject
 
-Implemented the first production-quality test-infrastructure slice for a vertical scenario runner built from plain JavaScript step arrays and composite module wrappers.
+Implemented the first production-quality test-infrastructure slice for a vertical scenario runner built from plain JavaScript step arrays and helpers that map to real runtime surfaces.
 
 ## Context
 
@@ -10,8 +10,8 @@ The user wanted a more readable way to write broad vertical/e2e tests. The align
 
 - `runScenario([...steps])` where each step is a function.
 - assertions are ordinary functions that inspect `ctx`.
-- composite modules hide repeated setup for common vertical paths.
-- tests that need lower-level detail use primitive steps directly.
+- shared helpers map to real production modules or existing runtime groupings.
+- test-specific sequencing stays visible as scenario steps.
 - real tests use capture records from logs or smoke-test capture output.
 - route checkpoints are outside the first slice; current vertical/e2e tests assert outcomes.
 
@@ -36,7 +36,8 @@ Added:
 The proof scenario preserves the original target test and demonstrates:
 
 - a plain `runScenario([...steps])` test shape;
-- a composite `whatsappSelectManyModule(...)` for the repeated WhatsApp transport setup;
+- a visible scenario step that starts the real WhatsApp transport module;
+- explicit app behavior steps for the selectMany interaction;
 - full `whatsapp.inbound` capture records generated through the existing fixture capture substrate;
 - replay through the same transport event processor used by live `messages.upsert` events;
 - plain assertion functions over scenario context.
