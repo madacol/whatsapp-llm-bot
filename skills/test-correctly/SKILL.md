@@ -9,8 +9,8 @@ Use testing to prove the user-valued behavior, not the implementation story.
 
 ## Core Rules
 
-1. Prove behavior changes red, then green.
-   For behavior changes that preserve or alter supported behavior, prove red before production edits, then green with `pnpm type-check` and relevant tests. Commit with red/green verification noted.
+1. Prove behavior work red, then green.
+   Before production edits for a bug fix or intended behavior change, create or run the strongest relevant failing proof first. Then make the change, run `pnpm type-check` and relevant tests, and note the red/green verification in the commit.
 
 2. Clarify the outcome when it changes the test.
    If the desired result, acknowledgement, durable state, or cleanup condition is materially ambiguous, ask before choosing the proof target.
