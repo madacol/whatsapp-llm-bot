@@ -9,8 +9,8 @@ Use testing to prove the user-valued behavior, not the implementation story.
 
 ## Core Rules
 
-1. Prove behavior work red, then green.
-   Before production edits for a bug fix or intended behavior change, create or run the strongest relevant failing proof first. Then make the change, run `pnpm type-check` and relevant tests, and note the red/green verification in the commit.
+1. Additions and fixes are red, then green.
+   Before production edits for a new feature, bug fix, or intended change to supported behavior, create or run the strongest relevant failing proof first. Then make the change, run `pnpm type-check` and relevant tests, and note the red/green verification in the commit.
 
 2. Clarify the outcome when it changes the test.
    If the desired result, acknowledgement, durable state, or cleanup condition is materially ambiguous, ask before choosing the proof target.
@@ -34,8 +34,8 @@ Use testing to prove the user-valued behavior, not the implementation story.
 7. Verify green on the same path.
    Green proof must cover the user-valued outcome and any relevant durable/async settlement. For live bugs, also verify the running version or say it was not verified.
 
-8. Handle obsolete behavior removals with removal proof.
-   For removals of obsolete behavior, identify and record the existing tests that prove the behavior being removed. Run those tests green first when practical, remove the feature, then run the same tests and confirm they fail for the expected reason. After that red proof, delete or update the tests that asserted removed behavior. Do not add or keep characterization, boundary, or absence tests whose only purpose is to prove the removed path is gone. Absence tests are appropriate only when the absence itself is a durable user-valued, safety, or architecture invariant. Add new tests only when they protect a remaining user-valued contract or a seam that should not regress.
+8. Removals are the opposite order: green, then red, then delete or update the obsolete test.
+   For removals of obsolete behavior, identify and record the existing tests that prove the behavior being removed. Run those tests green first when practical, remove or change the feature, then run the same tests and confirm they fail for the expected reason. After that red proof, delete or update the tests that asserted removed behavior. Do not add or keep characterization, boundary, or absence tests whose only purpose is to prove the removed path is gone. Absence tests are appropriate only when the absence itself is a durable user-valued, safety, or architecture invariant. Add new tests only when they protect a remaining user-valued contract or a seam that should not regress.
 
 If a fix fails in live/manual verification, stop extending the previous hypothesis. Treat the latest failure as the new source of truth, rebuild or adjust the vertical red proof from that evidence, then patch again.
 
