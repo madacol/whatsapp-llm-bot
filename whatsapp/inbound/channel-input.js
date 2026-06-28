@@ -23,7 +23,7 @@ function escapeRegExp(value) {
 
 /**
  * Extract the bot's own IDs without the WhatsApp suffix.
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppSocketIdentityPort} sock
  * @returns {string[]}
  */
 function getSelfIds(sock) {
@@ -180,7 +180,7 @@ function extractSenderJids(key) {
  * Normalize sender JIDs so downstream code can safely reuse them for transport
  * operations like group creation.
  * @param {ReturnType<typeof extractSenderJids>} senderJids
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppSocketLidMappingPort} sock
  * @returns {Promise<string[]>}
  */
 async function normalizeSenderJids(senderJids, sock) {
@@ -206,7 +206,7 @@ function normalizeTimestamp(value) {
 /**
  * Resolve a human-readable chat title when one is available.
  * Groups use the subject; 1:1 chats fall back to the sender display name.
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {Partial<WhatsAppSocketGroupMetadataPort>} sock
  * @param {string} chatId
  * @param {boolean} isGroup
  * @param {string} senderName
@@ -376,8 +376,8 @@ export async function finishChannelInputIo(io) {
 /**
  * Create the message-scoped ChannelInputIO functions.
  * @param {{
- *   sock: import('@whiskeysockets/baileys').WASocket;
- *   getSocket?: () => import('@whiskeysockets/baileys').WASocket | null;
+ *   sock: WhatsAppChannelInputSocketPort;
+ *   getSocket?: () => WhatsAppChannelInputSocketPort | null;
  *   chatId: string;
  *   message: BaileysMessage;
  *   senderIds: string[];
@@ -410,7 +410,7 @@ export function createChannelInputIo({
 }) {
   /**
    * Resolve the current live socket for outbound operations.
-   * @returns {import('@whiskeysockets/baileys').WASocket}
+   * @returns {WhatsAppChannelInputSocketPort}
    */
   function requireSocket() {
     const activeSocket = getSocket ? getSocket() : sock;
@@ -450,7 +450,7 @@ export function createChannelInputIo({
   /**
    * Resolve the current socket when available, otherwise return null so the
    * outbound event can be persisted for replay after reconnect.
-   * @returns {import('@whiskeysockets/baileys').WASocket | null}
+   * @returns {WhatsAppChannelInputSocketPort | null}
    */
   function getSocketOrNull() {
     try {
@@ -538,8 +538,13 @@ export function createChannelInputIo({
       if (!isGroup) return true;
 
       try {
-        const groupMetadata = await requireSocket().groupMetadata(chatId);
-        const participant = groupMetadata.participants.find((member) => senderIds.includes(member.id.split("@")[0]));
+        const activeSocket = requireSocket();
+        if (typeof activeSocket.groupMetadata !== "function") {
+          return false;
+        }
+        const groupMetadata = await activeSocket.groupMetadata(chatId);
+        const participant = (groupMetadata.participants ?? [])
+          .find((member) => senderIds.includes(member.id.split("@")[0]));
         return participant?.admin === "admin" || participant?.admin === "superadmin";
       } catch {
         return false;
@@ -554,12 +559,12 @@ export function createChannelInputIo({
  * Normalize a Baileys message into a ChannelInput.
  * Returns null when the message should be ignored by the app layer.
  * @param {BaileysMessage} baileysMessage
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppChannelInputSocketPort} sock
  * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => WhatsAppChannelInputSocketPort | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
  * @returns {Promise<ChannelInput | null>}
  */
 export async function buildChannelInput(
@@ -649,13 +654,13 @@ export async function buildChannelInput(
 /**
  * Adapt a Baileys message and invoke the app-level ChannelInput handler.
  * @param {BaileysMessage} baileysMessage
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppChannelInputSocketPort} sock
  * @param {(message: ChannelInput) => Promise<void>} messageHandler
  * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => WhatsAppChannelInputSocketPort | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessage(
@@ -761,13 +766,13 @@ function splitChannelInputsAtCommandBoundaries(channelInputs) {
  * invoke the app-level ChannelInput handler once with their content merged in arrival
  * order.
  * @param {BaileysMessage[]} baileysMessages
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppChannelInputSocketPort} sock
  * @param {(message: ChannelInput) => Promise<void>} messageHandler
  * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => WhatsAppChannelInputSocketPort | null, outboundStore?: import("../../store.js").Store, scheduleQueuedOutboundRetry?: () => void } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessages(

@@ -28,14 +28,14 @@ const log = createLogger("whatsapp");
  * }} DeliveredWhatsAppOutboundRow
  *
  * @typedef {{
- *   getSocket?: () => import("@whiskeysockets/baileys").WASocket | null,
+ *   getSocket?: () => WhatsAppOutboundSocketPort | null,
  *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
  *   store?: import("../../store.js").Store,
  *   persistDelayMs?: number,
  *   replayDelayMs?: number,
  *   sleep?: (ms: number) => Promise<void>,
  *   deliverEvent?: (
- *     sock: import("@whiskeysockets/baileys").WASocket,
+ *     sock: WhatsAppOutboundSocketPort,
  *     chatId: string,
  *     event: OutboundEvent,
  *     options: { quoted?: import("@whiskeysockets/baileys").WAMessage } | undefined,
@@ -43,7 +43,7 @@ const log = createLogger("whatsapp");
  *     sendOptions: { editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility },
  *   ) => Promise<MessageHandle | undefined>,
  *   deliverText?: (
- *     sock: import("@whiskeysockets/baileys").WASocket,
+ *     sock: WhatsAppOutboundSocketPort,
  *     chatId: string,
  *     text: string,
  *   ) => Promise<MessageHandle | undefined>,
@@ -296,7 +296,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
 
   /**
    * @param {{
-   *   getSocket?: () => import("@whiskeysockets/baileys").WASocket | null,
+   *   getSocket?: () => WhatsAppOutboundSocketPort | null,
    *   chatId: string,
    *   event: OutboundEvent,
    *   options?: { quoted?: import("@whiskeysockets/baileys").WAMessage },
@@ -348,7 +348,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
 
   /**
    * @param {{
-   *   getSocket?: () => import("@whiskeysockets/baileys").WASocket | null,
+   *   getSocket?: () => WhatsAppOutboundSocketPort | null,
    *   chatId: string,
    *   event: OutboundEvent,
    *   options?: { quoted?: import("@whiskeysockets/baileys").WAMessage },
@@ -387,7 +387,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
 
   /**
    * @param {{
-   *   getSocket?: () => import("@whiskeysockets/baileys").WASocket | null,
+   *   getSocket?: () => WhatsAppOutboundSocketPort | null,
    *   chatId: string,
    *   text: string,
    *   store?: import("../../store.js").Store,
@@ -422,7 +422,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
 
   /**
    * @param {{
-   *   getSocket?: () => import("@whiskeysockets/baileys").WASocket | null,
+   *   getSocket?: () => WhatsAppOutboundSocketPort | null,
    *   chatId: string,
    *   text: string,
    *   store?: import("../../store.js").Store,
@@ -452,7 +452,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
   }
 
   /**
-   * @param {import("@whiskeysockets/baileys").WASocket} sock
+   * @param {WhatsAppOutboundSocketPort} sock
    * @param {string} chatId
    * @param {import("./queue-store.js").WhatsAppOutboundQueuePayload} payload
    * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
@@ -472,7 +472,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
 
   /**
    * @param {{
-   *   getSocket?: () => import("@whiskeysockets/baileys").WASocket | null,
+   *   getSocket?: () => WhatsAppOutboundSocketPort | null,
    *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
    *   store?: import("../../store.js").Store,
    *   replayDelayMs?: number,

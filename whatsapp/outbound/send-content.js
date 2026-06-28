@@ -57,7 +57,7 @@ const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
 /** @type {Map<string, {
- *   sock: import('@whiskeysockets/baileys').WASocket,
+ *   sock: WhatsAppOutboundSocketPort,
  *   text: string,
  *   options: { store?: import("../../store.js").Store },
  *   timer: ReturnType<typeof setTimeout>,
@@ -107,7 +107,7 @@ function isRecord(value) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @returns {string[]}
  */
 function getSocketSelfIds(sock) {
@@ -119,7 +119,7 @@ function getSocketSelfIds(sock) {
 
 /**
  * @param {string} senderId
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @returns {boolean}
  */
 function isReactionFromSelf(senderId, sock) {
@@ -387,7 +387,7 @@ function observePinnedStatusDelivery(observer, event) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
  * @param {PinnedStatusDeliveryObserver | undefined} [observer]
@@ -423,7 +423,7 @@ async function pinWhatsAppMessage(sock, chatId, key, observer) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
  * @param {PinnedStatusDeliveryObserver | undefined} [observer]
@@ -459,7 +459,7 @@ async function unpinWhatsAppMessage(sock, chatId, key, observer) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {PinnedTurnStatusState} state
  * @param {PinnedStatusDeliveryObserver | undefined} [observer]
@@ -583,7 +583,7 @@ function formatRuntimeToolText(status, summary, reviewPrefix) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {MessageHandle} handle
  * @param {string} text
@@ -1099,7 +1099,7 @@ function shouldSuppressRuntimeEvent(event) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -1119,7 +1119,7 @@ async function sendRuntimeFileChangeEvent(sock, chatId, event, options, reaction
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {FileChangeEvent} fileChange
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -1186,7 +1186,7 @@ async function sendSnapshotRuntimeFileChangeEvent(sock, chatId, fileChange, opti
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -1268,7 +1268,7 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -1822,7 +1822,7 @@ function formatPinnedStatusPresentation(event, state, options) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -1923,7 +1923,7 @@ function formatErrorMessage(error) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {string} text
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -1979,7 +1979,7 @@ function renderOutboundEvent(event) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -2125,7 +2125,7 @@ function formatInspectState(inspect) {
 
 /**
  * Edit through a WhatsApp-owned durable handle.
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} transportHandleId
  * @param {string} newText
  * @param {{ store?: import("../../store.js").Store, now?: Date }} [options]
@@ -2148,7 +2148,7 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
 /**
  * Debounce edits for the same durable handle so rapidly changing status text
  * does not become one WhatsApp transaction per internal progress event.
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} transportHandleId
  * @param {string} newText
  * @param {{ store?: import("../../store.js").Store, trace?: Record<string, unknown>, debounceMs?: number }} [options]
@@ -2237,7 +2237,7 @@ function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, 
 /**
  * Dispatch a semantic outbound event as WhatsApp messages.
  * Returns a MessageHandle for the last editable message sent (if any).
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -2268,7 +2268,7 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime, s
 /**
  * Dispatch SendContent as WhatsApp messages with a source-based prefix.
  * Returns a MessageHandle for the last editable message sent (if any).
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {MessageSource} source
  * @param {SendContent} content
@@ -2513,7 +2513,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime

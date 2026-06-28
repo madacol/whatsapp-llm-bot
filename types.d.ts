@@ -18,6 +18,96 @@ type ChatDb = import("./sqlite-db.js").SqliteDb;
 type BaileysMessage = import("@whiskeysockets/baileys").WAMessage;
 type BaileysSocket = import("@whiskeysockets/baileys").WASocket;
 
+// App-owned WhatsApp socket ports. Keep Baileys at the adapter boundary while
+// production seams and tests depend on the capabilities they actually use.
+type WhatsAppSocketIdentityPort = {
+  user?: {
+    id?: string | null;
+    lid?: string | null;
+  } | null;
+};
+
+type WhatsAppSocketEventProcessorPort = {
+  process: (
+    handler: (
+      events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>,
+    ) => void | Promise<void>,
+  ) => void;
+  isBuffering?: () => boolean;
+};
+
+type WhatsAppSocketEventPort = {
+  ev: WhatsAppSocketEventProcessorPort;
+};
+
+type WhatsAppSocketSendMessagePort = {
+  sendMessage: BaileysSocket["sendMessage"];
+};
+
+type WhatsAppSocketPresencePort = {
+  sendPresenceUpdate: BaileysSocket["sendPresenceUpdate"];
+};
+
+type WhatsAppSocketLidMappingPort = {
+  signalRepository?: {
+    lidMapping?: {
+      getPNForLID?: (lidJid: string) => Promise<string | null | undefined>;
+    };
+  };
+};
+
+type WhatsAppSocketGroupMetadataPort = {
+  groupMetadata: BaileysSocket["groupMetadata"];
+};
+
+type WhatsAppSocketRelayMessagePort = {
+  relayMessage: BaileysSocket["relayMessage"];
+};
+
+type WhatsAppRawRelaySocketPort = WhatsAppSocketIdentityPort & WhatsAppSocketRelayMessagePort & {
+  waUploadToServer: BaileysSocket["waUploadToServer"];
+};
+
+type WhatsAppPollSocketPort =
+  & WhatsAppSocketSendMessagePort
+  & WhatsAppSocketIdentityPort
+  & WhatsAppSocketLidMappingPort;
+
+type WhatsAppChannelInputSocketPort =
+  & WhatsAppPollSocketPort
+  & WhatsAppSocketPresencePort
+  & Partial<WhatsAppRawRelaySocketPort>
+  & Partial<WhatsAppSocketGroupMetadataPort>;
+
+type WhatsAppOutboundSocketPort =
+  & WhatsAppSocketSendMessagePort
+  & WhatsAppSocketIdentityPort
+  & Partial<WhatsAppRawRelaySocketPort>;
+
+type WhatsAppTransportSocketPort =
+  & WhatsAppChannelInputSocketPort
+  & WhatsAppSocketEventPort
+  & {
+    groupCreate?: BaileysSocket["groupCreate"];
+    groupParticipantsUpdate?: BaileysSocket["groupParticipantsUpdate"];
+    groupUpdateSubject?: BaileysSocket["groupUpdateSubject"];
+    groupSettingUpdate?: BaileysSocket["groupSettingUpdate"];
+    communityCreate?: (
+      subject: string,
+      description: string,
+    ) => Promise<{ id?: string, subject?: string } | null>;
+    communityCreateGroup?: (
+      subject: string,
+      participants: string[],
+      parentCommunityChatId: string,
+    ) => Promise<{ id?: string, subject?: string } | null>;
+    communityLinkGroup?: (groupJid: string, parentCommunityJid: string) => Promise<unknown>;
+  };
+
+type WhatsAppConnectionSocketPort = WhatsAppTransportSocketPort & {
+  end: BaileysSocket["end"];
+};
+
 type TextContentBlock = {
   type: "text";
   text: string;
