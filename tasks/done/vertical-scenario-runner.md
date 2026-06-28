@@ -10,7 +10,7 @@ The user wanted a more readable way to write broad vertical/e2e tests. The align
 
 - `runScenario([...steps])` where each step is a function.
 - assertions are ordinary functions that inspect `ctx`.
-- shared helpers map to real production modules or existing runtime groupings.
+- shared helpers and composites map to production modules or groupings documented in `CONTEXT.md`, linked architecture docs, or the module's own internal files.
 - test-specific sequencing stays visible as scenario steps.
 - real tests use capture records from logs or smoke-test capture output.
 - route checkpoints are outside the first slice; current vertical/e2e tests assert outcomes.
