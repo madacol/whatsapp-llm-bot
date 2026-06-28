@@ -6,6 +6,8 @@
 
 ## Todo
 
+- Prevent inspectable reasoning and transcription messages from auto-opening. [details](prevent-inspectable-messages-auto-opening.md)
+- Add an explicit wait/send batching command for user-authored multi-message turns. [details](wait-send-batching-command.md)
 - Defer migration of existing vertical tests until scenario tests prove useful. [details](defer-vertical-scenario-migration.md)
 
 ## Blocked
