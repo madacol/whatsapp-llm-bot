@@ -6,9 +6,7 @@ import { createFixtureCapture } from "../diagnostics/capture.js";
 import {
   captureWhatsAppMessageUpdateEvent,
   captureWhatsAppUpsertEvent,
-  createWhatsAppTransport,
 } from "../whatsapp/create-whatsapp-transport.js";
-import { assistantOutputEvent } from "../outbound-events.js";
 import { createEncryptedPollVote } from "./poll-vote-fixtures.js";
 import { scenarioStep } from "./scenario-runner.js";
 
@@ -135,95 +133,6 @@ export function whatsappReactionMessage({
 }
 
 /**
- * Set up the WhatsApp transport and reply to the next inbound turn with one
- * inspectable message.
- * @param {{
- *   botPhoneJid: string,
- *   botLidJid?: string,
- *   replyEvent: OutboundEvent,
- *   inspect: MessageInspectState,
- *   update?: MessageHandleUpdate,
- *   inboundCoalesceDelayMs?: number,
- * }} input
- * @returns {ScenarioStep}
- */
-export function whatsappInspectableReplyModule(input) {
-  return scenarioStep("whatsappInspectableReplyModule", async (ctx) => {
-    /** @type {{ current: ProcessEvents | null }} */
-    const processEventsRef = { current: null };
-    /** @type {WhatsAppTransportSocketPort} */
-    const socket = {
-      user: {
-        id: input.botPhoneJid,
-        ...(input.botLidJid ? { lid: input.botLidJid } : {}),
-      },
-      ev: {
-        /**
-         * @param {ProcessEvents} handler
-         */
-        process(handler) {
-          processEventsRef.current = async (events) => {
-            await handler(events);
-          };
-        },
-      },
-      /**
-       * @param {string} targetChatId
-       * @param {Record<string, unknown>} message
-       * @returns {Promise<BaileysMessage>}
-       */
-      sendMessage: async (targetChatId, message) => {
-        const id = `sent-${ctx.sentMessages.length + 1}`;
-        ctx.sentMessages.push({ id, chatId: targetChatId, message });
-        return /** @type {BaileysMessage} */ ({ key: { id, remoteJid: targetChatId, fromMe: true } });
-      },
-      sendPresenceUpdate: async () => {},
-    };
-
-    let stopped = false;
-    const transport = await createWhatsAppTransport({
-      inboundCoalesceDelayMs: input.inboundCoalesceDelayMs ?? 5,
-      createConnectionSupervisor: async ({ onSocketReady }) => ({
-        start: async () => {
-          stopped = false;
-          onSocketReady(socket, async () => {});
-        },
-        stop: async () => {
-          stopped = true;
-        },
-        sendText: async () => {},
-        handleConnectionUpdate: async () => {},
-        isStopped: () => stopped,
-      }),
-    });
-
-    ctx.cleanup(async () => {
-      await transport.stop();
-    });
-
-    await transport.start(async (turn) => {
-      const handle = await turn.io.reply(input.replyEvent);
-      if (!handle) {
-        throw new Error("Expected inspectable reply to return a message handle.");
-      }
-      handle.setInspect(input.inspect);
-      if (input.update) {
-        await handle.update(input.update);
-      }
-    });
-
-    const registeredProcessEvents = processEventsRef.current;
-    if (!registeredProcessEvents) {
-      throw new Error("Expected connection event processor to be registered.");
-    }
-
-    ctx.set("whatsapp.processEvents", registeredProcessEvents);
-    await registeredProcessEvents({ "connection.update": { connection: "open" } });
-    ctx.current = { seam: "whatsapp.transport", event: "connection.open" };
-  });
-}
-
-/**
  * @param {{
  *   fixture: RawLidPollFixture,
  *   selectedOption: string,
@@ -268,137 +177,6 @@ export function rawLidPollVoteMessage({
       },
     },
   }));
-}
-
-/**
- * Set up the WhatsApp transport and app handler for a selectMany turn.
- * @param {{
- *   identity: RawLidPollIdentity,
- *   pollMessageId: string,
- *   prompt: string,
- *   options: SelectOption[],
- *   deleteOnSelect?: boolean,
- *   replyWithSelectionJson?: boolean,
- *   resultName?: string,
- * }} input
- * @returns {ScenarioStep}
- */
-export function whatsappSelectManyModule(input) {
-  return scenarioStep("whatsappSelectManyModule", async (ctx) => {
-    /** @type {{ current: ProcessEvents | null }} */
-    const processEventsRef = { current: null };
-    /** @type {(value: unknown) => void} */
-    let resolveSelection = () => {};
-    const selectionPromise = new Promise((resolve) => {
-      resolveSelection = resolve;
-    });
-    const resultPromise = withTimeout(
-      selectionPromise,
-      5_000,
-      `Expected ${input.resultName ?? "selectMany"} result to settle.`,
-    );
-    resultPromise.catch(() => {});
-    ctx.setResult(input.resultName ?? "selectMany", resultPromise);
-
-    /** @type {WhatsAppTransportSocketPort} */
-    const socket = {
-      user: {
-        id: input.identity.botPhoneJid,
-        lid: input.identity.botLidJid.replace("@lid", ":32@lid"),
-      },
-      ev: {
-        /**
-         * @param {ProcessEvents} handler
-         */
-        process(handler) {
-          processEventsRef.current = async (events) => {
-            await handler(events);
-          };
-        },
-      },
-      /**
-       * @param {string} targetChatId
-       * @param {Record<string, unknown>} message
-       * @returns {Promise<BaileysMessage>}
-       */
-      sendMessage: async (targetChatId, message) => {
-        const id = "poll" in message ? input.pollMessageId : `sent-${ctx.sentMessages.length + 1}`;
-        ctx.sentMessages.push({ id, chatId: targetChatId, message });
-        if ("poll" in message) {
-          const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
-          return /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
-            key: { id, remoteJid: targetChatId, fromMe: true },
-            message: {
-              messageContextInfo: {
-                messageSecret: input.identity.pollEncKey.toString("base64"),
-              },
-              pollCreationMessage: {
-                name: input.prompt,
-                options: values
-                  .filter((value) => typeof value === "string")
-                  .map((value) => ({ optionName: value })),
-                selectableOptionsCount: values.length,
-              },
-            },
-            participant: input.identity.botPhoneJid,
-          }));
-        }
-        return /** @type {BaileysMessage} */ ({ key: { id, remoteJid: targetChatId, fromMe: true } });
-      },
-      sendPresenceUpdate: async () => {},
-      signalRepository: {
-        lidMapping: {
-          getPNForLID: async () => null,
-        },
-      },
-    };
-
-    let stopped = false;
-    const transport = await createWhatsAppTransport({
-      inboundCoalesceDelayMs: 5,
-      createConnectionSupervisor: async ({ onSocketReady }) => ({
-        start: async () => {
-          stopped = false;
-          onSocketReady(socket, async () => {});
-        },
-        stop: async () => {
-          stopped = true;
-        },
-        sendText: async () => {},
-        handleConnectionUpdate: async () => {},
-        isStopped: () => stopped,
-      }),
-    });
-
-    ctx.cleanup(async () => {
-      await transport.stop();
-    });
-
-    await transport.start(async (turn) => {
-      const selectMany = turn.io.selectMany;
-      if (!selectMany) {
-        throw new Error("Expected WhatsApp turn IO to provide selectMany.");
-      }
-      const selection = await selectMany(
-        input.prompt,
-        input.options,
-        { deleteOnSelect: input.deleteOnSelect ?? false },
-      );
-      if (input.replyWithSelectionJson ?? false) {
-        await turn.io.reply(assistantOutputEvent([{ type: "markdown", text: JSON.stringify(selection) }]));
-      }
-      resolveSelection(selection);
-    });
-
-    const registeredProcessEvents = processEventsRef.current;
-    if (!registeredProcessEvents) {
-      throw new Error("Expected connection event processor to be registered.");
-    }
-
-    ctx.set("whatsapp.processEvents", registeredProcessEvents);
-    await registeredProcessEvents({ "connection.update": { connection: "open" } });
-    ctx.current = { seam: "whatsapp.transport", event: "connection.open" };
-  });
 }
 
 /**
@@ -564,23 +342,4 @@ async function findSingleCaptureFile(baseDir) {
     throw new Error(`Expected one capture file in ${baseDir}, got ${files.length}.`);
   }
   return path.join(baseDir, files[0]);
-}
-
-/**
- * @param {Promise<unknown>} promise
- * @param {number} timeoutMs
- * @param {string} failureMessage
- * @returns {Promise<unknown>}
- */
-function withTimeout(promise, timeoutMs, failureMessage) {
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let timer = null;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(failureMessage)), timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  });
 }

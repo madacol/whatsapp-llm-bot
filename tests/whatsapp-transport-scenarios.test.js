@@ -1,16 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { runScenario, scenarioStep } from "./scenario-runner.js";
+import { createWhatsAppTransport } from "../whatsapp/create-whatsapp-transport.js";
 import { RAW_LID_POLL_FIXTURE } from "./poll-vote-fixtures.js";
 import {
-  rawLidPollIdentity,
   rawLidPollVoteMessage,
   replayWhatsAppInboundSmokeCapture,
   waitForPollSent,
-  whatsappInspectableReplyModule,
   whatsappReactionMessage,
   whatsappTextMessage,
-  whatsappSelectManyModule,
 } from "./whatsapp-transport-scenario-modules.js";
 import { appMessageEvent, assistantOutputEvent } from "../outbound-events.js";
 
@@ -55,6 +53,145 @@ function assertStoredMessageId(value) {
   return value;
 }
 
+/**
+ * @param {{
+ *   botPhoneJid: string,
+ *   botLidJid?: string,
+ *   inboundCoalesceDelayMs?: number,
+ *   pollMessageId?: string,
+ *   pollEncKey?: Buffer,
+ * }} input
+ * @returns {import("./scenario-runner.js").ScenarioStep}
+ */
+function startWhatsAppTransport(input) {
+  return scenarioStep("start WhatsApp transport", async (ctx) => {
+    /** @type {{ current: ((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => void | Promise<void>) | null }} */
+    const processEventsRef = { current: null };
+    /** @type {ChannelInput[]} */
+    const turns = [];
+    /** @type {WhatsAppTransportSocketPort} */
+    const socket = {
+      user: {
+        id: input.botPhoneJid,
+        ...(input.botLidJid ? { lid: input.botLidJid.replace("@lid", ":32@lid") } : {}),
+      },
+      ev: {
+        /**
+         * @param {(events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => void | Promise<void>} handler
+         */
+        process(handler) {
+          processEventsRef.current = async (events) => {
+            await handler(events);
+          };
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        const id = "poll" in message && input.pollMessageId
+          ? input.pollMessageId
+          : `sent-${ctx.sentMessages.length + 1}`;
+        ctx.sentMessages.push({ id, chatId: targetChatId, message });
+        if ("poll" in message) {
+          if (!input.pollEncKey) {
+            throw new Error("Expected poll encryption key for WhatsApp poll send.");
+          }
+          const poll = /** @type {{ poll?: { name?: unknown, values?: unknown[], selectableCount?: unknown } }} */ (message).poll;
+          const values = poll?.values ?? [];
+          return /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
+            key: { id, remoteJid: targetChatId, fromMe: true },
+            message: {
+              messageContextInfo: {
+                messageSecret: input.pollEncKey.toString("base64"),
+              },
+              pollCreationMessage: {
+                name: typeof poll?.name === "string" ? poll.name : "",
+                options: values
+                  .filter((value) => typeof value === "string")
+                  .map((value) => ({ optionName: value })),
+                selectableOptionsCount: typeof poll?.selectableCount === "number"
+                  ? poll.selectableCount
+                  : values.length,
+              },
+            },
+            participant: input.botPhoneJid,
+          }));
+        }
+        return /** @type {BaileysMessage} */ ({ key: { id, remoteJid: targetChatId, fromMe: true } });
+      },
+      sendPresenceUpdate: async () => {},
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+    };
+    let stopped = false;
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: input.inboundCoalesceDelayMs ?? 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          stopped = false;
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {
+          stopped = true;
+        },
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => stopped,
+      }),
+    });
+
+    ctx.cleanup(async () => {
+      await transport.stop();
+    });
+
+    await transport.start(async (turn) => {
+      turns.push(turn);
+    });
+
+    const processEvents = processEventsRef.current;
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered.");
+    }
+    ctx.set("whatsapp.processEvents", processEvents);
+    ctx.set("whatsapp.turns", turns);
+    await processEvents({ "connection.update": { connection: "open" } });
+    ctx.current = { seam: "whatsapp.transport", event: "connection.open" };
+  });
+}
+
+/**
+ * @param {import("./scenario-runner.js").ScenarioContext} ctx
+ * @returns {ChannelInput[]}
+ */
+function getWhatsAppTurns(ctx) {
+  const turns = ctx.get("whatsapp.turns");
+  if (!Array.isArray(turns)) {
+    throw new Error("Expected WhatsApp transport to record turns.");
+  }
+  return /** @type {ChannelInput[]} */ (turns);
+}
+
+/**
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} timeoutMs
+ * @param {string} failureMessage
+ * @returns {Promise<T>}
+ */
+function withTimeout(promise, timeoutMs, failureMessage) {
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(failureMessage)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
+}
+
 describe("WhatsApp transport scenarios", () => {
   it("proves the scenario runner with captured-shape raw LID selectMany poll votes", async () => {
     const selectedOption = "⚪ Show pinned tool status";
@@ -67,13 +204,11 @@ describe("WhatsApp transport scenarios", () => {
     ];
 
     await runScenario([
-      whatsappSelectManyModule({
-        identity: rawLidPollIdentity(RAW_LID_POLL_FIXTURE),
+      startWhatsAppTransport({
+        botPhoneJid: RAW_LID_POLL_FIXTURE.botPhoneJid,
+        botLidJid: RAW_LID_POLL_FIXTURE.botLidJid,
         pollMessageId: RAW_LID_POLL_FIXTURE.pollMsgId,
-        prompt: "Choose which extra agent progress outputs are shown in chat.",
-        options: pollOptions,
-        deleteOnSelect: true,
-        replyWithSelectionJson: true,
+        pollEncKey: RAW_LID_POLL_FIXTURE.pollEncKey,
       }),
 
       replayWhatsAppInboundSmokeCapture({
@@ -85,6 +220,33 @@ describe("WhatsApp transport scenarios", () => {
             senderId: "poll-user",
           }),
         ],
+      }),
+
+      scenarioStep("app starts selectMany turn", async (ctx) => {
+        await ctx.waitFor(
+          () => getWhatsAppTurns(ctx).length > 0,
+          `Expected WhatsApp transport turn, got ${JSON.stringify(getWhatsAppTurns(ctx))}`,
+        );
+        const turn = getWhatsAppTurns(ctx)[0];
+        const selectMany = turn.io.selectMany;
+        if (!selectMany) {
+          throw new Error("Expected WhatsApp turn IO to provide selectMany.");
+        }
+        const selectionPromise = withTimeout(
+          (async () => {
+            const selection = await selectMany(
+              "Choose which extra agent progress outputs are shown in chat.",
+              pollOptions,
+              { deleteOnSelect: true },
+            );
+            await turn.io.reply(assistantOutputEvent([{ type: "markdown", text: JSON.stringify(selection) }]));
+            return selection;
+          })(),
+          5_000,
+          "Expected selectMany result to settle.",
+        );
+        selectionPromise.catch(() => {});
+        ctx.setResult("selectMany", selectionPromise);
       }),
 
       waitForPollSent(),
@@ -125,14 +287,8 @@ describe("WhatsApp transport scenarios", () => {
 
   it("keeps reasoning inspect hidden for bot marker echoes and reveals it for user eye reactions", async () => {
     await runScenario([
-      whatsappInspectableReplyModule({
+      startWhatsAppTransport({
         botPhoneJid: INSPECT_BOT_PHONE_JID,
-        replyEvent: assistantOutputEvent([{ type: "text", text: "Thinking..." }]),
-        inspect: {
-          kind: "reasoning",
-          summary: "*Thinking*",
-          text: "Inspectable reasoning should only show after a real user reaction.",
-        },
       }),
 
       replayWhatsAppInboundSmokeCapture({
@@ -144,6 +300,23 @@ describe("WhatsApp transport scenarios", () => {
             senderId: "scenario-user",
           }),
         ],
+      }),
+
+      scenarioStep("app replies with inspectable reasoning", async (ctx) => {
+        await ctx.waitFor(
+          () => getWhatsAppTurns(ctx).length > 0,
+          `Expected WhatsApp transport turn, got ${JSON.stringify(getWhatsAppTurns(ctx))}`,
+        );
+        const turn = getWhatsAppTurns(ctx)[0];
+        const handle = await turn.io.reply(assistantOutputEvent([{ type: "text", text: "Thinking..." }]));
+        if (!handle) {
+          throw new Error("Expected reasoning reply to return a message handle.");
+        }
+        handle.setInspect({
+          kind: "reasoning",
+          summary: "*Thinking*",
+          text: "Inspectable reasoning should only show after a real user reaction.",
+        });
       }),
 
       scenarioStep("remember inspectable reasoning message", async (ctx) => {
@@ -201,14 +374,8 @@ describe("WhatsApp transport scenarios", () => {
 
   it("keeps audio transcription inspect hidden for bot marker echoes and reveals it for user eye reactions", async () => {
     await runScenario([
-      whatsappInspectableReplyModule({
+      startWhatsAppTransport({
         botPhoneJid: INSPECT_BOT_PHONE_JID,
-        replyEvent: appMessageEvent("plain", "Transcribing audio...", { replyToTriggeringMessage: true }),
-        inspect: {
-          kind: "text",
-          text: "Audio transcript should only show after a real user reaction.",
-        },
-        update: { kind: "text", text: "Transcribed" },
       }),
 
       replayWhatsAppInboundSmokeCapture({
@@ -220,6 +387,25 @@ describe("WhatsApp transport scenarios", () => {
             senderId: "scenario-user",
           }),
         ],
+      }),
+
+      scenarioStep("app replies with inspectable transcription status", async (ctx) => {
+        await ctx.waitFor(
+          () => getWhatsAppTurns(ctx).length > 0,
+          `Expected WhatsApp transport turn, got ${JSON.stringify(getWhatsAppTurns(ctx))}`,
+        );
+        const turn = getWhatsAppTurns(ctx)[0];
+        const handle = await turn.io.reply(
+          appMessageEvent("plain", "Transcribing audio...", { replyToTriggeringMessage: true }),
+        );
+        if (!handle) {
+          throw new Error("Expected transcription reply to return a message handle.");
+        }
+        handle.setInspect({
+          kind: "text",
+          text: "Audio transcript should only show after a real user reaction.",
+        });
+        await handle.update({ kind: "text", text: "Transcribed" });
       }),
 
       scenarioStep("remember inspectable transcription message", async (ctx) => {
