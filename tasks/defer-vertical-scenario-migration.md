@@ -16,7 +16,7 @@ Broad migration of unrelated legacy vertical/e2e tests is still deferred until s
 
 - Add new vertical/e2e coverage with `tests/scenario-runner.js` when a change or bug fix crosses subsystem seams.
 - If a relevant vertical/e2e test already exists for the behavior being changed, migrate that proof to `tests/scenario-runner.js` as part of the change.
-- Use shared scenario helpers for real production modules or existing runtime groupings.
+- Use shared scenario helpers or composites for production modules or groupings already documented in `CONTEXT.md`, linked architecture docs, or the module's own internal files.
 - Keep test-only sequencing visible as plain scenario steps.
 - Use real capture records from logs or smoke-generated capture output.
 - Keep assertions as plain functions over scenario context.
