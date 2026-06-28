@@ -3,7 +3,7 @@
  */
 
 /**
- * @typedef {{ fromMe?: boolean }} ReactionMetadata
+ * @typedef {{ fromMe?: boolean, senderIds?: string[] }} ReactionMetadata
  */
 
 /**
@@ -13,7 +13,7 @@
 /**
  * @typedef {{
  *   subscribe: (msgKeyId: string, callback: ReactionCallback) => () => void;
- *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, fromMe?: boolean }>) => void;
+ *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, senderIds?: string[], fromMe?: boolean }>) => void;
  *   clear: () => void;
  *   readonly size: number;
  * }} ReactionRuntime
@@ -26,6 +26,7 @@
  *   remoteJid: string;
  *   emoji: string;
  *   senderId: string;
+ *   senderIds?: string[];
  *   fromMe?: boolean;
  *   listenerCount: number;
  * }} ReactionRuntimeObserverEvent
@@ -66,10 +67,10 @@ export function createReactionRuntime(options = {}) {
 
     /**
      * Route incoming reactions to registered callbacks.
-     * @param {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, fromMe?: boolean }>} reactions
+     * @param {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, senderIds?: string[], fromMe?: boolean }>} reactions
      */
     handleReactions(reactions) {
-      for (const { key, reaction, senderId, fromMe } of reactions) {
+      for (const { key, reaction, senderId, senderIds, fromMe } of reactions) {
         const callbacks = listeners.get(key.id);
         options.observer?.({
           type: "reaction.received",
@@ -77,6 +78,7 @@ export function createReactionRuntime(options = {}) {
           remoteJid: key.remoteJid,
           emoji: reaction.text,
           senderId,
+          ...(senderIds !== undefined ? { senderIds } : {}),
           ...(fromMe !== undefined ? { fromMe } : {}),
           listenerCount: callbacks?.size ?? 0,
         });
@@ -84,6 +86,7 @@ export function createReactionRuntime(options = {}) {
 
         for (const callback of callbacks) {
           callback(reaction.text, senderId, {
+            ...(senderIds !== undefined ? { senderIds } : {}),
             ...(fromMe !== undefined ? { fromMe } : {}),
           });
         }

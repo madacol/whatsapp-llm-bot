@@ -30,3 +30,4 @@ Completed task details are archived here instead of deleted.
 - Cleaner audio transcription prompt. [details](cleaner-audio-transcriptions.md)
 - Vertical scenario runner proof. [details](vertical-scenario-runner.md)
 - Test type-checking migration. [details](test-type-checking.md)
+- Prevent inspectable messages from auto-opening. [details](prevent-inspectable-messages-auto-opening.md)

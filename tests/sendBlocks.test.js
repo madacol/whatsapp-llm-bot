@@ -3255,6 +3255,81 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(sentTextMessages(calls)[0]?.text, "Thinking...");
   });
 
+  it("ignores inspect marker echoes whose alternate sender id matches the bot", async () => {
+    const { sock, calls } = createCaptureSock();
+    sock.user = { id: "393792375735:1@s.whatsapp.net" };
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "120363042584279820@g.us",
+      "plain",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspectable reasoning",
+    });
+    await waitFor(() => calls.some((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    }));
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "120363042584279820@g.us" },
+      reaction: { text: "👁" },
+      senderId: "147025689575646",
+      senderIds: ["147025689575646", "393792375735"],
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(sentTextMessages(calls).length, 1);
+    assert.equal(sentTextMessages(calls)[0]?.text, "Thinking...");
+  });
+
+  it("keeps audio transcription inspect hidden for marker echoes whose alternate sender id matches the bot", async () => {
+    const { sock, calls } = createCaptureSock();
+    sock.user = { id: "393792375735:1@s.whatsapp.net" };
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "120363042584279820@g.us",
+      "plain",
+      [{ type: "text", text: "Transcribing audio..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "text",
+      text: "Audio transcript should stay hidden until user inspection.",
+    });
+    await handle.update({ kind: "text", text: "Transcribed" });
+    await waitFor(() => calls.some((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    }));
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "120363042584279820@g.us" },
+      reaction: { text: "👁" },
+      senderId: "147025689575646",
+      senderIds: ["147025689575646", "393792375735"],
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(sentTextMessages(calls).length, 2);
+    assert.equal(sentTextMessages(calls)[0]?.text, "Transcribing audio...");
+    assert.equal(sentTextMessages(calls)[1]?.text, "Transcribed");
+  });
+
   it("edits the original message to full plain-text inspect output after user 👁 reactions", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();

@@ -254,6 +254,7 @@ describe("message-event-classifier", () => {
       },
       reaction: { text: "👁" },
       senderId: "213597330374785",
+      senderIds: ["213597330374785", "393792375735"],
       fromMe: false,
     }]);
 

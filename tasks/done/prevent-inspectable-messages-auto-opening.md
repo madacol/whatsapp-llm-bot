@@ -1,6 +1,6 @@
 # Prevent Inspectable Messages From Auto-Opening
 
-Status: Todo
+Status: Done
 
 ## Subject
 
@@ -48,3 +48,28 @@ Relevant surfaces to inspect first:
 ## Next Action
 
 Capture or inspect the latest outbound diagnostics/reaction normalization for an auto-opened inspectable thinking or transcription message, then add the smallest vertical regression that fails before the fix.
+
+## Implementation Notes
+
+- The available workspace diagnostics did not contain a persisted WhatsApp reaction record for the reported live auto-open. `.diagnostics/` only had enabled toggles, and `logs/codex-acp/app-server.log` contained ACP protocol traffic rather than WhatsApp reaction payloads.
+- The closest existing real-shaped reaction fixture was the group `reactionMessage` upsert in `tests/create-whatsapp-transport.test.js`, which includes both a LID `participant` and phone `participantAlt`.
+- The failing gap was that reaction normalization kept only one `senderId`. If a bot marker echo arrives with a primary LID sender and an alternate phone sender, the inspect handle cannot match the alternate id against `sock.user.id`, so it treats the bot marker as a user `👁` reaction.
+- The fix preserves alternate reaction sender candidates as `senderIds` through the WhatsApp message-event classifier and reaction runtime. The outbound inspect filter now checks those candidates against socket self ids before entering inspect mode.
+- `remoteJid` is used as a sender fallback only when no participant ids exist, because in group chats it is the chat id rather than a sender id.
+
+## Verification
+
+- Red proof: `pnpm test tests/sendBlocks.test.js --test-name-pattern "alternate sender id matches the bot"` failed in both the reasoning placeholder and audio transcription status cases because inspect output was edited into the visible message.
+- Green proof: `pnpm test tests/sendBlocks.test.js --test-name-pattern "alternate sender id matches the bot|edits the original message to full plain-text inspect output after user|reveals inspect data attached after an earlier user"`
+- Green proof: `pnpm test tests/create-whatsapp-transport.test.js --test-name-pattern "reaction"`
+- Support test: `pnpm test tests/conversation-runner-prompt-formatting.test.js --test-name-pattern "shows an inspectable transcribing status for audio live input"`
+- Support test: `pnpm test tests/reaction-handler.test.js`
+- Type-check: `pnpm type-check`
+- Type-check: `pnpm type-check:tests`
+- Full suite: `pnpm test` passed with 973 tests, 0 failures.
+
+## Completion Notes
+
+- Completed by preserving alternate reaction sender ids through the WhatsApp reaction normalization/runtime path and checking those ids in the outbound inspect self-filter.
+- Added regressions for both reasoning/thinking placeholders and audio transcription status messages.
+- Preserved explicit user inspection behavior, including reveal when inspect data already exists and reveal when a user reacted before inspect data arrived.
