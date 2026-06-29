@@ -12,7 +12,7 @@ The user wants vertical tests to record expressed user cases and bugs. A missing
 
 Inputs crossing mocked seams should prefer capture-system outputs from logs, smoke tests, or other legitimate capture runs. Made-up payloads are acceptable only as a weaker fallback when capture evidence is not practical.
 
-The scenario-runner direction should not be promoted as the default. Existing committed scenario-runner code can remain until deliberately replaced, but future guidance should focus on independently runnable vertical user-case tests and module harnesses rather than a scenario framework.
+Future guidance should focus on independently runnable vertical user-case tests and module harnesses rather than the scenario-runner framework. Existing committed scenario-runner code can remain until deliberately replaced.
 
 ## Guidance
 
@@ -23,10 +23,31 @@ The scenario-runner direction should not be promoted as the default. Existing co
 - After the vertical test exposes a module flaw, add the narrowest useful automatic regression test for that module.
 - Keep broad migration of unrelated legacy vertical/e2e tests deferred until a new vertical user-case harness design is chosen.
 
+## Spike Result
+
+`tests/vertical/whatsapp-agent-user-case.test.js` is the first plain vertical user-case spike for this direction.
+
+It proves that a private WhatsApp text can travel through:
+
+- mocked Baileys socket receiving `messages.upsert`;
+- real `createWhatsAppTransport`, including the production ingress journal path via `outboundStore`;
+- real conversation runner, route decision, message persistence, agent runtime orchestration, app output port, and WhatsApp rendering;
+- mocked ACP harness seam;
+- fake WhatsApp `sendMessage` observation.
+
+The test asserts both seam outcomes:
+
+- the selected harness receives the normalized user text as its runtime input;
+- WhatsApp outbound sends a rendered text response containing the harness answer to the original chat.
+
+The inbound payload currently uses `createWAMessage`, so it is a made-up Baileys-shaped message rather than a capture-system fixture. That is acceptable for this spike, but a promoted user-case catalog should prefer records from logs or smoke-generated captures when practical.
+
+This spike supports the plain-test direction better than the scenario-runner direction: the behavior is visible in ordinary `node:test` code, setup helpers represent only external seams, and production modules remain in the proof.
+
 ## Next Action
 
-Design the next vertical user-case harness before migrating more tests or promoting the existing scenario-runner pattern.
+Use this spike as the reference when adding the next user-case vertical test. Delay shared harness extraction until at least a few useful user-case tests show the repeated setup that should be named. Replace made-up seam inputs with capture-system fixtures when practical.
 
 ## Status
 
-Todo.
+Todo, with the first plain vertical spike completed.
