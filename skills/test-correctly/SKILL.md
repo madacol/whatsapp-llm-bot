@@ -15,18 +15,18 @@ Use testing to prove the user-valued behavior, not the implementation story.
 2. Removals: green, then red, then delete or update.
    For obsolete behavior removals, find the existing test that proves the behavior and run it green when practical. Remove or change the feature, rerun the same test and confirm it fails for the expected reason, then delete or update that obsolete test. Keep absence tests only when absence is itself a durable user-valued, safety, or architecture invariant.
 
-3. Start vertical and use real evidence.
-   Default to a test or replay that enters through the real entry point and follows the path to the user-valued outcome. For regressions, inspect the latest relevant captured input, logs, persisted state, trace, or fixture before production edits.
+3. Start from the user case and real evidence.
+   For a new user case or bug, create or update an independently runnable vertical test that represents that user case. Vertical tests are the user-case catalog: they may be too expensive for the default automatic suite, but they should be runnable directly for the behavior under investigation.
 
-   For changes and bug fixes in this repo, identify the vertical slice or end-to-end proof for the behavior being changed. If a relevant vertical/e2e test already exists, migrate that proof to the scenario-runner pattern as part of the change. If no relevant vertical/e2e test exists, create one with the scenario-runner pattern. Use `tests/scenario-runner.js`: plain JavaScript step arrays, explicit scenario steps, real capture records from logs or smoke-generated capture output, and plain assertions over scenario context. Create shared scenario helpers or composites for production modules or groupings already documented in `CONTEXT.md`, the architecture docs it links, or the module's own internal files. Keep test-only sequencing visible as scenario steps. Migrate only the relevant proof; broad unrelated legacy-test migration can stay deferred.
+   In vertical tests, mock only the external transport and agent seams unless there is a specific reason to do otherwise. The production code between those seams should run for real. Inputs crossing mocked seams should prefer capture-system outputs from logs, smoke tests, or other legitimate capture runs; made-up payloads are a weaker fallback when capture evidence is not practical.
 
-   For cross-seam behavior, test from the relevant start seam to the relevant end seam before adding narrower tests.
+   When a vertical test exposes a module flaw, add the narrowest useful automatic regression test for that module. The vertical test proves the user case; the narrow test becomes the cheap guard for the specific defect.
 
 4. Clarify when the proof target is ambiguous.
    If the desired result, acknowledgement, durable state, or cleanup condition changes the test and is materially ambiguous, ask before choosing the proof target.
 
 5. Keep the suspected seam in the proof.
-   Base red proof on the real failing artifact when one exists. Do not mock, bypass, or unit-test around the boundary most likely to be failing. Narrow seam/unit tests are support tests; they do not replace the vertical proof for a behavior change or bug fix.
+   Base red proof on the real failing artifact when one exists. Do not replace the production module or boundary most likely to be failing with test behavior. Mocked external transport and agent seams are acceptable in vertical tests; the production code between those seams should remain in the proof. Narrow seam/unit tests are support tests; they do not replace the vertical user-case proof for a behavior change or bug fix.
 
 6. Verify green on the same path.
    Green proof must cover the user-valued outcome and any relevant durable/async settlement. For live bugs, also verify the running version or say it was not verified.

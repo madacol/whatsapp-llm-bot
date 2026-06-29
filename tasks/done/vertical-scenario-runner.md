@@ -54,3 +54,7 @@ The second command ran the whole `tests/whatsapp-transport.test.js` file under t
 ## Status
 
 Done.
+
+## Superseded Guidance
+
+Later review changed the intended testing model. Do not treat the scenario-runner pattern as the default future vertical/e2e approach. Current guidance is tracked in `tasks/vertical-user-case-tests.md`: vertical tests should be an independently runnable user-case catalog, mock only external transport and agent seams by default, run real production code between those seams, prefer capture-system seam inputs, and add narrow automatic regression tests for module flaws found through vertical proof.
