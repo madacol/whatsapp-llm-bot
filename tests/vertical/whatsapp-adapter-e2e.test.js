@@ -14,14 +14,14 @@ import {
   createWAMessage,
   createTestDb,
   seedChat,
-} from "./helpers.js";
-import { registerAcpTestHarness, ZERO_USAGE } from "./acp-test-harness.js";
-import { setDb } from "../db.js";
-import { adaptIncomingMessage } from "../whatsapp/inbound/channel-input.js";
-import { createConfirmRuntime } from "../whatsapp/runtime/confirm-runtime.js";
-import { createSelectRuntime } from "../whatsapp/runtime/select-runtime.js";
-import { updateChatConfig } from "../chat-config.js";
-import { codexAcpEntryPoint, fakeCodexPath } from "./codex-acp-patch-fixture.js";
+} from "../helpers.js";
+import { registerAcpTestHarness, ZERO_USAGE } from "../acp-test-harness.js";
+import { setDb } from "../../db.js";
+import { adaptIncomingMessage } from "../../whatsapp/inbound/channel-input.js";
+import { createConfirmRuntime } from "../../whatsapp/runtime/confirm-runtime.js";
+import { createSelectRuntime } from "../../whatsapp/runtime/select-runtime.js";
+import { updateChatConfig } from "../../chat-config.js";
+import { codexAcpEntryPoint, fakeCodexPath } from "../codex-acp-patch-fixture.js";
 
 const testConfirmRegistry = createConfirmRuntime();
 const testUserResponseRegistry = createSelectRuntime();
@@ -35,9 +35,9 @@ const testUserResponseRegistry = createSelectRuntime();
 let mockServer;
 /** @type {(msg: ChannelInput) => Promise<void>} */
 let handleMessage;
-/** @type {import("../sqlite-db.js").SqliteDb} */
+/** @type {import("../../sqlite-db.js").SqliteDb} */
 let testDb;
-/** @type {import("../store.js").Store} */
+/** @type {import("../../store.js").Store} */
 let testStore;
 
 const CACHE_PATH = path.resolve("data/models.json");
@@ -58,11 +58,11 @@ before(async () => {
   mockServer = await createMockLlmServer();
   process.env.BASE_URL = mockServer.url;
 
-  const { initStore } = await import("../store.js");
+  const { initStore } = await import("../../store.js");
   testStore = await initStore(testDb);
-  const { createLlmClient } = await import("../llm.js");
+  const { createLlmClient } = await import("../../llm.js");
   const llmClient = createLlmClient();
-  const { createMessageHandler } = await import("../index.js");
+  const { createMessageHandler } = await import("../../index.js");
   ({ handleMessage } = createMessageHandler({
     store: testStore,
     llmClient,
@@ -117,8 +117,8 @@ describe("Codex /status through WhatsApp transport", () => {
   let readStatusCalls = 0;
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    const { createAcpHarness } = await import("../harnesses/acp.js");
+    const { registerHarnessDriver } = await import("../../harnesses/index.js");
+    const { createAcpHarness } = await import("../../harnesses/acp.js");
     registerHarnessDriver({
       name: harnessName,
       displayName: "Codex",
@@ -362,8 +362,8 @@ describe("ACP file changes through WhatsApp transport", () => {
   let nextSender = 0;
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    const { createAcpHarness } = await import("../harnesses/acp.js");
+    const { registerHarnessDriver } = await import("../../harnesses/index.js");
+    const { createAcpHarness } = await import("../../harnesses/acp.js");
     registerHarnessDriver({
       name: harnessName,
       supportsInstances: true,
@@ -471,8 +471,8 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
   let nextSender = 0;
 
   async function registerCodexAcpFileChangeHarness() {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    const { createAcpHarness } = await import("../harnesses/acp.js");
+    const { registerHarnessDriver } = await import("../../harnesses/index.js");
+    const { createAcpHarness } = await import("../../harnesses/acp.js");
     registerHarnessDriver({
       name: harnessName,
       supportsInstances: true,
@@ -576,8 +576,8 @@ describe("ACP runtime events through WhatsApp transport", () => {
   let nextSender = 0;
 
   async function registerRuntimeHarness() {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    const { createAcpHarness } = await import("../harnesses/acp.js");
+    const { registerHarnessDriver } = await import("../../harnesses/index.js");
+    const { createAcpHarness } = await import("../../harnesses/acp.js");
     registerHarnessDriver({
       name: harnessName,
       supportsInstances: true,

@@ -18,6 +18,8 @@ Use testing to prove the user-valued behavior, not the implementation story.
 3. Start from the user case and real evidence.
    For a new user case or bug, create or update an independently runnable vertical test that represents that user case. Vertical tests are the user-case catalog: they may be too expensive for the default automatic suite, but they should be runnable directly for the behavior under investigation.
 
+   In this repo, user-case vertical tests live under `tests/vertical/` and run with `pnpm test:vertical` or a direct `pnpm test tests/vertical/<file>.test.js` command. Keep the default top-level test suite focused on cheap automatic regression coverage.
+
    In vertical tests, mock only the external transport and agent seams unless there is a specific reason to do otherwise. The production code between those seams should run for real. Inputs crossing mocked seams should prefer capture-system outputs from logs, smoke tests, or other legitimate capture runs; made-up payloads are a weaker fallback when capture evidence is not practical.
 
    When a vertical test exposes a module flaw, add the narrowest useful automatic regression test for that module. The vertical test proves the user case; the narrow test becomes the cheap guard for the specific defect.
