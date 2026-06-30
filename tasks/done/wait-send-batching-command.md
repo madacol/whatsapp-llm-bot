@@ -1,6 +1,6 @@
 # Wait/Send Batching Command
 
-Status: Todo
+Status: Complete
 
 ## Subject
 
@@ -61,4 +61,35 @@ Relevant surfaces to inspect before implementation:
 
 ## Next Action
 
-Confirm the command names and exact command-token stripping behavior, then design the smallest app-owned waiting-state seam before changing production code.
+Done. Future follow-up should come from live use or a concrete user-case gap.
+
+## Result
+
+Implemented the explicit `/wait` and `/send` flow.
+
+- `/wait` opens a chat-scoped in-memory batch and replies with an app-owned status.
+- `/wait trailing text` strips the command token and keeps `trailing text` in the batch.
+- Messages in the same chat are collected without starting agent turns while the batch is open.
+- `/send` strips its command token, appends trailing text or media from the send message, and commits the collected content through the normal agent path.
+- `/send` with no pending batch replies with an app-owned "No pending batch" response and does not invoke the agent.
+- Batched media remains in the committed `ChannelInput` content.
+- Interleaved chats remain isolated.
+- If `/send` commits while an agent run is still active, the committed batch follows the existing buffered-turn path and runs after the active turn completes.
+
+The implementation lives in `conversation/wait-send-batching.js` and is wired from `conversation/create-conversation-runner.js`.
+
+## Verification
+
+Red proof:
+
+- `pnpm test tests/vertical/wait-send-batching.test.js` failed before production changes because `/wait` and `/send` were treated as ordinary agent input.
+
+Green proof:
+
+- `pnpm test tests/wait-send-batching.test.js`
+- `pnpm test tests/vertical/wait-send-batching.test.js`
+- `pnpm test tests/channel-input-routing.test.js tests/command-orchestration.test.js tests/conversation-runner-prompt-formatting.test.js tests/wait-send-batching.test.js tests/vertical/wait-send-batching.test.js`
+- `pnpm type-check`
+- `pnpm type-check:tests`
+- `pnpm test:fast`
+- `pnpm test:vertical`

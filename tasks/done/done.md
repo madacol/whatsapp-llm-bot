@@ -32,3 +32,4 @@ Completed task details are archived here instead of deleted.
 - Test type-checking migration. [details](test-type-checking.md)
 - Prevent inspectable messages from auto-opening. [details](prevent-inspectable-messages-auto-opening.md)
 - Plain vertical user-case testing catalog. [details](vertical-user-case-tests.md)
+- Explicit wait/send batching command. [details](wait-send-batching-command.md)
