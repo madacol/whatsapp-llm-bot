@@ -96,7 +96,12 @@ describe("Wait/send batching vertical user case", () => {
     await sendWhatsAppMessage({
       handleMessage,
       socket,
-      message: createWAMessage({ chatId, senderId: "wait-send-text-user", text: "/wait first line" }),
+      message: createWAMessage({ chatId, senderId: "wait-send-text-user", text: "/wait ignored control text" }),
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-text-user", text: "first line" }),
     });
     await sendWhatsAppMessage({
       handleMessage,
@@ -113,11 +118,11 @@ describe("Wait/send batching vertical user case", () => {
     await sendWhatsAppMessage({
       handleMessage,
       socket,
-      message: createWAMessage({ chatId, senderId: "wait-send-text-user", text: "/send final line" }),
+      message: createWAMessage({ chatId, senderId: "wait-send-text-user", text: "/send ignored control text" }),
     });
 
     assert.equal(harnessState.turns.length, 1);
-    assert.equal(harnessState.turns[0]?.input, "first line\nsecond line\nfinal line");
+    assert.equal(harnessState.turns[0]?.input, "first line\nsecond line");
     assert.ok(
       socket.getTextMessages().some((text) => text.includes("batched: first line")),
       `Expected agent response after /send, got ${JSON.stringify(socket.getTextMessages())}`,
@@ -164,18 +169,54 @@ describe("Wait/send batching vertical user case", () => {
     await sendWhatsAppMessage({
       handleMessage: primary.handleMessage,
       socket: primary.socket,
-      message: createWAMessage({ chatId: primaryChatId, senderId: "wait-send-media-user", text: "/send please inspect" }),
+      message: createWAMessage({ chatId: primaryChatId, senderId: "wait-send-media-user", text: "/send ignored control text" }),
     });
 
     assert.equal(primary.harnessState.turns.length, 1);
     const turn = primary.harnessState.turns[0];
     assert.ok(turn?.input?.includes("screenshot caption"), turn?.input);
-    assert.ok(turn?.input?.includes("please inspect"), turn?.input);
+    assert.equal(turn?.input?.includes("ignored control text"), false, turn?.input);
     assert.equal(turn?.messages?.at(-1)?.role, "user");
     const latestContent = turn?.messages?.at(-1)?.content ?? [];
     assert.deepEqual(
       latestContent.map((block) => block.type),
-      ["image", "text", "text"],
+      ["image", "text"],
+    );
+  });
+
+  it("does not batch non-agent command messages while a batch is open", async () => {
+    const chatId = "wait-send-command-user@s.whatsapp.net";
+    const { handleMessage, socket, harnessState } = await createWaitSendVertical({
+      chatId,
+      harnessName: "wait-send-command-harness",
+    });
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-command-user", text: "/wait" }),
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-command-user", text: "!c" }),
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-command-user", text: "real batched message" }),
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-command-user", text: "/send" }),
+    });
+
+    assert.equal(harnessState.turns.length, 1);
+    assert.equal(harnessState.turns[0]?.input, "real batched message");
+    assert.ok(
+      socket.getTextMessages().some((text) => text.includes("Nothing to cancel.")),
+      `Expected !c to run as a command, got ${JSON.stringify(socket.getTextMessages())}`,
     );
   });
 
@@ -231,7 +272,12 @@ describe("Wait/send batching vertical user case", () => {
     await sendWhatsAppMessage({
       handleMessage,
       socket,
-      message: createWAMessage({ chatId, senderId: "wait-send-active-run-user", text: "/wait queued one" }),
+      message: createWAMessage({ chatId, senderId: "wait-send-active-run-user", text: "/wait ignored control text" }),
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-active-run-user", text: "queued one" }),
     });
     await sendWhatsAppMessage({
       handleMessage,
@@ -241,7 +287,7 @@ describe("Wait/send batching vertical user case", () => {
     await sendWhatsAppMessage({
       handleMessage,
       socket,
-      message: createWAMessage({ chatId, senderId: "wait-send-active-run-user", text: "/send queued three" }),
+      message: createWAMessage({ chatId, senderId: "wait-send-active-run-user", text: "/send ignored control text" }),
     });
 
     assert.equal(harnessState.turns.length, 1);
@@ -249,6 +295,6 @@ describe("Wait/send batching vertical user case", () => {
     await activeRun;
 
     assert.equal(harnessState.turns.length, 2);
-    assert.equal(harnessState.turns[1]?.input, "queued one\nqueued two\nqueued three");
+    assert.equal(harnessState.turns[1]?.input, "queued one\nqueued two");
   });
 });

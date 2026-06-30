@@ -13,7 +13,6 @@ import { createCommandOrchestration } from "./command-orchestration.js";
 import {
   createWaitSendBatchStore,
   parseWaitSendBatchCommandText,
-  stripWaitSendCommandContent,
 } from "./wait-send-batching.js";
 
 const log = createLogger("conversation:runner");
@@ -431,8 +430,7 @@ export function createConversationRunner({
 
     const waitSendCommand = firstBlock ? parseWaitSendBatchCommandText(firstBlock.text) : null;
     if (waitSendCommand?.command === "wait" && firstBlock) {
-      const contentAfterCommand = stripWaitSendCommandContent(turn, firstBlock, waitSendCommand);
-      const batchState = waitSendBatches.startOrAppend(turn, contentAfterCommand);
+      const batchState = waitSendBatches.startOrAppend(turn, []);
       await appOutput.replyWithPlain(
         batchState.alreadyOpen
           ? `Batch already open. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send /send when ready.`
@@ -442,8 +440,7 @@ export function createConversationRunner({
     }
 
     if (waitSendCommand?.command === "send" && firstBlock) {
-      const contentAfterCommand = stripWaitSendCommandContent(turn, firstBlock, waitSendCommand);
-      const committedTurn = waitSendBatches.commit(turn, contentAfterCommand);
+      const committedTurn = waitSendBatches.commit(turn, []);
       if (!committedTurn) {
         await appOutput.replyWithPlain("No pending batch. Use /wait first.");
         return null;
@@ -456,11 +453,6 @@ export function createConversationRunner({
         runtimeSelection,
         resolvedBinding,
       });
-    }
-
-    if (waitSendBatches.has(chatId)) {
-      waitSendBatches.append(turn, content);
-      return null;
     }
 
     if (route.type === "bang-command" && firstBlock) {
@@ -477,6 +469,10 @@ export function createConversationRunner({
     if (route.type === "pending-followup") {
       if (!route.shouldRespond) {
         await addMessage(chatId, buildUserMessage(turn), senderIds);
+        return null;
+      }
+      if (waitSendBatches.has(chatId)) {
+        waitSendBatches.append(turn, content);
         return null;
       }
       const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
@@ -560,6 +556,11 @@ export function createConversationRunner({
       }
 
       log.debug("Slash command not handled by command orchestration; continuing through normal LLM path", firstBlock.text);
+    }
+
+    if (route.type === "agent-invocation" && waitSendBatches.has(chatId)) {
+      waitSendBatches.append(turn, content);
+      return null;
     }
 
     const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
