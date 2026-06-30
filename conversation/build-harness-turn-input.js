@@ -107,6 +107,7 @@ function usesSemanticAcpContent(harnessName) {
  *   harnessName: string,
  *   runConfig: HarnessRunConfig,
  *   bufferedTexts?: string[],
+ *   prebuiltInputText?: string,
  *   audioTranscriptionObserver?: {
  *     onAudioTranscriptionStart?: (event: { block: AudioContentBlock, modelId: string }) => void | Promise<void>,
  *     onAudioTranscriptionComplete?: (event: { block: AudioContentBlock, modelId: string, transcription: string }) => void | Promise<void>,
@@ -126,6 +127,7 @@ export async function buildHarnessTurnInput({
   harnessName,
   runConfig,
   bufferedTexts = [],
+  prebuiltInputText,
   audioTranscriptionObserver,
 }) {
   const { externalInstructions, messages } = await prepareHarnessConversationInput({
@@ -139,19 +141,20 @@ export async function buildHarnessTurnInput({
     harnessName,
     bufferedTexts,
   });
+  const inputText = prebuiltInputText ?? await buildLiveInputText({
+    content: getLatestUserContent(messages),
+    llmClient,
+    mediaToTextModels: chatInfo?.media_to_text_models ?? {},
+    db: getChatDb(chatId),
+    includeMediaReferences: !usesSemanticAcpContent(harnessName),
+    onAudioTranscriptionStart: audioTranscriptionObserver?.onAudioTranscriptionStart,
+    onAudioTranscriptionComplete: audioTranscriptionObserver?.onAudioTranscriptionComplete,
+    onAudioTranscriptionFailure: audioTranscriptionObserver?.onAudioTranscriptionFailure,
+  });
 
   return {
     chatId,
-    input: await buildLiveInputText({
-      content: getLatestUserContent(messages),
-      llmClient,
-      mediaToTextModels: chatInfo?.media_to_text_models ?? {},
-      db: getChatDb(chatId),
-      includeMediaReferences: !usesSemanticAcpContent(harnessName),
-      onAudioTranscriptionStart: audioTranscriptionObserver?.onAudioTranscriptionStart,
-      onAudioTranscriptionComplete: audioTranscriptionObserver?.onAudioTranscriptionComplete,
-      onAudioTranscriptionFailure: audioTranscriptionObserver?.onAudioTranscriptionFailure,
-    }),
+    input: inputText,
     messages,
     externalInstructions,
     runConfig,

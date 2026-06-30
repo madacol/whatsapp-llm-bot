@@ -259,6 +259,24 @@ export function createConversationRunner({
   }
 
   /**
+   * @param {{
+   *   chatId: string,
+   *   chatInfo: import("../store.js").ChatRow | undefined,
+   *   content: IncomingContentBlock[],
+   *   context: ExecuteActionContext,
+   * }} input
+   * @returns {Promise<string>}
+   */
+  async function buildBatchInputText({ chatId, chatInfo, content, context }) {
+    return buildPendingRunInputText({
+      chatId,
+      chatInfo,
+      content,
+      audioTranscriptionObserver: createAudioTranscriptionStatusObserver(context),
+    });
+  }
+
+  /**
    * @param {ChannelInput} turn
    * @returns {Promise<void>}
    */
@@ -305,6 +323,7 @@ export function createConversationRunner({
    *   context: ExecuteActionContext,
    *   runtimeSelection: AgentRuntimeSelection,
    *   resolvedBinding: ResolvedChatBinding,
+   *   prebuiltInputText?: string,
    *   audioTranscriptionObserver?: ReturnType<typeof createAudioTranscriptionStatusObserver>,
    * }} input
    * @returns {Promise<ChannelInput | null>}
@@ -315,6 +334,7 @@ export function createConversationRunner({
     context,
     runtimeSelection,
     resolvedBinding,
+    prebuiltInputText,
     audioTranscriptionObserver = createAudioTranscriptionStatusObserver(context),
   }) {
     const appOutput = createAppOutputPort(context);
@@ -333,9 +353,9 @@ export function createConversationRunner({
       return null;
     }
 
-    const userText = agentRuntime.hasPendingRun(chatId)
+    const userText = prebuiltInputText ?? (agentRuntime.hasPendingRun(chatId)
       ? await buildPendingRunInputText({ chatId, chatInfo, content, audioTranscriptionObserver })
-      : getTopLevelText(content);
+      : getTopLevelText(content));
     const lifecycleDecision = await agentRuntime.beginRun({
       turn,
       userText,
@@ -365,6 +385,7 @@ export function createConversationRunner({
       message,
       selection: runtimeSelection,
       resolvedBinding,
+      prebuiltInputText,
       audioTranscriptionObserver,
     });
   }
@@ -440,19 +461,32 @@ export function createConversationRunner({
     }
 
     if (waitSendCommand?.command === "send" && firstBlock) {
-      const committedTurn = waitSendBatches.commit(turn, []);
-      if (!committedTurn) {
+      const committed = waitSendBatches.commit(turn, []);
+      if (!committed) {
         await appOutput.replyWithPlain("No pending batch. Use /wait first.");
         return null;
       }
       const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
       return handleLlmMessage({
-        turn: committedTurn,
+        turn: committed.turn,
         chatInfo,
         context,
         runtimeSelection,
         resolvedBinding,
+        prebuiltInputText: committed.inputText,
       });
+    }
+
+    if (waitSendCommand?.command === "cancel" && firstBlock) {
+      const cancelled = waitSendBatches.cancel(chatId);
+      if (!cancelled) {
+        await appOutput.replyWithPlain("No pending batch. Use /wait first.");
+        return null;
+      }
+      await appOutput.replyWithPlain(
+        `Batch cancelled. Discarded ${cancelled.messageCount} message${cancelled.messageCount === 1 ? "" : "s"}.`,
+      );
+      return null;
     }
 
     if (route.type === "bang-command" && firstBlock) {
@@ -472,7 +506,12 @@ export function createConversationRunner({
         return null;
       }
       if (waitSendBatches.has(chatId)) {
-        waitSendBatches.append(turn, content);
+        waitSendBatches.append(turn, content, await buildBatchInputText({
+          chatId,
+          chatInfo,
+          content,
+          context,
+        }));
         return null;
       }
       const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
@@ -559,7 +598,12 @@ export function createConversationRunner({
     }
 
     if (route.type === "agent-invocation" && waitSendBatches.has(chatId)) {
-      waitSendBatches.append(turn, content);
+      waitSendBatches.append(turn, content, await buildBatchInputText({
+        chatId,
+        chatInfo,
+        content,
+        context,
+      }));
       return null;
     }
 

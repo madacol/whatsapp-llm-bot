@@ -8,15 +8,19 @@ import {
 import { createChannelInput } from "./helpers.js";
 
 describe("wait/send batching", () => {
-  it("parses only explicit /wait and /send commands", () => {
+  it("parses only explicit wait/send batch control commands", () => {
     assert.deepEqual(parseWaitSendBatchCommandText("/wait gather this"), {
       command: "wait",
     });
     assert.deepEqual(parseWaitSendBatchCommandText("/SEND"), {
       command: "send",
     });
+    assert.deepEqual(parseWaitSendBatchCommandText("/cancel"), {
+      command: "cancel",
+    });
     assert.equal(parseWaitSendBatchCommandText("/waiting"), null);
     assert.equal(parseWaitSendBatchCommandText("/sendlater"), null);
+    assert.equal(parseWaitSendBatchCommandText("/cancelled"), null);
   });
 
   it("commits one chat batch without leaking interleaved chat content", () => {
@@ -43,13 +47,34 @@ describe("wait/send batching", () => {
     }).context;
 
     batches.startOrAppend(first, []);
-    batches.append(second, second.content);
+    batches.append(second, second.content, "second");
 
     assert.equal(batches.commit(other, []), null);
     const committed = batches.commit(send, []);
 
-    assert.deepEqual(committed?.content, [{ type: "text", text: "second" }]);
-    assert.deepEqual(committed?.senderIds, ["a"]);
-    assert.equal(committed?.facts.addressedToBot, true);
+    assert.deepEqual(committed?.turn.content, [{ type: "text", text: "second" }]);
+    assert.deepEqual(committed?.turn.senderIds, ["a"]);
+    assert.equal(committed?.turn.facts.addressedToBot, true);
+    assert.equal(committed?.inputText, "second");
+  });
+
+  it("cancels a pending chat batch", () => {
+    const batches = createWaitSendBatchStore();
+    const first = createChannelInput({
+      chatId: "chat-a",
+      senderIds: ["a"],
+      content: [{ type: "text", text: "/wait" }],
+    }).context;
+    const second = createChannelInput({
+      chatId: "chat-a",
+      senderIds: ["a"],
+      content: [{ type: "text", text: "second" }],
+    }).context;
+
+    batches.startOrAppend(first, []);
+    batches.append(second, second.content, "second");
+
+    assert.deepEqual(batches.cancel("chat-a"), { messageCount: 1 });
+    assert.equal(batches.commit(first, []), null);
   });
 });

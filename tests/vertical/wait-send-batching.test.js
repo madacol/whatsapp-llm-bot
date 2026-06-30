@@ -23,6 +23,8 @@ const originalMasterId = process.env.MASTER_ID;
  *   chatId: string,
  *   harnessName: string,
  *   onSendTurn?: Parameters<typeof registerAcpTestHarness>[0]["onSendTurn"],
+ *   mediaToTextModels?: { image?: string, audio?: string, video?: string, general?: string },
+ *   llmClient?: LlmClient,
  * }} input
  * @returns {Promise<{
  *   handleMessage: (turn: ChannelInput) => Promise<void>,
@@ -30,7 +32,7 @@ const originalMasterId = process.env.MASTER_ID;
  *   harnessState: ReturnType<typeof registerAcpTestHarness>,
  * }>}
  */
-async function createWaitSendVertical({ chatId, harnessName, onSendTurn }) {
+async function createWaitSendVertical({ chatId, harnessName, onSendTurn, mediaToTextModels, llmClient }) {
   const db = await createTestDb();
   setDb("./pgdata/root", db);
   const store = await initStore(db);
@@ -44,10 +46,14 @@ async function createWaitSendVertical({ chatId, harnessName, onSendTurn }) {
   });
   const { handleMessage } = createMessageHandler({
     store,
-    llmClient: /** @type {LlmClient} */ ({}),
+    llmClient: llmClient ?? /** @type {LlmClient} */ ({}),
   });
   await seedChat(db, chatId, { enabled: true });
-  await updateChatConfig(chatId, (current) => ({ ...current, harness: harnessName }));
+  await updateChatConfig(chatId, (current) => ({
+    ...current,
+    harness: harnessName,
+    ...(mediaToTextModels ? { media_to_text_models: mediaToTextModels } : {}),
+  }));
 
   return {
     handleMessage,
@@ -86,6 +92,45 @@ after(() => {
 });
 
 describe("Wait/send batching vertical user case", () => {
+  it("cancels an open batch without invoking the agent", async () => {
+    const chatId = "wait-send-cancel-user@s.whatsapp.net";
+    const { handleMessage, socket, harnessState } = await createWaitSendVertical({
+      chatId,
+      harnessName: "wait-send-cancel-harness",
+    });
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-cancel-user", text: "/wait" }),
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-cancel-user", text: "discard me" }),
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-cancel-user", text: "/cancel" }),
+    });
+
+    assert.equal(harnessState.turns.length, 0);
+    assert.ok(
+      socket.getTextMessages().some((text) => text.includes("Batch cancelled")),
+      `Expected batch cancellation acknowledgement, got ${JSON.stringify(socket.getTextMessages())}`,
+    );
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-cancel-user", text: "after cancel" }),
+    });
+
+    assert.equal(harnessState.turns.length, 1);
+    assert.equal(harnessState.turns[0]?.input, "after cancel");
+  });
+
   it("holds user-authored text until /send commits one agent turn", async () => {
     const chatId = "wait-send-text-user@s.whatsapp.net";
     const { handleMessage, socket, harnessState } = await createWaitSendVertical({
@@ -127,6 +172,67 @@ describe("Wait/send batching vertical user case", () => {
       socket.getTextMessages().some((text) => text.includes("batched: first line")),
       `Expected agent response after /send, got ${JSON.stringify(socket.getTextMessages())}`,
     );
+  });
+
+  it("transcribes audio while collecting a batch before /send commits it", async () => {
+    const chatId = "wait-send-audio-user@s.whatsapp.net";
+    let transcriptionCalls = 0;
+    const { handleMessage, socket, harnessState } = await createWaitSendVertical({
+      chatId,
+      harnessName: "wait-send-audio-harness",
+      mediaToTextModels: { audio: "audio/model" },
+      llmClient: /** @type {LlmClient} */ (/** @type {unknown} */ ({
+        chat: {
+          completions: {
+            create: async () => {
+              transcriptionCalls += 1;
+              return {
+                choices: [{ message: { content: "Batch audio transcript." } }],
+              };
+            },
+          },
+        },
+      })),
+    });
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-audio-user", text: "/wait" }),
+    });
+    const audioMessage = createWAMessage({
+      chatId,
+      senderId: "wait-send-audio-user",
+      audio: { mimetype: "audio/mp3" },
+    });
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: audioMessage,
+      mediaBytes: Buffer.from("batched audio bytes"),
+    });
+
+    assert.equal(harnessState.turns.length, 0);
+    assert.equal(transcriptionCalls, 1);
+    assert.ok(
+      socket.getTextMessages().some((text) => text === "Transcribing audio..."),
+      `Expected transcription to start before /send, got ${JSON.stringify(socket.getTextMessages())}`,
+    );
+    assert.ok(
+      socket.getTextMessages().some((text) => text === "Transcribed"),
+      `Expected transcription to complete before /send, got ${JSON.stringify(socket.getTextMessages())}`,
+    );
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-audio-user", text: "/send" }),
+    });
+
+    assert.equal(transcriptionCalls, 1);
+    assert.equal(harnessState.turns.length, 1);
+    assert.ok(harnessState.turns[0]?.input?.includes("Batch audio transcript."), harnessState.turns[0]?.input);
+    assert.equal(harnessState.turns[0]?.input?.includes("[Audio description:"), false, harnessState.turns[0]?.input);
   });
 
   it("keeps media from batched WhatsApp messages and isolates batches per chat", async () => {
