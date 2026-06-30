@@ -489,7 +489,7 @@ describe("sendEvent – runtime events", () => {
         type: "command.started",
         provider: "acp",
         command: {
-          command: "pnpm test tests/e2e-adapter.test.js",
+          command: "pnpm test tests/vertical/whatsapp-adapter-e2e.test.js",
           status: "started",
         },
       },
@@ -503,7 +503,7 @@ describe("sendEvent – runtime events", () => {
         type: "command.completed",
         provider: "acp",
         command: {
-          command: "pnpm test tests/e2e-adapter.test.js",
+          command: "pnpm test tests/vertical/whatsapp-adapter-e2e.test.js",
           status: "completed",
           output: "ok",
         },
@@ -511,9 +511,9 @@ describe("sendEvent – runtime events", () => {
     }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Shell*  `pnpm test tests/e2e-adapter.test.js`", linkPreview: null },
+      { text: "🔧 *Shell*  `pnpm test tests/vertical/whatsapp-adapter-e2e.test.js`", linkPreview: null },
       {
-        text: "✅ *Shell*  `pnpm test tests/e2e-adapter.test.js`",
+        text: "✅ *Shell*  `pnpm test tests/vertical/whatsapp-adapter-e2e.test.js`",
         edit: { id: "msg-1", remoteJid: "runtime-command-duplicate-chat", fromMe: true },
         linkPreview: null,
       },
