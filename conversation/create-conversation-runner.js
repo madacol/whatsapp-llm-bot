@@ -10,6 +10,11 @@ import { buildLiveInputText } from "./live-input-text.js";
 import { decideChannelInputRoute } from "./channel-input-routing.js";
 import { createAgentRuntime } from "./agent-runtime.js";
 import { createCommandOrchestration } from "./command-orchestration.js";
+import {
+  createWaitSendBatchStore,
+  parseWaitSendBatchCommandText,
+  stripWaitSendCommandContent,
+} from "./wait-send-batching.js";
 
 const log = createLogger("conversation:runner");
 const DEFAULT_LIVE_INPUT_FALLBACK_DELAY_MS = 1500;
@@ -211,6 +216,7 @@ export function createConversationRunner({
     workspacePresentation,
     dispatchTurn,
   });
+  const waitSendBatches = createWaitSendBatchStore();
 
   const commandOrchestration = createCommandOrchestration({
     workspaceControl: workspaceLifecycle,
@@ -412,6 +418,51 @@ export function createConversationRunner({
       return null;
     }
 
+    if (route.type === "disabled-slash-command") {
+      await commandOrchestration.handleCommand({
+        route,
+        turn,
+        chatInfo,
+        context,
+        resolvedBinding,
+      });
+      return null;
+    }
+
+    const waitSendCommand = firstBlock ? parseWaitSendBatchCommandText(firstBlock.text) : null;
+    if (waitSendCommand?.command === "wait" && firstBlock) {
+      const contentAfterCommand = stripWaitSendCommandContent(turn, firstBlock, waitSendCommand);
+      const batchState = waitSendBatches.startOrAppend(turn, contentAfterCommand);
+      await appOutput.replyWithPlain(
+        batchState.alreadyOpen
+          ? `Batch already open. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send /send when ready.`
+          : `Batch started. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send /send when ready.`,
+      );
+      return null;
+    }
+
+    if (waitSendCommand?.command === "send" && firstBlock) {
+      const contentAfterCommand = stripWaitSendCommandContent(turn, firstBlock, waitSendCommand);
+      const committedTurn = waitSendBatches.commit(turn, contentAfterCommand);
+      if (!committedTurn) {
+        await appOutput.replyWithPlain("No pending batch. Use /wait first.");
+        return null;
+      }
+      const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
+      return handleLlmMessage({
+        turn: committedTurn,
+        chatInfo,
+        context,
+        runtimeSelection,
+        resolvedBinding,
+      });
+    }
+
+    if (waitSendBatches.has(chatId)) {
+      waitSendBatches.append(turn, content);
+      return null;
+    }
+
     if (route.type === "bang-command" && firstBlock) {
       const result = await commandOrchestration.handleCommand({
         route,
@@ -493,17 +544,6 @@ export function createConversationRunner({
 
     if (route.type === "persist-only") {
       await addMessage(chatId, buildUserMessage(turn), senderIds);
-      return null;
-    }
-
-    if (route.type === "disabled-slash-command") {
-      await commandOrchestration.handleCommand({
-        route,
-        turn,
-        chatInfo,
-        context,
-        resolvedBinding,
-      });
       return null;
     }
 
