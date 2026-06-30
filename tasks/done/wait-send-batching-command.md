@@ -52,12 +52,12 @@ Relevant surfaces to inspect before implementation:
 ## Acceptance Criteria
 
 - A `/wait` message enters waiting mode and returns an app-owned acknowledgement/status without starting an agent run.
-- Text/media attached to the `/wait` message is included in the pending batch according to the confirmed command-stripping rule.
+- `/wait` and `/send` are control messages; their command text and trailing content are not included in the pending batch.
 - Additional messages in the same chat are accepted into the pending batch without starting agent runs.
 - `/send` submits the collected content as one user turn through the normal agent path.
 - `/send` with no pending batch gives a clear app-owned response and does not invoke the agent.
 - Waiting state is isolated per chat and survives interleaved messages in other chats.
-- Tests cover text-only batching, mixed media batching, command text stripping, empty send, and active-run interaction.
+- Tests cover text-only batching, mixed media batching, command messages staying out of the batch, empty send, and active-run interaction.
 
 ## Next Action
 
@@ -68,9 +68,10 @@ Done. Future follow-up should come from live use or a concrete user-case gap.
 Implemented the explicit `/wait` and `/send` flow.
 
 - `/wait` opens a chat-scoped in-memory batch and replies with an app-owned status.
-- `/wait trailing text` strips the command token and keeps `trailing text` in the batch.
-- Messages in the same chat are collected without starting agent turns while the batch is open.
-- `/send` strips its command token, appends trailing text or media from the send message, and commits the collected content through the normal agent path.
+- Batch content is collected only from non-command `agent-invocation` turns and responding `pending-followup` turns.
+- `/wait` and `/send` control the batch but do not contribute content, even if they contain trailing text or media.
+- Non-agent command messages keep normal command behavior while a batch is open.
+- `/send` commits the collected content through the normal agent path.
 - `/send` with no pending batch replies with an app-owned "No pending batch" response and does not invoke the agent.
 - Batched media remains in the committed `ChannelInput` content.
 - Interleaved chats remain isolated.
@@ -83,6 +84,7 @@ The implementation lives in `conversation/wait-send-batching.js` and is wired fr
 Red proof:
 
 - `pnpm test tests/vertical/wait-send-batching.test.js` failed before production changes because `/wait` and `/send` were treated as ordinary agent input.
+- After the first implementation, `pnpm test tests/vertical/wait-send-batching.test.js` failed again because batching happened too early in the runner and captured control/command messages. The fix moved batch appends into the agent-bound paths only.
 
 Green proof:
 

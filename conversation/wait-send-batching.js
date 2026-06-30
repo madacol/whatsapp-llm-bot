@@ -1,7 +1,6 @@
 /**
  * @typedef {{
  *   command: "wait" | "send",
- *   trailingText: string,
  * }} WaitSendBatchCommand
  */
 
@@ -27,35 +26,7 @@ export function parseWaitSendBatchCommandText(text) {
   const command = /** @type {"wait" | "send"} */ (match[1].toLowerCase());
   return {
     command,
-    trailingText: match[2]?.trim() ?? "",
   };
-}
-
-/**
- * @param {ChannelInput} turn
- * @param {TextContentBlock} firstBlock
- * @param {WaitSendBatchCommand} command
- * @returns {IncomingContentBlock[]}
- */
-export function stripWaitSendCommandContent(turn, firstBlock, command) {
-  const firstTextIndex = turn.content.indexOf(firstBlock);
-  if (firstTextIndex === -1) {
-    return [];
-  }
-
-  /** @type {IncomingContentBlock[]} */
-  const content = [];
-  for (let index = 0; index < turn.content.length; index += 1) {
-    const block = turn.content[index];
-    if (index === firstTextIndex) {
-      if (command.trailingText) {
-        content.push({ type: "text", text: command.trailingText });
-      }
-      continue;
-    }
-    content.push(block);
-  }
-  return content;
 }
 
 /**
