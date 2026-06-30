@@ -52,12 +52,14 @@ Relevant surfaces to inspect before implementation:
 ## Acceptance Criteria
 
 - A `/wait` message enters waiting mode and returns an app-owned acknowledgement/status without starting an agent run.
-- `/wait` and `/send` are control messages; their command text and trailing content are not included in the pending batch.
+- `/wait`, `/send`, and `/cancel` are control messages; their command text and trailing content are not included in the pending batch.
 - Additional messages in the same chat are accepted into the pending batch without starting agent runs.
+- Media-to-text preprocessing still runs for collected agent-bound messages while the batch is open, before `/send`.
 - `/send` submits the collected content as one user turn through the normal agent path.
+- `/cancel` discards the pending batch without invoking the agent.
 - `/send` with no pending batch gives a clear app-owned response and does not invoke the agent.
 - Waiting state is isolated per chat and survives interleaved messages in other chats.
-- Tests cover text-only batching, mixed media batching, command messages staying out of the batch, empty send, and active-run interaction.
+- Tests cover text-only batching, audio transcription during batching, mixed media batching, cancellation, command messages staying out of the batch, empty send, and active-run interaction.
 
 ## Next Action
 
@@ -65,13 +67,15 @@ Done. Future follow-up should come from live use or a concrete user-case gap.
 
 ## Result
 
-Implemented the explicit `/wait` and `/send` flow.
+Implemented the explicit `/wait`, `/send`, and `/cancel` flow.
 
 - `/wait` opens a chat-scoped in-memory batch and replies with an app-owned status.
 - Batch content is collected only from non-command `agent-invocation` turns and responding `pending-followup` turns.
-- `/wait` and `/send` control the batch but do not contribute content, even if they contain trailing text or media.
+- `/wait`, `/send`, and `/cancel` control the batch but do not contribute content, even if they contain trailing text or media.
+- Agent-bound media is converted to the prepared agent input text while it is collected, so audio transcription status appears on the audio message before `/send`; `/send` reuses that prepared input and does not re-transcribe.
 - Non-agent command messages keep normal command behavior while a batch is open.
 - `/send` commits the collected content through the normal agent path.
+- `/cancel` discards the collected content and replies with an app-owned status without invoking the agent.
 - `/send` with no pending batch replies with an app-owned "No pending batch" response and does not invoke the agent.
 - Batched media remains in the committed `ChannelInput` content.
 - Interleaved chats remain isolated.
@@ -85,6 +89,7 @@ Red proof:
 
 - `pnpm test tests/vertical/wait-send-batching.test.js` failed before production changes because `/wait` and `/send` were treated as ordinary agent input.
 - After the first implementation, `pnpm test tests/vertical/wait-send-batching.test.js` failed again because batching happened too early in the runner and captured control/command messages. The fix moved batch appends into the agent-bound paths only.
+- Follow-up red proof: `pnpm test tests/vertical/wait-send-batching.test.js` failed because `/cancel` was unhandled and batched audio did not run media-to-text before `/send`.
 
 Green proof:
 

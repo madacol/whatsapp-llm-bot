@@ -245,6 +245,7 @@ function materializeRuntimeSelection(selection) {
  *     message: UserMessage,
  *     selection: AgentRuntimeSelection,
  *     resolvedBinding: ResolvedChatBinding,
+ *     prebuiltInputText?: string,
  *     audioTranscriptionObserver?: {
  *       onAudioTranscriptionStart?: (event: { block: AudioContentBlock, modelId: string }) => void | Promise<void>,
  *       onAudioTranscriptionComplete?: (event: { block: AudioContentBlock, modelId: string, transcription: string }) => void | Promise<void>,
@@ -435,6 +436,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
    *   message: UserMessage,
    *   selection: AgentRuntimeSelection,
    *   resolvedBinding: ResolvedChatBinding,
+   *   prebuiltInputText?: string,
    *   audioTranscriptionObserver?: {
    *     onAudioTranscriptionStart?: (event: { block: AudioContentBlock, modelId: string }) => void | Promise<void>,
    *     onAudioTranscriptionComplete?: (event: { block: AudioContentBlock, modelId: string, transcription: string }) => void | Promise<void>,
@@ -450,6 +452,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
     message,
     selection,
     resolvedBinding,
+    prebuiltInputText,
     audioTranscriptionObserver,
   }) {
     const { persona, harness, harnessInstance } = materializeRuntimeSelection(selection);
@@ -526,6 +529,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
       harnessName: runtimeName,
       runConfig,
       bufferedTexts,
+      prebuiltInputText,
       audioTranscriptionObserver,
     });
     log.info("Agent runtime turn input build completed", {
@@ -596,6 +600,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
       message,
       selection,
       resolvedBinding,
+      prebuiltInputText,
       audioTranscriptionObserver,
     }) {
       const { chatId } = turn;
@@ -610,6 +615,7 @@ export function createAgentRuntime({ store, llmClient, log }) {
           message,
           selection,
           resolvedBinding,
+          prebuiltInputText,
           audioTranscriptionObserver,
         });
         if (result.response.length > 0) {
