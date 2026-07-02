@@ -64,6 +64,8 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - 2026-07-02 follow-up: user reported that silence endpointing works in quiet conditions, but TV/background speech keeps RMS above the fixed threshold so capture does not end after the user stops talking.
 - `Web Speech v7` changes post-wake endpointing from a fixed RMS gate to adaptive ambient-relative VAD. The client now estimates ambient RMS while wake listening, seeds capture endpointing from that baseline, requires speech to rise above the ambient-relative voice threshold, and treats return-to-baseline as silence using a lower release threshold.
 - `Web Speech v7` also keeps the browser microphone stream open during wake listening and attempts to start `SpeechRecognition` from the shared live audio track before falling back to native browser microphone recognition. This avoids the app explicitly releasing/reacquiring the mic on wake-listening start and restart loops, though browsers that ignore `start(audioTrack)` may still use their own recognition microphone path.
+- 2026-07-02 regression: user reported v7 no longer detects Jarvis on the phone. Treat the phone result as authoritative for native Web Speech; the stub smoke only validates app wiring after a recognition result, not real Android Chrome recognition.
+- `Web Speech v8` restores the previous native Web Speech wake path by releasing any app-owned microphone stream before starting `SpeechRecognition`, removing the shared pre-wake mic stream and ambient monitor. Adaptive endpointing remains for post-wake capture, using a short post-wake calibration window to estimate background RMS before applying ambient-relative voice/release thresholds.
 
 ## Deployment
 
@@ -130,6 +132,13 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v7|app.js\\?v=20260702-wake-v7|adaptive ambient"` verified the deployed v7 marker and cache-busted script URL.
 - `curl -fsSL --max-time 15 'https://private-host-redacted/app.js?v=20260702-wake-v7' | rg "WAKE_DETECTOR_BUILD|shared-audio-track|vadThresholds|Ambient RMS"` verified the deployed shared-track and adaptive VAD code markers.
 - `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 30000 --stub-recognition --wait-complete` passed against deployed v7: status reached `Silence detected; submitting.`, uploaded a 23.2 KiB `audio/webm;codecs=opus` blob, and received stub response text `wake smoke recognized`.
+- `pnpm type-check` after Web Speech v8 regression fix.
+- `pnpm type-check:tests` after Web Speech v8 regression fix.
+- `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after Web Speech v8 regression fix.
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed Web Speech v8.
+- `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v8|app.js\\?v=20260702-wake-v8|native wake"` verified the deployed v8 marker and cache-busted script URL.
+- `curl -fsSL --max-time 15 'https://private-host-redacted/app.js?v=20260702-wake-v8' | rg "WAKE_DETECTOR_BUILD|VAD_POST_WAKE_CALIBRATION_MS|Calibrating ambient|recognition.start\\(\\)"` verified the deployed native Web Speech start path and post-wake calibration markers.
+- `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 30000 --stub-recognition --wait-complete` passed against deployed v8: status reached `Silence detected; submitting.`, uploaded a 25.1 KiB `audio/webm;codecs=opus` blob, and received stub response text `wake smoke recognized`. This remains a post-wake app-path smoke only; it does not prove native Android Chrome wake recognition.
 
 Manual browser microphone testing on the phone remains useful, but the deployed backend path has now been verified independently with synthetic speech.
 
