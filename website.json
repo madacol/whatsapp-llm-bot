@@ -13,5 +13,26 @@
     "static": {
       "root": "./architecture-review-site"
     }
+  },
+  {
+    "subdomain": "web-audio-client",
+    "access": {
+      "mode": "tailnet"
+    },
+    "service": {
+      "command": [
+        "/usr/bin/node",
+        "clients/web/server.js"
+      ]
+    }
+  },
+  {
+    "subdomain": "web-audio-api",
+    "access": {
+      "mode": "tailnet"
+    },
+    "proxy": {
+      "target": "127.0.0.1:3200"
+    }
   }
 ]

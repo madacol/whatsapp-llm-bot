@@ -21,6 +21,7 @@
         "test:vertical": "node scripts/test-runner.js tests/vertical/*.test.js",
         "test:watch": "node scripts/test-runner.js --watch",
         "test:prompts": "node --test tests/*.prompt-test.js",
+        "web:audio": "node clients/web/server.js",
         "type-check": "npx tsc --noEmit --project jsconfig.json",
         "type-check:tests": "tsc --noEmit --project jsconfig.tests.json"
     },

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Madabot Web Audio</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="settings-panel" aria-labelledby="settings-heading">
+        <div class="section-heading">
+          <p class="eyebrow">HTTP audio transport</p>
+          <h1 id="settings-heading">Web Audio Client</h1>
+        </div>
+
+        <form id="settings-form" class="settings-form">
+          <label>
+            <span>API base URL</span>
+            <input id="base-url" name="baseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://private-host-redacted" required>
+          </label>
+          <p id="api-url-help" class="field-note">
+            Use an HTTPS API URL reachable from this browser. Deployed links can set it with <code>?api=...</code>.
+          </p>
+          <label>
+            <span>Bearer token (optional)</span>
+            <input id="token" name="token" type="password" autocomplete="off">
+          </label>
+          <p class="field-note">
+            Leave blank for the current tailnet test API. If a token is re-enabled, paste only the token value.
+          </p>
+          <div class="field-grid">
+            <label>
+              <span>Transport</span>
+              <input id="transport-id" name="transportId" type="text" autocomplete="off" required>
+            </label>
+            <label>
+              <span>Chat ID</span>
+              <input id="chat-id" name="chatId" type="text" autocomplete="off" required>
+            </label>
+          </div>
+          <div class="field-grid">
+            <label>
+              <span>Sender ID</span>
+              <input id="sender-id" name="senderId" type="text" autocomplete="off" required>
+            </label>
+            <label>
+              <span>Sender name</span>
+              <input id="sender-name" name="senderName" type="text" autocomplete="name" required>
+            </label>
+          </div>
+          <button id="check-api" class="secondary-button" type="button">Check API</button>
+        </form>
+      </section>
+
+      <section class="control-panel" aria-labelledby="recording-heading">
+        <div class="section-heading compact">
+          <p class="eyebrow">Manual capture</p>
+          <h2 id="recording-heading">Record And Send</h2>
+        </div>
+
+        <div class="status-strip" aria-live="polite">
+          <span id="state-pill" class="state-pill">Idle</span>
+          <span id="status-text">Ready.</span>
+        </div>
+
+        <div class="recording-readout">
+          <div>
+            <span class="readout-label">Duration</span>
+            <strong id="duration">00:00.0</strong>
+          </div>
+          <div>
+            <span class="readout-label">Input format</span>
+            <strong id="input-format">Detecting...</strong>
+          </div>
+          <div>
+            <span class="readout-label">Last capture</span>
+            <strong id="last-size">None</strong>
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button id="enable-mic" class="secondary-button" type="button">Enable Mic</button>
+          <button id="start-recording" class="primary-button" type="button">Start Recording</button>
+          <button id="stop-send" class="primary-button danger" type="button" disabled>Stop And Send</button>
+          <button id="discard-recording" class="secondary-button" type="button" disabled>Discard</button>
+        </div>
+
+        <div class="wake-panel">
+          <div class="section-heading mini">
+            <p class="eyebrow">Word detection</p>
+            <h3>Wake Capture</h3>
+          </div>
+          <div class="wake-grid">
+            <label>
+              <span>Wake phrase</span>
+              <input id="wake-phrase" name="wakePhrase" type="text" autocomplete="off" required>
+            </label>
+            <label>
+              <span>Language</span>
+              <input id="wake-language" name="wakeLanguage" type="text" inputmode="text" autocomplete="off" required>
+            </label>
+            <label>
+              <span>Max seconds</span>
+              <input id="wake-capture-seconds" name="wakeCaptureSeconds" type="number" min="2" max="120" step="1" required>
+            </label>
+            <label>
+              <span>Silence seconds</span>
+              <input id="wake-silence-seconds" name="wakeSilenceSeconds" type="number" min="0.5" max="5" step="0.1" required>
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="start-listening" class="primary-button" type="button">Start Listening</button>
+            <button id="stop-listening" class="secondary-button" type="button" disabled>Stop Listening</button>
+          </div>
+          <p id="wake-detector-version" class="field-note detector-version">Detector build: Web Speech v6, silence endpoint fix.</p>
+          <p id="wake-status" class="field-note">Detector idle.</p>
+        </div>
+
+        <div class="playback-panel">
+          <div class="section-heading mini">
+            <p class="eyebrow">Assistant</p>
+            <h3>Response</h3>
+          </div>
+          <p id="assistant-text" class="assistant-text">No response yet.</p>
+          <audio id="assistant-audio" controls preload="none"></audio>
+        </div>
+
+        <details class="diagnostics">
+          <summary>Diagnostics</summary>
+          <pre id="diagnostics-output">No requests yet.</pre>
+        </details>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js?v=20260701-wake-v6"></script>
+  </body>
+</html>
