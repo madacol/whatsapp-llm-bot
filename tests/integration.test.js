@@ -176,6 +176,22 @@ describe("ACP conversation routing", () => {
     assert.ok(responses.some((response) => response.text.includes("ACP integration response: hello ACP")));
   });
 
+  it("auto-enables authenticated HTTP API client chats before ACP routing", async () => {
+    const chatId = "api:auto-enable-client";
+    await seedAcpChat(chatId, { enabled: false });
+
+    const { context, responses } = createChannelInput({
+      chatId,
+      content: [{ type: "text", text: "hello from web" }],
+    });
+    await handleMessage(context);
+
+    const chat = await readChatConfig(chatId);
+    assert.equal(chat?.is_enabled, true);
+    assert.equal(capturedTurns[0].input, "hello from web");
+    assert.ok(responses.some((response) => response.text.includes("ACP integration response: hello from web")));
+  });
+
   it("does not respond in group when not mentioned", async () => {
     await seedAcpChat("group-ignore@g.us", { enabled: true });
 

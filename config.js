@@ -3,6 +3,24 @@ dotenv.config();
 
 const system_prompt = `You are Madabot, a helpful AI assistant.`;
 
+/**
+ * @param {string} name
+ * @returns {boolean | null}
+ */
+function envFlag(name) {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (!value) {
+    return null;
+  }
+  if (["1", "true", "yes", "on"].includes(value)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(value)) {
+    return false;
+  }
+  return null;
+}
+
 export default {
   get MASTER_IDs() { return process.env.MASTER_ID?.split(',').map(s => s.trim()).filter(Boolean) ?? []; },
   set MASTER_IDs(v) { process.env.MASTER_ID = v.join(','); },
@@ -42,6 +60,8 @@ export default {
   get html_server_port() { return parseInt(process.env.HTML_SERVER_PORT || "3100", 10); },
   get html_server_base_url() { return process.env.HTML_SERVER_BASE_URL || ""; },
   get api_transport_token() { return process.env.API_TRANSPORT_TOKEN || ""; },
+  get api_transport_enabled() { return envFlag("API_TRANSPORT_ENABLED") ?? Boolean(this.api_transport_token); },
+  get api_transport_auth_required() { return envFlag("API_TRANSPORT_AUTH_REQUIRED") ?? Boolean(this.api_transport_token); },
   get api_transport_host() { return process.env.API_TRANSPORT_HOST || "127.0.0.1"; },
   get api_transport_port() { return parseInt(process.env.API_TRANSPORT_PORT || "3200", 10); },
 

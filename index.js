@@ -181,11 +181,14 @@ if (!process.env.TESTING) {
     process.exit(1);
   });
 
-  const apiTransport = config.api_transport_token
+  if (config.api_transport_enabled && config.api_transport_auth_required && !config.api_transport_token) {
+    throw new Error("API_TRANSPORT_AUTH_REQUIRED is enabled but API_TRANSPORT_TOKEN is not set");
+  }
+  const apiTransport = config.api_transport_enabled
     ? await createHttpApiTransport({
         host: config.api_transport_host,
         port: config.api_transport_port,
-        authToken: config.api_transport_token,
+        authToken: config.api_transport_auth_required ? config.api_transport_token : "",
       })
     : null;
   if (apiTransport) {

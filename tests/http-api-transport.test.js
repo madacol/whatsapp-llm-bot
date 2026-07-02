@@ -398,6 +398,35 @@ describe("http-api transport", () => {
     assert.deepEqual(await res.json(), { error: "Unauthorized" });
   });
 
+  it("allows requests without authorization when auth is disabled", async () => {
+    const transport = await createHttpApiTransport({
+      port: 0,
+      host: "127.0.0.1",
+      authToken: "",
+    });
+    transports.push(transport);
+    let handled = false;
+    await transport.start(async (turn) => {
+      handled = true;
+      await turn.io.reply({
+        kind: "assistant_output",
+        content: "No token required.",
+      });
+    });
+
+    const res = await fetch(`${transport.baseUrl}/api/transports/voice/turns?wait=true`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(turnPayload("no-auth-request")),
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(handled, true);
+    const body = await res.json();
+    assert.equal(body.status, "completed");
+    assert.equal(body.text, "No token required.");
+  });
+
   it("rejects malformed text turn payloads before calling the handler", async () => {
     const transport = await createHttpApiTransport({
       port: 0,

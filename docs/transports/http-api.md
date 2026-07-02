@@ -2,19 +2,24 @@
 
 The HTTP API transport lets a non-WhatsApp client submit text inputs to the normal bot runtime and receive structured outbound events. It is intended for clients such as the Bluetooth voice assistant, where audio capture, transcription, and speech output live outside this repo.
 
-The transport is disabled by default. It starts only when `API_TRANSPORT_TOKEN` is set.
+The transport is disabled by default. It starts when either `API_TRANSPORT_TOKEN`
+is set or `API_TRANSPORT_ENABLED=true` is set.
 
 ## Configuration
 
 Set these environment variables before starting `index.js`:
 
 ```bash
+API_TRANSPORT_ENABLED=true
+API_TRANSPORT_AUTH_REQUIRED=true
 API_TRANSPORT_TOKEN=<shared bearer token>
 API_TRANSPORT_HOST=127.0.0.1
 API_TRANSPORT_PORT=3200
 ```
 
-`API_TRANSPORT_HOST` defaults to `127.0.0.1`, and `API_TRANSPORT_PORT` defaults to `3200`. Do not expose this listener without authentication; every API endpoint except `/health` requires:
+`API_TRANSPORT_HOST` defaults to `127.0.0.1`, and `API_TRANSPORT_PORT` defaults to `3200`. `API_TRANSPORT_AUTH_REQUIRED` defaults to true when `API_TRANSPORT_TOKEN` is set and false otherwise. For private tailnet-only development, auth can be disabled explicitly with `API_TRANSPORT_ENABLED=true` and `API_TRANSPORT_AUTH_REQUIRED=false`.
+
+Do not expose this listener outside trusted private networking without authentication. When auth is required, every API endpoint except `/health` requires:
 
 ```http
 Authorization: Bearer <shared bearer token>

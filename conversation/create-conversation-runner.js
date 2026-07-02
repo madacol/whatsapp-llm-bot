@@ -17,6 +17,7 @@ import {
 
 const log = createLogger("conversation:runner");
 const DEFAULT_LIVE_INPUT_FALLBACK_DELAY_MS = 1500;
+const HTTP_API_CHAT_ID_PREFIX = "api:";
 /**
  * Type guard: checks that a content block is a text block.
  * @param {IncomingContentBlock} block
@@ -32,6 +33,17 @@ function isTextBlock(block) {
  */
 function hasNonTextContent(content) {
   return content.some((block) => block.type !== "text");
+}
+
+/**
+ * HTTP API transport clients are authenticated at the transport boundary and
+ * use synthetic `api:*` chat IDs. They should not inherit WhatsApp's
+ * disabled-by-default chat gate.
+ * @param {string} chatId
+ * @returns {boolean}
+ */
+function isHttpApiClientChat(chatId) {
+  return chatId.startsWith(HTTP_API_CHAT_ID_PREFIX);
 }
 
 /**
@@ -205,6 +217,7 @@ export function createConversationRunner({
     addMessage,
     createChat,
     getChat,
+    setChatEnabled,
   } = store;
 
   const agentRuntime = createAgentRuntime({ store, llmClient, log });
@@ -402,7 +415,11 @@ export function createConversationRunner({
 
     await createChat(chatId);
 
-    const chatInfo = await getChat(chatId);
+    let chatInfo = await getChat(chatId);
+    if (isHttpApiClientChat(chatId) && chatInfo && !chatInfo.is_enabled) {
+      await setChatEnabled(chatId, true);
+      chatInfo = await getChat(chatId);
+    }
     const context = createMessageActionContext(turn);
     const appOutput = createAppOutputPort(context);
     const resolvedBinding = await workspaceBinding.resolveChatBinding(
