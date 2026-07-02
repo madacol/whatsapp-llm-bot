@@ -30,11 +30,15 @@ describe("HTTP API transport turn ledger", () => {
     ledger.setActiveTurn(payload.chatId, first.record.turnId);
     ledger.appendEvent(payload.chatId, {
       kind: "assistant_output",
+      content: [{ type: "text", text: "Thinking..." }],
+    }, ledger.getActiveTurnId(payload.chatId));
+    ledger.appendEvent(payload.chatId, {
+      kind: "assistant_output",
       content: [{ type: "text", text: "Done." }],
     }, ledger.getActiveTurnId(payload.chatId));
 
     assert.equal(first.record.text, "Done.");
-    assert.deepEqual(ledger.listEvents(payload.chatId, 0).map((event) => event.eventId), ["1"]);
+    assert.deepEqual(ledger.listEvents(payload.chatId, 0).map((event) => event.eventId), ["1", "2"]);
   });
 
 });

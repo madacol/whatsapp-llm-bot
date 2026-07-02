@@ -469,11 +469,17 @@ export async function createHttpApiTransport(options = {}) {
       runTurn: onTurn,
       afterTurnCompleted: async ({ record }) => {
         if (record.text.trim()) {
-          const speech = await synthesizeSpeech({
-            text: record.text,
-            chatId: payload.chatId,
-            turnId: record.turnId,
-          });
+          let speech;
+          try {
+            speech = await synthesizeSpeech({
+              text: record.text,
+              chatId: payload.chatId,
+              turnId: record.turnId,
+            });
+          } catch (error) {
+            log.warn("HTTP API speech synthesis failed; returning text without audio.", error);
+            return null;
+          }
           if (speech?.buffer?.byteLength && speech.mimeType) {
             const outputPath = await writeMedia(speech.buffer, speech.mimeType, "audio");
             const audioEventBlock = {

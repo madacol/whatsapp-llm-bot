@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import dotenv from "dotenv";
+
 const OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech";
 const OPENROUTER_SPEECH_URL = "https://openrouter.ai/api/v1/audio/speech";
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -5,7 +8,10 @@ const DEFAULT_PROVIDER = "openai";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini-tts";
 const DEFAULT_OPENROUTER_MODEL = "openai/gpt-audio-mini";
 const DEFAULT_VOICE = "marin";
+const DEFAULT_FLITE_VOICE = "slt";
 const DEFAULT_FORMAT = "mp3";
+const DEFAULT_PCM_SAMPLE_RATE = 24000;
+const DOTENV_VALUES = dotenv.config().parsed ?? {};
 
 /** @type {Record<string, string>} */
 const FORMAT_TO_MIME = {
@@ -35,7 +41,9 @@ const FORMAT_TO_MIME = {
  * @returns {string}
  */
 function env(name, fallback) {
-  const value = process.env[name];
+  const value = name.startsWith("TTS_")
+    ? DOTENV_VALUES[name] ?? process.env[name]
+    : process.env[name] ?? DOTENV_VALUES[name];
   return value && value.trim() ? value : fallback;
 }
 
@@ -94,6 +102,50 @@ function resolveMimeType(responseFormat, contentType) {
     return contentType.split(";").map((part) => part.trim()).filter(Boolean).join("; ");
   }
   return FORMAT_TO_MIME[responseFormat] || "application/octet-stream";
+}
+
+/**
+ * @param {number} value
+ * @param {number} byteCount
+ * @returns {Buffer}
+ */
+function littleEndianInteger(value, byteCount) {
+  const buffer = Buffer.alloc(byteCount);
+  if (byteCount === 2) {
+    buffer.writeUInt16LE(value, 0);
+  } else {
+    buffer.writeUInt32LE(value, 0);
+  }
+  return buffer;
+}
+
+/**
+ * @param {Buffer} pcm16
+ * @param {{ sampleRate?: number, channels?: number }} [options]
+ * @returns {Buffer}
+ */
+function wrapPcm16AsWav(pcm16, options = {}) {
+  const sampleRate = options.sampleRate ?? DEFAULT_PCM_SAMPLE_RATE;
+  const channels = options.channels ?? 1;
+  const bitsPerSample = 16;
+  const blockAlign = channels * bitsPerSample / 8;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = pcm16.byteLength;
+  return Buffer.concat([
+    Buffer.from("RIFF"),
+    littleEndianInteger(36 + dataSize, 4),
+    Buffer.from("WAVEfmt "),
+    littleEndianInteger(16, 4),
+    littleEndianInteger(1, 2),
+    littleEndianInteger(channels, 2),
+    littleEndianInteger(sampleRate, 4),
+    littleEndianInteger(byteRate, 4),
+    littleEndianInteger(blockAlign, 2),
+    littleEndianInteger(bitsPerSample, 2),
+    Buffer.from("data"),
+    littleEndianInteger(dataSize, 4),
+    pcm16,
+  ]);
 }
 
 /**
@@ -171,12 +223,13 @@ async function synthesizeViaSpeechEndpoint(text, options) {
  * @returns {Promise<SpeechSynthesisResult>}
  */
 async function synthesizeViaOpenRouterChat(text, options) {
+  const requestedAudioFormat = options.responseFormat === "wav" ? "pcm16" : options.responseFormat;
   const payload = {
     model: options.model,
     modalities: ["text", "audio"],
     audio: {
       voice: options.voice,
-      format: options.responseFormat,
+      format: requestedAudioFormat,
     },
     stream: true,
     messages: [
@@ -217,10 +270,88 @@ async function synthesizeViaOpenRouterChat(text, options) {
   if (buffer.byteLength === 0) {
     throw new Error("OpenRouter audio chat returned empty audio");
   }
+  if (options.responseFormat === "wav") {
+    return {
+      buffer: wrapPcm16AsWav(buffer, {
+        sampleRate: Number.parseInt(env("TTS_PCM_SAMPLE_RATE", String(DEFAULT_PCM_SAMPLE_RATE)), 10) || DEFAULT_PCM_SAMPLE_RATE,
+      }),
+      mimeType: "audio/wav",
+    };
+  }
   return {
     buffer,
     mimeType: resolveMimeType(options.responseFormat, null),
   };
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeFfmpegFilterValue(value) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * @param {string} text
+ * @param {{ voice: string }} options
+ * @returns {Promise<SpeechSynthesisResult>}
+ */
+function synthesizeViaFfmpegFlite(text, options) {
+  return new Promise((resolve, reject) => {
+    const filter = `flite=text='${escapeFfmpegFilterValue(text)}':voice=${escapeFfmpegFilterValue(options.voice)}`;
+    const ffmpeg = spawn("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      filter,
+      "-ar",
+      String(DEFAULT_PCM_SAMPLE_RATE),
+      "-ac",
+      "1",
+      "-f",
+      "wav",
+      "pipe:1",
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+
+    /** @type {Buffer[]} */
+    const stdout = [];
+    /** @type {Buffer[]} */
+    const stderr = [];
+
+    ffmpeg.stdout.on("data", (chunk) => {
+      stdout.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    ffmpeg.stderr.on("data", (chunk) => {
+      stderr.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    ffmpeg.on("error", reject);
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        const buffer = Buffer.concat(stdout);
+        if (buffer.byteLength === 0) {
+          reject(new Error("ffmpeg flite returned empty audio"));
+          return;
+        }
+        resolve({ buffer, mimeType: "audio/wav" });
+        return;
+      }
+      const details = Buffer.concat(stderr).toString("utf8").trim();
+      reject(new Error(`ffmpeg flite failed with code ${code}${details ? `: ${details}` : ""}`));
+    });
+  });
 }
 
 /**
@@ -235,17 +366,20 @@ export async function synthesizeSpeechForHttpApi(input) {
     throw new Error("text is empty");
   }
   const provider = env("TTS_PROVIDER", DEFAULT_PROVIDER);
-  if (provider !== "openai" && provider !== "openrouter") {
+  if (provider !== "openai" && provider !== "openrouter" && provider !== "flite") {
     throw new Error(`unsupported TTS_PROVIDER: ${provider}`);
   }
   const responseFormat = env("TTS_RESPONSE_FORMAT", DEFAULT_FORMAT);
   const modelDefault = provider === "openai" ? DEFAULT_OPENAI_MODEL : DEFAULT_OPENROUTER_MODEL;
   const model = env("TTS_MODEL", modelDefault);
-  const voice = env("TTS_VOICE", DEFAULT_VOICE);
+  const voice = env("TTS_VOICE", provider === "flite" ? DEFAULT_FLITE_VOICE : DEFAULT_VOICE);
   const speed = Number.parseFloat(env("TTS_SPEED", "1")) || 1;
   const instructions = env("TTS_INSTRUCTIONS", "");
   const route = env("TTS_ROUTE", provider === "openai" ? "speech" : "chat");
 
+  if (provider === "flite") {
+    return synthesizeViaFfmpegFlite(text, { voice });
+  }
   if (route === "speech") {
     return synthesizeViaSpeechEndpoint(text, {
       provider,

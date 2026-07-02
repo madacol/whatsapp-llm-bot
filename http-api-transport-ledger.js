@@ -8,18 +8,26 @@ const DEFAULT_MAX_EVENTS = 1000;
  */
 function extractTextContent(content) {
   if (typeof content === "string") {
-    return content;
+    return isTransientAssistantStatus(content) ? "" : content;
   }
   const blocks = Array.isArray(content) ? content : [content];
   return blocks
     .map((block) => {
       if ((block.type === "text" || block.type === "markdown") && typeof block.text === "string") {
-        return block.text;
+        return isTransientAssistantStatus(block.text) ? "" : block.text;
       }
       return "";
     })
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isTransientAssistantStatus(text) {
+  return text.trim() === "Thinking...";
 }
 
 /**
