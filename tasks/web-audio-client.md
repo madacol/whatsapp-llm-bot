@@ -61,6 +61,9 @@ Active. The manual record/send/playback slice is deployed and verified end to en
   - `Web Speech v5` starts native Web Speech synchronously from the button click path after Chromium smoke reported `not-allowed`.
   - `Web Speech v6` fixes command-capture endpointing: `startWakeRecorder()` was resetting `wakeDetectedAt` to `0`, which prevented the silence loop from ever entering its endpoint logic. The fix preserves the capture start timestamp and shows live RMS/silence progress while capturing.
   - Added `scripts/web-wake-smoke.js`, a Chromium DevTools smoke harness with generated fake mic audio. Native Web Speech cannot be proven in this Linux Chromium environment: headless and Xvfb non-headless runs expose `SpeechRecognition` but fail with `audio-capture`. A recognizer-stub smoke proves the app path recognizes `hey jarvis` and enters command capture when Web Speech emits a matching result.
+- 2026-07-02 follow-up: user reported that silence endpointing works in quiet conditions, but TV/background speech keeps RMS above the fixed threshold so capture does not end after the user stops talking.
+- `Web Speech v7` changes post-wake endpointing from a fixed RMS gate to adaptive ambient-relative VAD. The client now estimates ambient RMS while wake listening, seeds capture endpointing from that baseline, requires speech to rise above the ambient-relative voice threshold, and treats return-to-baseline as silence using a lower release threshold.
+- `Web Speech v7` also keeps the browser microphone stream open during wake listening and attempts to start `SpeechRecognition` from the shared live audio track before falling back to native browser microphone recognition. This avoids the app explicitly releasing/reacquiring the mic on wake-listening start and restart loops, though browsers that ignore `start(audioTrack)` may still use their own recognition microphone path.
 
 ## Deployment
 
@@ -120,6 +123,13 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - Final deployed OpenAI TTS E2E used generated non-private MP3 speech and posted to `POST https://private-host-redacted/api/transports/voice/audio-turns?wait=true` with request id `e2e-audio-match-1782932487696`; response was HTTP 200 with `status:"completed"`, assistant text, and MP3 audio path `eee9b0661d25182929b7f5e30e504812ae664086c95fa02d7aa0aae3744a5f29.mp3`.
 - The returned deployed MP3 was fetched through `https://private-host-redacted/api/media/eee9b0661d25182929b7f5e30e504812ae664086c95fa02d7aa0aae3744a5f29.mp3` with HTTP 200 and `content-type: audio/mpeg`; OpenAI transcription normalized exactly to the API response text with word coverage `1.000`.
 - Deployed word-detection static check: `https://private-host-redacted/` includes `Word detection`, `Wake Capture`, `Max seconds`, and `Silence seconds`; deployed `app.js` includes the `SpeechRecognition` wake-detection path plus `WAKE_PREROLL_MS`, `startWakeRecorder`, `VAD_NO_SPEECH_TIMEOUT_MS`, `VAD_POST_ROLL_MS`, `Silence detected`, `No speech detected`, `Max utterance`, and `finishWakeCapture`.
+- `pnpm type-check` after Web Speech v7 adaptive ambient endpointing and shared microphone stream changes.
+- `pnpm type-check:tests` after Web Speech v7 adaptive ambient endpointing and shared microphone stream changes.
+- `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after Web Speech v7 changes; sandboxed run failed without detailed output in this environment.
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed Web Speech v7.
+- `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v7|app.js\\?v=20260702-wake-v7|adaptive ambient"` verified the deployed v7 marker and cache-busted script URL.
+- `curl -fsSL --max-time 15 'https://private-host-redacted/app.js?v=20260702-wake-v7' | rg "WAKE_DETECTOR_BUILD|shared-audio-track|vadThresholds|Ambient RMS"` verified the deployed shared-track and adaptive VAD code markers.
+- `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 30000 --stub-recognition --wait-complete` passed against deployed v7: status reached `Silence detected; submitting.`, uploaded a 23.2 KiB `audio/webm;codecs=opus` blob, and received stub response text `wake smoke recognized`.
 
 Manual browser microphone testing on the phone remains useful, but the deployed backend path has now been verified independently with synthetic speech.
 

@@ -1,7 +1,7 @@
 const STORAGE_KEY = "madabot.webAudioClient.settings.v1";
 const LOCAL_DEV_API_BASE_URL = "http://127.0.0.1:3200";
 const DEPLOYED_API_BASE_URL = "https://private-host-redacted";
-const WAKE_DETECTOR_BUILD = "Web Speech v6";
+const WAKE_DETECTOR_BUILD = "Web Speech v7";
 
 /**
  * @typedef {{
@@ -73,6 +73,13 @@ const PREFERRED_AUDIO_TYPES = [
 const WAKE_PREROLL_MS = 500;
 const WAKE_RECORDER_FRAME_MS = 80;
 const VAD_RMS_THRESHOLD = 0.018;
+const VAD_RELEASE_RMS_FLOOR = 0.012;
+const VAD_START_BASELINE_MULTIPLIER = 1.65;
+const VAD_RELEASE_BASELINE_MULTIPLIER = 1.28;
+const VAD_START_MARGIN = 0.006;
+const VAD_RELEASE_MARGIN = 0.004;
+const VAD_BASELINE_ALPHA = 0.035;
+const VAD_BASELINE_FAST_ALPHA = 0.18;
 const VAD_NO_SPEECH_TIMEOUT_MS = 5000;
 const VAD_POST_ROLL_MS = 300;
 const JARVIS_WAKE_VARIANTS = [
@@ -124,15 +131,26 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   vadAnalyser: AnalyserNode | null;
  *   vadData: Uint8Array | null;
  *   vadFrame: number;
+ *   ambientAudioContext: AudioContext | null;
+ *   ambientSource: MediaStreamAudioSourceNode | null;
+ *   ambientAnalyser: AnalyserNode | null;
+ *   ambientData: Uint8Array | null;
+ *   ambientFrame: number;
+ *   ambientRms: number;
+ *   ambientLastStatusAt: number;
  *   vadLastVoiceAt: number;
  *   vadSpeechSeen: boolean;
-  *   vadSilenceMs: number;
+ *   vadSilenceMs: number;
  *   vadNoSpeechTimeoutMs: number;
  *   vadPostRollMs: number;
  *   vadMaxUtteranceMs: number;
  *   vadIgnoreUntil: number;
  *   vadLastStatusAt: number;
+ *   vadBaselineRms: number;
+ *   vadVoiceThresholdRms: number;
+ *   vadReleaseThresholdRms: number;
  *   wakeRecognitionEnds: number;
+ *   wakeRecognitionSource: string;
  *   diagnosticsHistory: unknown[];
  * }}
  */
@@ -157,6 +175,13 @@ const state = {
   vadAnalyser: null,
   vadData: null,
   vadFrame: 0,
+  ambientAudioContext: null,
+  ambientSource: null,
+  ambientAnalyser: null,
+  ambientData: null,
+  ambientFrame: 0,
+  ambientRms: 0,
+  ambientLastStatusAt: 0,
   vadLastVoiceAt: 0,
   vadSpeechSeen: false,
   vadSilenceMs: DEFAULT_SETTINGS.wakeSilenceSeconds * 1000,
@@ -165,7 +190,11 @@ const state = {
   vadMaxUtteranceMs: DEFAULT_SETTINGS.wakeCaptureSeconds * 1000,
   vadIgnoreUntil: 0,
   vadLastStatusAt: 0,
+  vadBaselineRms: 0,
+  vadVoiceThresholdRms: VAD_RMS_THRESHOLD,
+  vadReleaseThresholdRms: VAD_RELEASE_RMS_FLOOR,
   wakeRecognitionEnds: 0,
+  wakeRecognitionSource: "",
   diagnosticsHistory: [],
 };
 
@@ -471,6 +500,20 @@ function audioContextCtor() {
   return audioWindow.AudioContext ?? audioWindow.webkitAudioContext ?? null;
 }
 
+/**
+ * @returns {MediaStreamTrack | null}
+ */
+function liveAudioTrack() {
+  return state.stream?.getAudioTracks().find((track) => track.readyState === "live") ?? null;
+}
+
+/**
+ * @returns {boolean}
+ */
+function hasLiveMicrophone() {
+  return liveAudioTrack() !== null;
+}
+
 async function checkApi() {
   const settings = readSettings();
   saveSettings();
@@ -501,8 +544,14 @@ async function enableMicrophone() {
     throwAndShow("This browser does not expose microphone capture.");
     return;
   }
+  if (hasLiveMicrophone()) {
+    setStatus("Ready", "Microphone is already enabled.");
+    renderControls();
+    return;
+  }
   try {
     setBusy(true);
+    releaseMicrophone();
     state.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         autoGainControl: true,
@@ -628,9 +677,16 @@ async function startWakeListening() {
     clearWakeCaptureTimer();
     stopWakeRecognitionOnly();
     stopSilenceDetection();
+    stopAmbientMonitor();
     state.wakeTriggered = false;
     state.wakeDetectedAt = 0;
-    releaseMicrophone();
+    state.wakeRecognitionSource = "";
+    if (!hasLiveMicrophone()) {
+      await enableMicrophone();
+    }
+    if (!hasLiveMicrophone()) {
+      return;
+    }
     const recognition = new Recognition();
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -643,14 +699,16 @@ async function startWakeListening() {
     state.wakeListening = true;
     state.wakeTriggered = false;
     state.wakeRecognitionEnds = 0;
+    startAmbientMonitor();
     startWakeRecognition(recognition);
-    setWakeStatus(`Listening for "${settings.wakePhrase}" (${recognition.lang}).`);
+    setWakeStatus(`Listening for "${settings.wakePhrase}" (${recognition.lang}) with the mic stream held open.`);
     setStatus("Listening", `Listening for "${settings.wakePhrase}".`);
     appendDiagnostics({
       wakeRecognition: {
         event: "start",
         language: recognition.lang,
         wakePhrase: settings.wakePhrase,
+        source: state.wakeRecognitionSource,
       },
     });
   } catch (error) {
@@ -668,8 +726,25 @@ async function startWakeListening() {
  * @returns {void}
  */
 function startWakeRecognition(recognition) {
+  const track = liveAudioTrack();
+  if (track) {
+    try {
+      recognition.start(track);
+      state.wakeRecognitionSource = "shared-audio-track";
+      appendDiagnostics({ wakeRecognition: { event: "recognition-start", source: state.wakeRecognitionSource } });
+      return;
+    } catch (error) {
+      appendDiagnostics({
+        wakeRecognition: {
+          event: "recognition-start-track-fallback",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
   recognition.start();
-  appendDiagnostics({ wakeRecognition: { event: "recognition-start", source: "microphone" } });
+  state.wakeRecognitionSource = "browser-microphone";
+  appendDiagnostics({ wakeRecognition: { event: "recognition-start", source: state.wakeRecognitionSource } });
 }
 
 /**
@@ -727,8 +802,14 @@ function handleWakeRecognitionEnd() {
     return;
   }
   state.wakeRecognitionEnds += 1;
-  setWakeStatus(`Recognition ended without detecting Jarvis. Restarting (${state.wakeRecognitionEnds}).`);
-  appendDiagnostics({ wakeRecognition: { event: "end", count: state.wakeRecognitionEnds } });
+  setWakeStatus(`Recognition ended without detecting Jarvis. Restarting on the open mic stream (${state.wakeRecognitionEnds}).`);
+  appendDiagnostics({
+    wakeRecognition: {
+      event: "end",
+      count: state.wakeRecognitionEnds,
+      source: state.wakeRecognitionSource,
+    },
+  });
   const recognition = state.recognition;
   if (!recognition) {
     return;
@@ -755,6 +836,7 @@ function handleWakeRecognitionEnd() {
 async function triggerWakeCapture(settings) {
   state.wakeListening = false;
   stopWakeRecognitionOnly();
+  stopAmbientMonitor();
   if (!state.stream) {
     await enableMicrophone();
   }
@@ -773,6 +855,10 @@ async function triggerWakeCapture(settings) {
   state.vadMaxUtteranceMs = settings.wakeCaptureSeconds * 1000;
   state.vadIgnoreUntil = captureStartedAt + WAKE_CUE_MS;
   state.vadLastStatusAt = 0;
+  state.vadBaselineRms = state.ambientRms;
+  const thresholds = vadThresholds(state.vadBaselineRms);
+  state.vadVoiceThresholdRms = thresholds.voice;
+  state.vadReleaseThresholdRms = thresholds.release;
   startWakeRecorder();
   startSilenceDetection(settings);
   setStatus("Detected", "Wake phrase detected. Capturing command.", "recording");
@@ -817,6 +903,10 @@ function startWakeRecorder() {
 function startSilenceDetection(settings) {
   stopSilenceDetection();
   state.vadSilenceMs = settings.wakeSilenceSeconds * 1000;
+  state.vadBaselineRms = state.vadBaselineRms || state.ambientRms;
+  const thresholds = vadThresholds(state.vadBaselineRms);
+  state.vadVoiceThresholdRms = thresholds.voice;
+  state.vadReleaseThresholdRms = thresholds.release;
   const stream = state.stream;
   const AudioContextClass = audioContextCtor();
   if (!stream || !AudioContextClass) {
@@ -861,9 +951,20 @@ function runSilenceDetectionFrame() {
     }
 
     const rms = currentRms(analyser, data);
-    if (rms >= VAD_RMS_THRESHOLD) {
+    if (!state.vadBaselineRms) {
+      state.vadBaselineRms = rms;
+    }
+    const thresholds = vadThresholds(state.vadBaselineRms);
+    const voiceThreshold = state.vadSpeechSeen ? thresholds.release : thresholds.voice;
+    const isVoice = rms >= voiceThreshold;
+    state.vadVoiceThresholdRms = thresholds.voice;
+    state.vadReleaseThresholdRms = thresholds.release;
+
+    if (isVoice) {
       state.vadSpeechSeen = true;
       state.vadLastVoiceAt = now;
+    } else {
+      state.vadBaselineRms = updateRmsBaseline(state.vadBaselineRms, rms);
     }
 
     if (state.vadSpeechSeen) {
@@ -883,6 +984,93 @@ function runSilenceDetectionFrame() {
   }
 
   state.vadFrame = window.requestAnimationFrame(runSilenceDetectionFrame);
+}
+
+function startAmbientMonitor() {
+  stopAmbientMonitor();
+  const stream = state.stream;
+  const AudioContextClass = audioContextCtor();
+  if (!stream || !AudioContextClass) {
+    return;
+  }
+  const audioContext = new AudioContextClass();
+  const source = audioContext.createMediaStreamSource(stream);
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.25;
+  source.connect(analyser);
+  state.ambientAudioContext = audioContext;
+  state.ambientSource = source;
+  state.ambientAnalyser = analyser;
+  state.ambientData = new Uint8Array(analyser.fftSize);
+  state.ambientLastStatusAt = 0;
+  void audioContext.resume().catch(() => undefined);
+  state.ambientFrame = window.requestAnimationFrame(runAmbientMonitorFrame);
+}
+
+function runAmbientMonitorFrame() {
+  const analyser = state.ambientAnalyser;
+  const data = state.ambientData;
+  if (!analyser || !data) {
+    state.ambientFrame = 0;
+    return;
+  }
+  const now = performance.now();
+  const rms = currentRms(analyser, data);
+  state.ambientRms = updateRmsBaseline(state.ambientRms, rms);
+  if (state.wakeListening && !state.wakeTriggered && now - state.ambientLastStatusAt >= 1500) {
+    state.ambientLastStatusAt = now;
+    setWakeStatus(
+      `Listening for "${readSettings().wakePhrase}". Ambient RMS ${state.ambientRms.toFixed(3)}. Mic stream stays open.`,
+    );
+  }
+  state.ambientFrame = window.requestAnimationFrame(runAmbientMonitorFrame);
+}
+
+function stopAmbientMonitor() {
+  if (state.ambientFrame) {
+    window.cancelAnimationFrame(state.ambientFrame);
+    state.ambientFrame = 0;
+  }
+  state.ambientSource?.disconnect();
+  state.ambientAnalyser?.disconnect();
+  const audioContext = state.ambientAudioContext;
+  state.ambientAudioContext = null;
+  state.ambientSource = null;
+  state.ambientAnalyser = null;
+  state.ambientData = null;
+  state.ambientLastStatusAt = 0;
+  if (audioContext && audioContext.state !== "closed") {
+    void audioContext.close().catch(() => undefined);
+  }
+}
+
+/**
+ * @param {number} baseline
+ * @returns {{ voice: number, release: number }}
+ */
+function vadThresholds(baseline) {
+  const ambient = Math.max(0, baseline || 0);
+  return {
+    voice: Math.max(VAD_RMS_THRESHOLD, ambient * VAD_START_BASELINE_MULTIPLIER + VAD_START_MARGIN),
+    release: Math.max(VAD_RELEASE_RMS_FLOOR, ambient * VAD_RELEASE_BASELINE_MULTIPLIER + VAD_RELEASE_MARGIN),
+  };
+}
+
+/**
+ * @param {number} baseline
+ * @param {number} rms
+ * @returns {number}
+ */
+function updateRmsBaseline(baseline, rms) {
+  if (!Number.isFinite(rms) || rms <= 0) {
+    return baseline;
+  }
+  if (!Number.isFinite(baseline) || baseline <= 0) {
+    return rms;
+  }
+  const alpha = rms < baseline ? VAD_BASELINE_FAST_ALPHA : VAD_BASELINE_ALPHA;
+  return baseline + (rms - baseline) * alpha;
 }
 
 /**
@@ -914,11 +1102,11 @@ function renderVadStatus(now, rms, silentForMs) {
   const stopAfterMs = state.vadSilenceMs + state.vadPostRollMs;
   if (state.vadSpeechSeen) {
     setWakeStatus(
-      `Capturing command. RMS ${rms.toFixed(3)} / ${VAD_RMS_THRESHOLD.toFixed(3)}. Silence ${(silentForMs / 1000).toFixed(1)}s/${(stopAfterMs / 1000).toFixed(1)}s.`,
+      `Capturing command. RMS ${rms.toFixed(3)} / ${state.vadReleaseThresholdRms.toFixed(3)} release. Ambient ${state.vadBaselineRms.toFixed(3)}. Silence ${(silentForMs / 1000).toFixed(1)}s/${(stopAfterMs / 1000).toFixed(1)}s.`,
     );
   } else {
     setWakeStatus(
-      `Capturing command. Waiting for speech. RMS ${rms.toFixed(3)} / ${VAD_RMS_THRESHOLD.toFixed(3)}.`,
+      `Capturing command. Waiting for speech. RMS ${rms.toFixed(3)} / ${state.vadVoiceThresholdRms.toFixed(3)} voice. Ambient ${state.vadBaselineRms.toFixed(3)}.`,
     );
   }
 }
@@ -939,6 +1127,9 @@ function stopSilenceDetection() {
   state.vadSpeechSeen = false;
   state.vadIgnoreUntil = 0;
   state.vadLastStatusAt = 0;
+  state.vadBaselineRms = 0;
+  state.vadVoiceThresholdRms = VAD_RMS_THRESHOLD;
+  state.vadReleaseThresholdRms = VAD_RELEASE_RMS_FLOOR;
   if (audioContext && audioContext.state !== "closed") {
     void audioContext.close().catch(() => undefined);
   }
@@ -1168,6 +1359,7 @@ async function stopWakeListening(message = "Detector stopped.") {
     stopTimer();
   }
   stopWakeRecognitionOnly();
+  stopAmbientMonitor();
   stopSilenceDetection();
   await stopWakeRecorder(false).catch((error) => handleError(error));
   if (message) {
@@ -1510,8 +1702,10 @@ function cleanup() {
 }
 
 function releaseMicrophone() {
+  stopAmbientMonitor();
   if (state.stream) {
     state.stream.getTracks().forEach((track) => track.stop());
     state.stream = null;
   }
+  state.ambientRms = 0;
 }
