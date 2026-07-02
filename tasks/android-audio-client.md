@@ -10,6 +10,7 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 - Follow-up clarification on 2026-06-24: replicate the current voice assistant functionality in an Android app, with the change that Android transmits audio directly to the API so the client stays as thin as possible.
 - Follow-up clarification on 2026-06-24: also implement word detection, interpreted as wake-word / wake-phrase detection matching the existing Pi voice assistant flow.
 - Follow-up clarification on 2026-06-24: openWakeWord was chosen for a Pi Zero constraint and was not reliable enough; prefer a better-quality open-source alternative for Android if available.
+- Follow-up on 2026-07-01: Android target can assume medium/high-end Android hardware; low-end-phone constraints are not required.
 - `clients/voice-pi/openwakeword_always_on.py` and `clients/voice-pi/capture_after_wake.py` currently use openWakeWord for `hey_jarvis` detection, then VAD endpointing to capture the user's turn.
 - `sherpa-onnx` is the preferred POC wake-word candidate: it is Apache-2.0, supports Android and Kotlin/Java APIs, includes keyword spotting, has an Android keyword spotting app, and supports custom keyword files.
 - `clients/voice-pi/README.md` says the Pi client is a frontend for `http-api-transport.js`, and the intended next step is moving STT/TTS into `whatsapp-llm-bot` while clients keep wake/capture/upload/playback.
@@ -33,6 +34,7 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 - Use the same provider-backed TTS direction already implemented in `clients/voice-pi/tts_openrouter.py`: default OpenAI speech with OpenRouter-compatible alternatives via env configuration, not local OS TTS.
 - Build a native Android POC under `clients/android/` that owns wake phrase detection, recording, upload, and playback.
 - Use `sherpa-onnx` keyword spotting on Android for wake detection rather than Android cloud speech recognition or openWakeWord.
+- On the assumed medium/high-end phone target, benchmark the sherpa-onnx detector with a realistic wake phrase and threshold before considering proprietary alternatives such as Picovoice Porcupine Android.
 
 ## Current Status
 
