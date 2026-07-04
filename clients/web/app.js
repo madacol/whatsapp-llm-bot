@@ -3,7 +3,7 @@ import { OpenWakeWordJarvisDetector, OPEN_WAKE_WORD_MODEL_BASE_PATH } from "./op
 const STORAGE_KEY = "madabot.webAudioClient.settings.v1";
 const LOCAL_DEV_API_BASE_URL = "http://127.0.0.1:3200";
 const DEPLOYED_API_BASE_URL = "https://private-host-redacted";
-const WAKE_DETECTOR_BUILD = "Local openWakeWord v12";
+const WAKE_DETECTOR_BUILD = "Local openWakeWord v13";
 const DEFAULT_WAKE_THRESHOLD = 0.5;
 
 /**
@@ -47,6 +47,7 @@ const VAD_BASELINE_FAST_ALPHA = 0.18;
 const VAD_POST_WAKE_CALIBRATION_MS = 350;
 const VAD_NO_SPEECH_TIMEOUT_MS = 5000;
 const VAD_POST_ROLL_MS = 300;
+const WAKE_REARM_SUPPRESS_MS = 900;
 const WAKE_CUE_TONES = [
   [660, 0.16],
   [0, 0.05],
@@ -108,6 +109,7 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   localWakeInputRemainder: Float32Array;
  *   localWakeProcessChain: Promise<void>;
  *   localWakeLastScoreAt: number;
+ *   localWakeSuppressUntil: number;
  *   diagnosticsHistory: unknown[];
  * }}
  */
@@ -156,6 +158,7 @@ const state = {
   localWakeInputRemainder: new Float32Array(0),
   localWakeProcessChain: Promise.resolve(),
   localWakeLastScoreAt: 0,
+  localWakeSuppressUntil: 0,
   diagnosticsHistory: [],
 };
 
@@ -746,6 +749,20 @@ function handleOpenWakeWordDetection(prediction) {
   if (!state.wakeListening || state.wakeTriggered || state.recorder) {
     return;
   }
+  if (shouldSuppressLocalWakeDetection()) {
+    state.openWakeWord?.reset();
+    state.localWakePcm = [];
+    state.localWakeInputRemainder = new Float32Array(0);
+    appendDiagnostics({
+      localWake: {
+        event: "suppressed-detection-after-rearm",
+        keyword: prediction.label,
+        score: Number(prediction.score.toFixed(3)),
+        threshold: prediction.threshold,
+      },
+    });
+    return;
+  }
   const settings = readSettings();
   state.wakeTriggered = true;
   appendDiagnostics({
@@ -772,6 +789,7 @@ async function startLocalWakeProcessing() {
   if (!stream || !detector || !AudioContextClass) {
     throw new Error("Local wake detector is not ready.");
   }
+  detector.reset();
   const audioContext = new AudioContextClass();
   const source = audioContext.createMediaStreamSource(stream);
   const processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -792,6 +810,20 @@ async function startLocalWakeProcessing() {
   state.localWakeProcessChain = Promise.resolve();
   state.localWakeLastScoreAt = 0;
   await audioContext.resume().catch(() => undefined);
+}
+
+/**
+ * @returns {boolean}
+ */
+function shouldSuppressLocalWakeDetection() {
+  if (!state.localWakeSuppressUntil) {
+    return false;
+  }
+  if (performance.now() < state.localWakeSuppressUntil) {
+    return true;
+  }
+  state.localWakeSuppressUntil = 0;
+  return false;
 }
 
 /**
@@ -1252,6 +1284,7 @@ async function restartWakeListeningAfterCapture() {
     return;
   }
   try {
+    state.localWakeSuppressUntil = performance.now() + WAKE_REARM_SUPPRESS_MS;
     setWakeStatus("Restarting wake listener.");
     await startWakeListening();
   } catch (error) {
@@ -1390,6 +1423,7 @@ async function stopWakeListening(message = "Detector stopped.") {
   state.wakeListening = false;
   state.wakeTriggered = false;
   state.wakeDetectedAt = 0;
+  state.localWakeSuppressUntil = 0;
   clearWakeCaptureTimer();
   if (wasWakeCapturing) {
     stopTimer();

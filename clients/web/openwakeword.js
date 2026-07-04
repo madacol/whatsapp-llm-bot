@@ -74,6 +74,8 @@ export class OpenWakeWordJarvisDetector {
     this.melspectrogramRows = initialRows(76, MELSPEC_COLUMNS, 1);
     /** @type {number[][]} */
     this.featureRows = [];
+    /** @type {number[][]} */
+    this.primedFeatureRows = [];
     /** @type {number[]} */
     this.predictionBuffer = [];
   }
@@ -102,6 +104,7 @@ export class OpenWakeWordJarvisDetector {
       threshold: options.threshold,
     });
     await detector.primeFeatureBuffer();
+    detector.captureResetBaseline();
     return detector;
   }
 
@@ -114,6 +117,15 @@ export class OpenWakeWordJarvisDetector {
       this.embeddingSession.release(),
       this.wakeSession.release(),
     ]);
+  }
+
+  reset() {
+    this.rawDataBuffer = [];
+    this.rawDataRemainder = new Int16Array(0);
+    this.accumulatedSamples = 0;
+    this.melspectrogramRows = initialRows(76, MELSPEC_COLUMNS, 1);
+    this.featureRows = cloneRows(this.primedFeatureRows);
+    this.predictionBuffer = [];
   }
 
   /**
@@ -161,6 +173,10 @@ export class OpenWakeWordJarvisDetector {
     const embeddings = await this.embeddingsForSamples(samples);
     this.featureRows.push(...embeddings);
     trimRows(this.featureRows, FEATURE_MAX_ROWS);
+  }
+
+  captureResetBaseline() {
+    this.primedFeatureRows = cloneRows(this.featureRows);
   }
 
   /**
@@ -414,4 +430,12 @@ function trimRows(rows, maxLength) {
   if (rows.length > maxLength) {
     rows.splice(0, rows.length - maxLength);
   }
+}
+
+/**
+ * @param {number[][]} rows
+ * @returns {number[][]}
+ */
+function cloneRows(rows) {
+  return rows.map((row) => [...row]);
 }
