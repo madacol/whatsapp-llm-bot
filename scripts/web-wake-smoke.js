@@ -46,14 +46,11 @@ async function main() {
 
     await cdp.send("Page.navigate", { url: options.url });
     await waitForPageReady(cdp);
-    if (options.stubPorcupine) {
-      await installPorcupineStub(cdp);
-    }
     await installFetchStub(cdp);
     const capability = await evaluate(cdp, `(() => ({
       secure: isSecureContext,
       hasMediaDevices: Boolean(navigator.mediaDevices?.getUserMedia),
-      hasPorcupine: Boolean(window.PorcupineWeb?.Porcupine),
+      hasOnnxRuntime: Boolean(window.ort?.InferenceSession),
       wakeStatus: document.querySelector("#wake-status")?.textContent || "",
       detectorVersion: document.querySelector("#wake-detector-version")?.textContent || ""
     }))()`);
@@ -64,7 +61,7 @@ async function main() {
       expectRestart: options.expectRestart,
     });
     const report = {
-      mode: options.stubPorcupine ? "stub-porcupine" : "local-porcupine",
+      mode: "local-openwakeword",
       url: options.url,
       audio: options.audio,
       capability,
@@ -98,13 +95,12 @@ async function cleanupProfile(profileDir) {
 
 /**
  * @param {string[]} argv
- * @returns {{ url: string, audio: string, timeoutMs: number, stubPorcupine: boolean, headed: boolean, waitComplete: boolean, expectRestart: boolean }}
+ * @returns {{ url: string, audio: string, timeoutMs: number, headed: boolean, waitComplete: boolean, expectRestart: boolean }}
  */
 function parseArgs(argv) {
   let url = DEFAULT_URL;
   let audio = DEFAULT_AUDIO;
   let timeoutMs = 15_000;
-  let stubPorcupine = false;
   let headed = false;
   let waitComplete = false;
   let expectRestart = false;
@@ -120,8 +116,6 @@ function parseArgs(argv) {
     } else if (arg === "--timeout-ms" && next) {
       timeoutMs = Number.parseInt(next, 10);
       index += 1;
-    } else if (arg === "--stub-porcupine") {
-      stubPorcupine = true;
     } else if (arg === "--headed") {
       headed = true;
     } else if (arg === "--wait-complete") {
@@ -131,32 +125,14 @@ function parseArgs(argv) {
       waitComplete = true;
     }
   }
-  if (stubPorcupine) {
-    url = withUrlParam(url, "porcupineAccessKey", "smoke-test-access-key");
-  }
   return {
     url,
     audio,
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 15_000,
-    stubPorcupine,
     headed,
     waitComplete,
     expectRestart,
   };
-}
-
-/**
- * @param {string} url
- * @param {string} key
- * @param {string} value
- * @returns {string}
- */
-function withUrlParam(url, key, value) {
-  const parsed = new URL(url);
-  if (!parsed.searchParams.has(key)) {
-    parsed.searchParams.set(key, value);
-  }
-  return parsed.toString();
 }
 
 /**
@@ -310,38 +286,6 @@ async function installFetchStub(cdp) {
 
 /**
  * @param {CdpClient} cdp
- * @returns {Promise<void>}
- */
-async function installPorcupineStub(cdp) {
-  await cdp.send("Runtime.evaluate", {
-    expression: `
-      (() => {
-        window.PorcupineWeb = {
-          BuiltInKeyword: { Jarvis: "Jarvis" },
-          Porcupine: {
-            async create(_accessKey, _keywords, callback) {
-              let frames = 0;
-              return {
-                frameLength: 512,
-                sampleRate: 16000,
-                async process() {
-                  frames += 1;
-                  if (frames === 4) {
-                    callback({ label: "Jarvis", index: 0 });
-                  }
-                },
-                async release() {}
-              };
-            }
-          }
-        };
-      })()
-    `,
-  });
-}
-
-/**
- * @param {CdpClient} cdp
  * @param {string} selector
  * @returns {Promise<void>}
  */
@@ -407,7 +351,7 @@ async function readPageState(cdp) {
     return {
       detected: /Wake phrase detected|Jarvis detected locally|Capturing command|wake smoke recognized/i.test(combined),
       completed: /wake smoke recognized|Assistant returned text but no audio/i.test(combined),
-      restarted: /Listening (locally )?for/i.test(wakeStatus) && /wake smoke recognized/i.test(assistantText),
+      restarted: /Listening locally for/i.test(wakeStatus) && /wake smoke recognized/i.test(assistantText),
       wakeStatus,
       statusText,
       assistantText,

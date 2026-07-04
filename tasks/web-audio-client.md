@@ -21,12 +21,18 @@ Research update on 2026-07-01:
 - Browser wake detection is not equivalent to native always-on listening. Microphone capture requires a secure context and user permission; hidden/background pages are subject to browser lifecycle throttling; screen wake locks apply only to active visible documents and can be released by the browser or OS.
 - sherpa-onnx supports WebAssembly generally, but its keyword-spotting path currently looks more direct on Android than in a packaged browser client. Treat sherpa browser KWS as a later investigation, not the first browser implementation path.
 
+Direction correction on 2026-07-04:
+
+- The user rejected any provider-gated browser wake detector. A Picovoice AccessKey is not acceptable even if inference runs locally, because it introduces an external vendor account/key requirement.
+- The web MVP wake path must be absolutely local from the browser's point of view: one app-owned microphone stream, local PCM processing, vendored model/runtime assets, and no wake-provider API/token.
+- Current browser wake implementation uses vendored ONNX Runtime Web plus vendored openWakeWord-compatible ONNX models for `hey_jarvis`.
+
 ## Proposed Direction
 
 - Build a web POC under `clients/web/` as its own client.
 - First slice: manual record, upload the recorded blob to `POST /api/transports/:transportId/audio-turns?wait=true`, show assistant text, fetch/play assistant audio.
 - Use `MediaRecorder` with a preferred `audio/ogg; codecs=opus` or `audio/webm; codecs=opus` MIME type, falling back to a browser-supported `audio/*` type that the backend media-to-text provider can transcribe.
-- Add a browser `WakeWordDetector` boundary after the manual path works. Primary candidate: Picovoice Porcupine Web if proprietary SDK/account use is acceptable. Open/experimental fallback: TensorFlow.js Speech Commands. Avoid Web Speech API for wake detection because browser support and behavior are inconsistent and it is not a local wake-word engine.
+- Add a browser `WakeWordDetector` boundary after the manual path works. Current accepted path: vendored openWakeWord-compatible ONNX models running through ONNX Runtime Web. Do not use a provider-gated SDK or Web Speech API as the MVP wake engine.
 - Make browser constraints explicit in the UI state model: microphone permission, listening, recording, uploading, awaiting response, playback, and permission/error states.
 - Require HTTPS or localhost for microphone access. For phone-on-LAN testing against the bot backend, use TLS/dev certs, a trusted local reverse proxy, or another secure-origin setup.
 
@@ -38,7 +44,7 @@ Research update on 2026-07-01:
 
 ## Current Status
 
-Active. The manual record/send/playback slice is deployed and verified end to end. The Web Speech wake path was removed from the MVP because Chrome/Android repeatedly ended and restarted recognition, causing audible mic activation cycles and unreliable wake behavior. Current work is local-only browser wake detection: one app-owned microphone stream feeds Porcupine Web's built-in Jarvis detector, then the same stream is reused for command capture and upload.
+Active. The manual record/send/playback slice is deployed and verified end to end. The Web Speech wake path was removed from the MVP because Chrome/Android repeatedly ended and restarted recognition, causing audible mic activation cycles and no real Jarvis detections in target testing. The Picovoice/Porcupine path was removed because it requires a vendor AccessKey. Current work is absolute-local browser wake detection: one app-owned microphone stream feeds a vendored openWakeWord-compatible ONNX Jarvis detector, then the same stream is reused for command capture and upload.
 
 ## Progress
 
@@ -66,9 +72,10 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - `Web Speech v7` also keeps the browser microphone stream open during wake listening and attempts to start `SpeechRecognition` from the shared live audio track before falling back to native browser microphone recognition. This avoids the app explicitly releasing/reacquiring the mic on wake-listening start and restart loops, though browsers that ignore `start(audioTrack)` may still use their own recognition microphone path.
 - 2026-07-02 regression: user reported v7 no longer detects Jarvis on the phone. Treat the phone result as authoritative for native Web Speech; the stub smoke only validates app wiring after a recognition result, not real Android Chrome recognition.
 - `Web Speech v8` restores the previous native Web Speech wake path by releasing any app-owned microphone stream before starting `SpeechRecognition`, removing the shared pre-wake mic stream and ambient monitor. Adaptive endpointing remains for post-wake capture, using a short post-wake calibration window to estimate background RMS before applying ambient-relative voice/release thresholds.
-- 2026-07-04 direction change: user rejected Web Speech compatibility/fallback work and asked for the simplest MVP that works. The web client now has one wake path: Picovoice Porcupine Web, built-in `Jarvis`, one app-owned `getUserMedia` stream, Web Audio PCM framing/downsampling, local Porcupine `process(Int16Array)` calls, same-stream command `MediaRecorder` capture, silence endpointing, upload, response playback, and auto-return to local wake listening after each completed turn.
-- Added exact pinned dependency `@picovoice/porcupine-web@4.0.0`, vendored the browser IIFE bundle under `clients/web/vendor/picovoice/`, and vendored the official common Porcupine model under `clients/web/vendor/porcupine/porcupine_params.pv`.
-- The page now requires a Picovoice AccessKey for local Jarvis detection. That is separate from the HTTP API bearer token and is used by the browser-side wake engine.
+- 2026-07-04 direction change: user rejected Web Speech compatibility/fallback work and asked for the simplest MVP that works. A short-lived Picovoice Porcupine implementation was also rejected because it required a Picovoice AccessKey.
+- Replaced the provider-gated wake path with local openWakeWord-compatible ONNX inference in the browser. The web client now has one wake path: vendored ONNX Runtime Web, vendored `melspectrogram.onnx`, vendored `embedding_model.onnx`, vendored `hey_jarvis_v0.1.onnx`, one app-owned `getUserMedia` stream, Web Audio PCM framing/downsampling, same-stream command `MediaRecorder` capture, silence endpointing, upload, response playback, and auto-return to local wake listening after each completed turn.
+- Added exact pinned dependency `onnxruntime-web@1.24.1`, vendored the browser WASM runtime assets under `clients/web/vendor/onnxruntime/`, and removed the Picovoice dependency, bundle, model, and AccessKey UI.
+- The page no longer requires any wake-provider key. Wake detection is local browser inference over local assets.
 
 ## Deployment
 
@@ -151,13 +158,24 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - `curl -fsSL --max-time 15 https://private-host-redacted/` returned deployed HTML with `Picovoice AccessKey`, `Local Porcupine v10`, and no `Web Speech`, `wake-engine`, or `wake-language` controls.
 - `curl -I --max-time 15 https://private-host-redacted/vendor/porcupine/porcupine_params.pv` returned HTTP 200 with `content-length: 984948`.
 - `curl -I --max-time 15 https://private-host-redacted/vendor/picovoice/porcupine-web.iife.js` returned HTTP 200 with `content-type: text/javascript; charset=utf-8`.
+- 2026-07-04 correction: the Porcupine/Picovoice deployment was superseded because the AccessKey requirement violates the user's no-cloud/no-provider-key constraint.
+- `pnpm type-check` after replacing Picovoice with local openWakeWord-compatible ONNX wake detection.
+- `pnpm type-check:tests` after replacing Picovoice with local openWakeWord-compatible ONNX wake detection.
+- `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after adding the vendored ONNX Runtime and openWakeWord assets.
+- `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --wait-complete` passed locally with real browser ONNX inference: openWakeWord detected `hey_jarvis`, command capture stopped, the upload path ran, and the stubbed assistant response text `wake smoke recognized` rendered.
+- `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --expect-restart` passed locally: after a completed turn, the page returned to `Listening locally for "jarvis".`
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed the local openWakeWord browser wake path to `private-host-redacted`.
+- Deployed HTML marker check found `Wake threshold`, `Detector build: Local openWakeWord v11, single mic stream.`, and `./vendor/onnxruntime/ort.wasm.min.js`.
+- Deployed JavaScript marker check found `OpenWakeWordJarvisDetector` and `configureOrtRuntime`; the same HTML/JS marker checks found no `Picovoice`, `Porcupine`, `AccessKey`, `Web Speech`, or `SpeechRecognition` strings.
+- `curl -I --max-time 15 https://private-host-redacted/vendor/openwakeword/hey_jarvis_v0.1.onnx` returned HTTP 200 with `content-length: 1271370`.
+- `curl -I --max-time 15 https://private-host-redacted/vendor/onnxruntime/ort-wasm-simd-threaded.wasm` returned HTTP 200 with `content-type: application/wasm` and `content-length: 12297086`.
 
 Manual browser microphone testing on the phone remains useful, but the deployed backend path has now been verified independently with synthetic speech.
 
 ## Remaining
 
-- Manually test real Porcupine Jarvis detection on the target phone/browser with a Picovoice AccessKey. The local smoke proves app wiring with a stubbed detector, not real acoustic detection quality.
-- If built-in Jarvis is not good enough in the target environment, train/download a custom Porcupine Web `.ppn` keyword model and swap the built-in keyword for that model.
+- Manually test real openWakeWord Jarvis detection on the target phone/browser. The local Chromium fake-mic smoke proves real browser ONNX inference and app wiring; real acoustic phone performance still needs target-device testing.
+- If the openWakeWord `hey_jarvis_v0.1` model is not good enough in the target environment, evaluate tuning the threshold, using a custom local openWakeWord model, or switching to another fully local browser-runnable model asset.
 
 ## Acceptance
 
@@ -170,6 +188,8 @@ Manual browser microphone testing on the phone remains useful, but the deployed 
 
 - Picovoice Porcupine Web quick start: https://picovoice.ai/docs/quick-start/porcupine-web/
 - Picovoice Porcupine Android quick start: https://picovoice.ai/docs/quick-start/porcupine-android/
+- openWakeWord release assets: https://github.com/dscripka/openWakeWord/releases/tag/v0.5.1
+- ONNX Runtime Web package: https://www.npmjs.com/package/onnxruntime-web
 - TensorFlow.js Speech Commands: https://github.com/tensorflow/tfjs-models/tree/master/speech-commands
 - MDN `getUserMedia`: https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
 - MDN Page Visibility API: https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API

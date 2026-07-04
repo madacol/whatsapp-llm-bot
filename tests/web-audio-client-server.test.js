@@ -24,25 +24,48 @@ describe("web audio client static server", () => {
     const indexText = await index.text();
     assert.match(indexText, /Web Audio Client/);
     assert.match(indexText, /Word detection/);
-    assert.match(indexText, /Picovoice AccessKey/);
-    assert.match(indexText, /Local Porcupine v10/);
-    assert.match(indexText, /porcupine-web\.iife\.js/);
+    assert.match(indexText, /Wake threshold/);
+    assert.match(indexText, /Local openWakeWord v11/);
+    assert.match(indexText, /ort\.wasm\.min\.js/);
 
     const script = await fetch(`${baseUrl}/app.js`);
     assert.equal(script.status, 200);
     assert.equal(script.headers.get("content-type"), "text/javascript; charset=utf-8");
     const scriptText = await script.text();
     assert.match(scriptText, /audio-turns/);
-    assert.match(scriptText, /Porcupine/);
-    assert.match(scriptText, /Local Porcupine v10/);
+    assert.match(scriptText, /OpenWakeWordJarvisDetector/);
+    assert.match(scriptText, /Local openWakeWord v11/);
 
-    const porcupineBundle = await fetch(`${baseUrl}/vendor/picovoice/porcupine-web.iife.js`);
-    assert.equal(porcupineBundle.status, 200);
-    assert.equal(porcupineBundle.headers.get("content-type"), "text/javascript; charset=utf-8");
+    const openWakeWordModule = await fetch(`${baseUrl}/openwakeword.js`);
+    assert.equal(openWakeWordModule.status, 200);
+    assert.equal(openWakeWordModule.headers.get("content-type"), "text/javascript; charset=utf-8");
+    await discardResponseBody(openWakeWordModule);
 
-    const porcupineModel = await fetch(`${baseUrl}/vendor/porcupine/porcupine_params.pv`);
-    assert.equal(porcupineModel.status, 200);
-    assert.equal(porcupineModel.headers.get("content-type"), "application/octet-stream");
+    const ortBundle = await fetch(`${baseUrl}/vendor/onnxruntime/ort.wasm.min.js`);
+    assert.equal(ortBundle.status, 200);
+    assert.equal(ortBundle.headers.get("content-type"), "text/javascript; charset=utf-8");
+    await discardResponseBody(ortBundle);
+
+    const ortWasm = await fetch(`${baseUrl}/vendor/onnxruntime/ort-wasm-simd-threaded.wasm`);
+    assert.equal(ortWasm.status, 200);
+    assert.equal(ortWasm.headers.get("content-type"), "application/wasm");
+    await discardResponseBody(ortWasm);
+
+    const ortWasmModule = await fetch(`${baseUrl}/vendor/onnxruntime/ort-wasm-simd-threaded.mjs`);
+    assert.equal(ortWasmModule.status, 200);
+    assert.equal(ortWasmModule.headers.get("content-type"), "text/javascript; charset=utf-8");
+    await discardResponseBody(ortWasmModule);
+
+    for (const modelPath of [
+      "vendor/openwakeword/melspectrogram.onnx",
+      "vendor/openwakeword/embedding_model.onnx",
+      "vendor/openwakeword/hey_jarvis_v0.1.onnx",
+    ]) {
+      const model = await fetch(`${baseUrl}/${modelPath}`);
+      assert.equal(model.status, 200);
+      assert.equal(model.headers.get("content-type"), "application/octet-stream");
+      await discardResponseBody(model);
+    }
   });
 
   it("rejects missing files and path traversal", async () => {
@@ -51,13 +74,19 @@ describe("web audio client static server", () => {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
     const baseUrl = `http://127.0.0.1:${listeningPort(server)}`;
 
-    assert.equal((await fetch(`${baseUrl}/missing.js`)).status, 404);
-    assert.equal((await fetch(`${baseUrl}/%2e%2e/package.json`)).status, 404);
+    const missing = await fetch(`${baseUrl}/missing.js`);
+    assert.equal(missing.status, 404);
+    await discardResponseBody(missing);
+    const traversal = await fetch(`${baseUrl}/%2e%2e/package.json`);
+    assert.equal(traversal.status, 404);
+    await discardResponseBody(traversal);
   });
 
   it("resolves content types and static paths defensively", () => {
     assert.equal(contentTypeForPath("index.html"), "text/html; charset=utf-8");
     assert.equal(contentTypeForPath("app.js"), "text/javascript; charset=utf-8");
+    assert.equal(contentTypeForPath("runtime.mjs"), "text/javascript; charset=utf-8");
+    assert.equal(contentTypeForPath("runtime.wasm"), "application/wasm");
     assert.equal(contentTypeForPath("voice.bin"), "application/octet-stream");
 
     assert.ok(resolveStaticPath("/tmp/client", "/index.html")?.endsWith("/tmp/client/index.html"));
@@ -75,4 +104,12 @@ function listeningPort(server) {
     throw new Error("Expected server to listen on an AddressInfo endpoint");
   }
   return address.port;
+}
+
+/**
+ * @param {Response} response
+ * @returns {Promise<void>}
+ */
+async function discardResponseBody(response) {
+  await response.body?.cancel();
 }

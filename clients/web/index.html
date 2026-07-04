@@ -97,12 +97,8 @@
               <input id="wake-phrase" name="wakePhrase" type="text" autocomplete="off" required>
             </label>
             <label>
-              <span>Picovoice AccessKey</span>
-              <input id="porcupine-access-key" name="porcupineAccessKey" type="password" autocomplete="off">
-            </label>
-            <label>
-              <span>Sensitivity</span>
-              <input id="porcupine-sensitivity" name="porcupineSensitivity" type="number" min="0.1" max="1" step="0.05" required>
+              <span>Wake threshold</span>
+              <input id="wake-threshold" name="wakeThreshold" type="number" min="0.05" max="0.95" step="0.05" required>
             </label>
             <label>
               <span>Max seconds</span>
@@ -117,7 +113,7 @@
             <button id="start-listening" class="primary-button" type="button">Start Listening</button>
             <button id="stop-listening" class="secondary-button" type="button" disabled>Stop Listening</button>
           </div>
-          <p id="wake-detector-version" class="field-note detector-version">Detector build: Local Porcupine v10, single mic stream.</p>
+          <p id="wake-detector-version" class="field-note detector-version">Detector build: Local openWakeWord v11, single mic stream.</p>
           <p id="wake-status" class="field-note">Detector idle.</p>
         </div>
 
@@ -137,7 +133,7 @@
       </section>
     </main>
 
-    <script src="./vendor/picovoice/porcupine-web.iife.js"></script>
-    <script type="module" src="./app.js?v=20260704-wake-v10"></script>
+    <script src="./vendor/onnxruntime/ort.wasm.min.js"></script>
+    <script type="module" src="./app.js?v=20260704-wake-v11"></script>
   </body>
 </html>
