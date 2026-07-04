@@ -44,7 +44,7 @@ Direction correction on 2026-07-04:
 
 ## Current Status
 
-Active. The manual record/send/playback slice is deployed and verified end to end. The Web Speech wake path was removed from the MVP because Chrome/Android repeatedly ended and restarted recognition, causing audible mic activation cycles and no real Jarvis detections in target testing. The Picovoice/Porcupine path was removed because it requires a vendor AccessKey. Current work is absolute-local browser wake detection: one app-owned microphone stream feeds a vendored openWakeWord-compatible ONNX Jarvis detector, then the same stream is reused for command capture and upload.
+Active. The manual record/send/playback slice is deployed and verified end to end. The Web Speech wake path was removed from the MVP because Chrome/Android repeatedly ended and restarted recognition, causing audible mic activation cycles and no real Jarvis detections in target testing. The Picovoice/Porcupine path was removed because it requires a vendor AccessKey. Current work is absolute-local browser wake detection: one app-owned microphone stream feeds a vendored openWakeWord-compatible ONNX Jarvis detector, then the same stream is reused for command capture and upload. As of v12, the client re-arms local wake listening immediately after command capture stops; upload, assistant response, and assistant audio continue in the background instead of blocking the next wake capture.
 
 ## Progress
 
@@ -76,6 +76,7 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - Replaced the provider-gated wake path with local openWakeWord-compatible ONNX inference in the browser. The web client now has one wake path: vendored ONNX Runtime Web, vendored `melspectrogram.onnx`, vendored `embedding_model.onnx`, vendored `hey_jarvis_v0.1.onnx`, one app-owned `getUserMedia` stream, Web Audio PCM framing/downsampling, same-stream command `MediaRecorder` capture, silence endpointing, upload, response playback, and auto-return to local wake listening after each completed turn.
 - Added exact pinned dependency `onnxruntime-web@1.24.1`, vendored the browser WASM runtime assets under `clients/web/vendor/onnxruntime/`, and removed the Picovoice dependency, bundle, model, and AccessKey UI.
 - The page no longer requires any wake-provider key. Wake detection is local browser inference over local assets.
+- v12 removes the delayed restart-after-answer/audio path. `finishWakeCapture()` now stops the command recorder, immediately starts local wake listening again when auto-restart is armed, and submits the captured audio in the background. Local wake detection no longer treats an in-flight upload/assistant response as a blocker, so the user can inject or steer with another wake turn before the previous answer returns.
 
 ## Deployment
 
@@ -169,6 +170,14 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - Deployed JavaScript marker check found `OpenWakeWordJarvisDetector` and `configureOrtRuntime`; the same HTML/JS marker checks found no `Picovoice`, `Porcupine`, `AccessKey`, `Web Speech`, or `SpeechRecognition` strings.
 - `curl -I --max-time 15 https://private-host-redacted/vendor/openwakeword/hey_jarvis_v0.1.onnx` returned HTTP 200 with `content-length: 1271370`.
 - `curl -I --max-time 15 https://private-host-redacted/vendor/onnxruntime/ort-wasm-simd-threaded.wasm` returned HTTP 200 with `content-type: application/wasm` and `content-length: 12297086`.
+- `pnpm type-check` after v12 immediate wake rearm changes.
+- `pnpm type-check:tests` after v12 immediate wake rearm changes.
+- `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after v12 marker/test updates and guard assertions for no `Picovoice`, `Porcupine`, `AccessKey`, `Web Speech`, or `SpeechRecognition` strings in the served HTML/JS.
+- `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --response-delay-ms 30000 --expect-immediate-restart` passed locally: the fake backend response was still delayed, assistant text was still `No response yet.`, and diagnostics already showed a second local wake `start` event.
+- `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --wait-complete` passed locally after v12: local ONNX wake detection, command capture, upload, and response render still completed.
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed v12 to `private-host-redacted`.
+- Deployed v12 marker check found `Detector build: Local openWakeWord v12, single mic stream.`, `./app.js?v=20260704-wake-v12`, and `restartWakeListeningAfterCapture` / `submitWakeAudioInBackground` in the served JavaScript.
+- Deployed v12 marker check found no `Picovoice`, `Porcupine`, `AccessKey`, `Web Speech`, `SpeechRecognition`, or `scheduleWakeRestart` strings in the served HTML/JS.
 
 Manual browser microphone testing on the phone remains useful, but the deployed backend path has now been verified independently with synthetic speech.
 

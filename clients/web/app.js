@@ -3,7 +3,7 @@ import { OpenWakeWordJarvisDetector, OPEN_WAKE_WORD_MODEL_BASE_PATH } from "./op
 const STORAGE_KEY = "madabot.webAudioClient.settings.v1";
 const LOCAL_DEV_API_BASE_URL = "http://127.0.0.1:3200";
 const DEPLOYED_API_BASE_URL = "https://private-host-redacted";
-const WAKE_DETECTOR_BUILD = "Local openWakeWord v11";
+const WAKE_DETECTOR_BUILD = "Local openWakeWord v12";
 const DEFAULT_WAKE_THRESHOLD = 0.5;
 
 /**
@@ -47,7 +47,6 @@ const VAD_BASELINE_FAST_ALPHA = 0.18;
 const VAD_POST_WAKE_CALIBRATION_MS = 350;
 const VAD_NO_SPEECH_TIMEOUT_MS = 5000;
 const VAD_POST_ROLL_MS = 300;
-const WAKE_RESTART_DELAY_MS = 650;
 const WAKE_CUE_TONES = [
   [660, 0.16],
   [0, 0.05],
@@ -71,6 +70,7 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   recordingStartedAt: number;
  *   timer: number;
  *   busy: boolean;
+ *   busyCount: number;
  *   lastBlob: Blob | null;
  *   assistantAudioUrl: string;
  *   wakeListening: boolean;
@@ -98,7 +98,6 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   vadVoiceThresholdRms: number;
  *   vadReleaseThresholdRms: number;
  *   wakeAutoRestart: boolean;
- *   wakeRestartTimer: number;
  *   openWakeWord: OpenWakeWordJarvisDetector | null;
  *   openWakeWordConfigKey: string;
  *   localWakeAudioContext: AudioContext | null;
@@ -119,6 +118,7 @@ const state = {
   recordingStartedAt: 0,
   timer: 0,
   busy: false,
+  busyCount: 0,
   lastBlob: null,
   assistantAudioUrl: "",
   wakeListening: false,
@@ -146,7 +146,6 @@ const state = {
   vadVoiceThresholdRms: VAD_RMS_THRESHOLD,
   vadReleaseThresholdRms: VAD_RELEASE_RMS_FLOOR,
   wakeAutoRestart: false,
-  wakeRestartTimer: 0,
   openWakeWord: null,
   openWakeWordConfigKey: "",
   localWakeAudioContext: null,
@@ -651,7 +650,6 @@ async function startLocalWakeListening(settings) {
   saveSettings();
 
   try {
-    clearWakeRestartTimer();
     clearWakeCaptureTimer();
     stopSilenceDetection();
     stopLocalWakeProcessing(false);
@@ -745,7 +743,7 @@ function configureOrtRuntime(ort) {
  * @returns {void}
  */
 function handleOpenWakeWordDetection(prediction) {
-  if (!state.wakeListening || state.wakeTriggered || state.busy || state.recorder) {
+  if (!state.wakeListening || state.wakeTriggered || state.recorder) {
     return;
   }
   const settings = readSettings();
@@ -1221,9 +1219,6 @@ function stopSilenceDetection() {
 async function finishWakeCapture(message) {
   clearWakeCaptureTimer();
   stopSilenceDetection();
-  /** @type {{ assistantAudioStarted: boolean }} */
-  let submitResult = { assistantAudioStarted: false };
-  let submitted = false;
   try {
     const blob = await stopWakeRecorder(true);
     stopTimer();
@@ -1238,15 +1233,43 @@ async function finishWakeCapture(message) {
     els.lastSize.textContent = formatBytes(blob.size);
     setWakeStatus(message);
     void playCue(END_CUE_TONES);
-    submitResult = await submitAudio(blob);
-    submitted = true;
+    if (state.wakeAutoRestart) {
+      void restartWakeListeningAfterCapture();
+    }
+    void submitWakeAudioInBackground(blob);
   } catch (error) {
     handleError(error);
   } finally {
     renderControls();
-    if (submitted) {
-      scheduleWakeRestartAfterTurn(submitResult);
-    }
+  }
+}
+
+/**
+ * @returns {Promise<void>}
+ */
+async function restartWakeListeningAfterCapture() {
+  if (!state.wakeAutoRestart || state.wakeListening || state.wakeTriggered || state.recorder || state.wakeRecorder) {
+    return;
+  }
+  try {
+    setWakeStatus("Restarting wake listener.");
+    await startWakeListening();
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+/**
+ * @param {Blob} blob
+ * @returns {Promise<void>}
+ */
+async function submitWakeAudioInBackground(blob) {
+  try {
+    await submitAudio(blob);
+  } catch (error) {
+    handleError(error);
+  } finally {
+    renderControls();
   }
 }
 
@@ -1367,7 +1390,6 @@ async function stopWakeListening(message = "Detector stopped.") {
   state.wakeListening = false;
   state.wakeTriggered = false;
   state.wakeDetectedAt = 0;
-  clearWakeRestartTimer();
   clearWakeCaptureTimer();
   if (wasWakeCapturing) {
     stopTimer();
@@ -1428,63 +1450,6 @@ function clearWakeCaptureTimer() {
     window.clearTimeout(state.wakeCaptureTimer);
     state.wakeCaptureTimer = 0;
   }
-}
-
-function clearWakeRestartTimer() {
-  if (state.wakeRestartTimer) {
-    window.clearTimeout(state.wakeRestartTimer);
-    state.wakeRestartTimer = 0;
-  }
-}
-
-/**
- * @param {{ assistantAudioStarted: boolean }} submitResult
- * @returns {void}
- */
-function scheduleWakeRestartAfterTurn(submitResult) {
-  clearWakeRestartTimer();
-  if (!state.wakeAutoRestart) {
-    return;
-  }
-  if (submitResult.assistantAudioStarted) {
-    setWakeStatus("Waiting for assistant audio to finish before listening again.");
-    scheduleWakeRestartAfterAssistantAudio();
-    return;
-  }
-  setWakeStatus("Restarting wake listener.");
-  state.wakeRestartTimer = window.setTimeout(() => {
-    void restartWakeListeningIfStillArmed();
-  }, WAKE_RESTART_DELAY_MS);
-}
-
-function scheduleWakeRestartAfterAssistantAudio() {
-  const audio = els.assistantAudio;
-  const done = () => {
-    audio.removeEventListener("ended", done);
-    audio.removeEventListener("error", done);
-    clearWakeRestartTimer();
-    if (!state.wakeAutoRestart) {
-      return;
-    }
-    state.wakeRestartTimer = window.setTimeout(() => {
-      void restartWakeListeningIfStillArmed();
-    }, WAKE_RESTART_DELAY_MS);
-  };
-  audio.addEventListener("ended", done);
-  audio.addEventListener("error", done);
-  const durationMs = Number.isFinite(audio.duration)
-    ? Math.min(45_000, Math.max(5_000, audio.duration * 1000 + 2000))
-    : 45_000;
-  state.wakeRestartTimer = window.setTimeout(done, durationMs);
-}
-
-async function restartWakeListeningIfStillArmed() {
-  clearWakeRestartTimer();
-  if (!state.wakeAutoRestart || state.wakeListening || state.wakeTriggered || state.busy || state.recorder || state.wakeRecorder) {
-    return;
-  }
-  setWakeStatus("Listening again.");
-  await startWakeListening();
 }
 
 /**
@@ -1721,7 +1686,12 @@ function setStatus(label, message, tone = "") {
  * @returns {void}
  */
 function setBusy(value) {
-  state.busy = value;
+  if (value) {
+    state.busyCount += 1;
+  } else {
+    state.busyCount = Math.max(0, state.busyCount - 1);
+  }
+  state.busy = state.busyCount > 0;
   renderControls();
 }
 

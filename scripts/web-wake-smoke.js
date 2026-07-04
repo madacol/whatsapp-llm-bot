@@ -46,7 +46,7 @@ async function main() {
 
     await cdp.send("Page.navigate", { url: options.url });
     await waitForPageReady(cdp);
-    await installFetchStub(cdp);
+    await installFetchStub(cdp, options);
     const capability = await evaluate(cdp, `(() => ({
       secure: isSecureContext,
       hasMediaDevices: Boolean(navigator.mediaDevices?.getUserMedia),
@@ -59,6 +59,7 @@ async function main() {
     const result = await waitForWakeDetection(cdp, options.timeoutMs, {
       waitComplete: options.waitComplete,
       expectRestart: options.expectRestart,
+      expectImmediateRestart: options.expectImmediateRestart,
     });
     const report = {
       mode: "local-openwakeword",
@@ -68,7 +69,7 @@ async function main() {
       ...result,
     };
     console.log(JSON.stringify(report, null, 2));
-    if (options.expectRestart ? !result.restarted : options.waitComplete ? !result.completed : !result.detected) {
+    if (options.expectImmediateRestart ? !result.immediateRestarted : options.expectRestart ? !result.restarted : options.waitComplete ? !result.completed : !result.detected) {
       process.exitCode = 1;
     }
     await cdp.close();
@@ -95,7 +96,7 @@ async function cleanupProfile(profileDir) {
 
 /**
  * @param {string[]} argv
- * @returns {{ url: string, audio: string, timeoutMs: number, headed: boolean, waitComplete: boolean, expectRestart: boolean }}
+ * @returns {{ url: string, audio: string, timeoutMs: number, headed: boolean, waitComplete: boolean, expectRestart: boolean, expectImmediateRestart: boolean, responseDelayMs: number }}
  */
 function parseArgs(argv) {
   let url = DEFAULT_URL;
@@ -104,6 +105,8 @@ function parseArgs(argv) {
   let headed = false;
   let waitComplete = false;
   let expectRestart = false;
+  let expectImmediateRestart = false;
+  let responseDelayMs = 0;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
@@ -123,6 +126,11 @@ function parseArgs(argv) {
     } else if (arg === "--expect-restart") {
       expectRestart = true;
       waitComplete = true;
+    } else if (arg === "--expect-immediate-restart") {
+      expectImmediateRestart = true;
+    } else if (arg === "--response-delay-ms" && next) {
+      responseDelayMs = Number.parseInt(next, 10);
+      index += 1;
     }
   }
   return {
@@ -132,6 +140,8 @@ function parseArgs(argv) {
     headed,
     waitComplete,
     expectRestart,
+    expectImmediateRestart,
+    responseDelayMs: Number.isFinite(responseDelayMs) ? Math.max(0, responseDelayMs) : 0,
   };
 }
 
@@ -262,20 +272,26 @@ async function waitForPageReady(cdp) {
 
 /**
  * @param {CdpClient} cdp
+ * @param {{ responseDelayMs: number }} options
  * @returns {Promise<void>}
  */
-async function installFetchStub(cdp) {
+async function installFetchStub(cdp, options) {
   await cdp.send("Runtime.evaluate", {
     expression: `
       (() => {
+        const responseDelayMs = ${JSON.stringify(options.responseDelayMs)};
         const realFetch = window.fetch.bind(window);
         window.fetch = (input, init) => {
           const url = String(input instanceof Request ? input.url : input);
           if (url.includes("/audio-turns")) {
-            return Promise.resolve(new Response(JSON.stringify({
-              status: "completed",
-              text: "wake smoke recognized"
-            }), { status: 200, headers: { "content-type": "application/json" } }));
+            return new Promise((resolve) => {
+              window.setTimeout(() => {
+                resolve(new Response(JSON.stringify({
+                  status: "completed",
+                  text: "wake smoke recognized"
+                }), { status: 200, headers: { "content-type": "application/json" } }));
+              }, responseDelayMs);
+            });
           }
           return realFetch(input, init);
         };
@@ -321,15 +337,15 @@ function isPoint(value) {
 /**
  * @param {CdpClient} cdp
  * @param {number} timeoutMs
- * @param {{ waitComplete: boolean, expectRestart: boolean }} options
- * @returns {Promise<{ detected: boolean, completed: boolean, restarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
+ * @param {{ waitComplete: boolean, expectRestart: boolean, expectImmediateRestart: boolean }} options
+ * @returns {Promise<{ detected: boolean, completed: boolean, restarted: boolean, immediateRestarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
  */
 async function waitForWakeDetection(cdp, timeoutMs, options) {
   const deadline = Date.now() + timeoutMs;
   let last = await readPageState(cdp);
   while (Date.now() < deadline) {
     last = await readPageState(cdp);
-    if (options.expectRestart ? last.restarted : options.waitComplete ? last.completed : last.detected) {
+    if (options.expectImmediateRestart ? last.immediateRestarted : options.expectRestart ? last.restarted : options.waitComplete ? last.completed : last.detected) {
       return last;
     }
     await delay(250);
@@ -339,7 +355,7 @@ async function waitForWakeDetection(cdp, timeoutMs, options) {
 
 /**
  * @param {CdpClient} cdp
- * @returns {Promise<{ detected: boolean, completed: boolean, restarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
+ * @returns {Promise<{ detected: boolean, completed: boolean, restarted: boolean, immediateRestarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
  */
 async function readPageState(cdp) {
   const state = await evaluate(cdp, `(() => {
@@ -347,11 +363,16 @@ async function readPageState(cdp) {
     const statusText = document.querySelector("#status-text")?.textContent || "";
     const assistantText = document.querySelector("#assistant-text")?.textContent || "";
     const diagnostics = document.querySelector("#diagnostics-output")?.textContent || "";
+    const localWakeStarts = diagnostics.match(/"event":\\s*"start"/g)?.length || 0;
     const combined = wakeStatus + " " + statusText + " " + assistantText + " " + diagnostics;
     return {
       detected: /Wake phrase detected|Jarvis detected locally|Capturing command|wake smoke recognized/i.test(combined),
       completed: /wake smoke recognized|Assistant returned text but no audio/i.test(combined),
       restarted: /Listening locally for/i.test(wakeStatus) && /wake smoke recognized/i.test(assistantText),
+      immediateRestarted: /(Listening locally for|Jarvis detected locally|Capturing command)/i.test(wakeStatus)
+        && /Uploading/i.test(statusText)
+        && !/wake smoke recognized/i.test(assistantText)
+        || localWakeStarts >= 2 && !/wake smoke recognized/i.test(assistantText),
       wakeStatus,
       statusText,
       assistantText,
@@ -366,13 +387,14 @@ async function readPageState(cdp) {
 
 /**
  * @param {unknown} value
- * @returns {value is { detected: boolean, completed: boolean, restarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }}
+ * @returns {value is { detected: boolean, completed: boolean, restarted: boolean, immediateRestarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }}
  */
 function isPageState(value) {
   return typeof value === "object" && value !== null
     && typeof /** @type {{ detected?: unknown }} */ (value).detected === "boolean"
     && typeof /** @type {{ completed?: unknown }} */ (value).completed === "boolean"
     && typeof /** @type {{ restarted?: unknown }} */ (value).restarted === "boolean"
+    && typeof /** @type {{ immediateRestarted?: unknown }} */ (value).immediateRestarted === "boolean"
     && typeof /** @type {{ wakeStatus?: unknown }} */ (value).wakeStatus === "string"
     && typeof /** @type {{ statusText?: unknown }} */ (value).statusText === "string"
     && typeof /** @type {{ assistantText?: unknown }} */ (value).assistantText === "string"
