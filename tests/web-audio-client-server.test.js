@@ -24,13 +24,25 @@ describe("web audio client static server", () => {
     const indexText = await index.text();
     assert.match(indexText, /Web Audio Client/);
     assert.match(indexText, /Word detection/);
+    assert.match(indexText, /Picovoice AccessKey/);
+    assert.match(indexText, /Local Porcupine v10/);
+    assert.match(indexText, /porcupine-web\.iife\.js/);
 
     const script = await fetch(`${baseUrl}/app.js`);
     assert.equal(script.status, 200);
     assert.equal(script.headers.get("content-type"), "text/javascript; charset=utf-8");
     const scriptText = await script.text();
     assert.match(scriptText, /audio-turns/);
-    assert.match(scriptText, /SpeechRecognition/);
+    assert.match(scriptText, /Porcupine/);
+    assert.match(scriptText, /Local Porcupine v10/);
+
+    const porcupineBundle = await fetch(`${baseUrl}/vendor/picovoice/porcupine-web.iife.js`);
+    assert.equal(porcupineBundle.status, 200);
+    assert.equal(porcupineBundle.headers.get("content-type"), "text/javascript; charset=utf-8");
+
+    const porcupineModel = await fetch(`${baseUrl}/vendor/porcupine/porcupine_params.pv`);
+    assert.equal(porcupineModel.status, 200);
+    assert.equal(porcupineModel.headers.get("content-type"), "application/octet-stream");
   });
 
   it("rejects missing files and path traversal", async () => {

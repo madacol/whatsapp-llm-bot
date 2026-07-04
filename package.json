@@ -34,6 +34,7 @@
         "@electric-sql/pglite": "^0.3.3",
         "@mozilla/readability": "^0.6.0",
         "@napi-rs/canvas": "^0.1.100",
+        "@picovoice/porcupine-web": "4.0.0",
         "@resvg/resvg-js": "^2.6.2",
         "@whiskeysockets/baileys": "7.0.0-rc13",
         "diff": "^8.0.3",

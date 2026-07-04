@@ -36,6 +36,9 @@ importers:
       '@napi-rs/canvas':
         specifier: ^0.1.100
         version: 0.1.100
+      '@picovoice/porcupine-web':
+        specifier: 4.0.0
+        version: 4.0.0
       '@resvg/resvg-js':
         specifier: ^2.6.2
         version: 2.6.2
@@ -683,6 +686,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@picovoice/porcupine-web@4.0.0':
+    resolution: {integrity: sha512-YqXBp6R9od6NTgcm80UyyB71c4eBArxD3BtX1SKQC4/xAvThM2VgwtPj4J7gvjl9yqqlcr+0Mg3T4lbKIOziTw==}
+    engines: {node: '>=18'}
+
+  '@picovoice/web-utils@1.4.3':
+    resolution: {integrity: sha512-7JN3YYsSD9Gtce6YKG3XqpX49dkeu7jTdbox7rHQA/X/Q3zxopXA9zlCKSq6EIjFbiX2iuzDKUx1XrFa3d8c0w==}
+    engines: {node: '>=14'}
+    hasBin: true
+
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
 
@@ -1023,6 +1035,10 @@ packages:
 
   comma-separated-tokens@2.0.3:
     resolution: {integrity: sha512-Fu4hJdvzeylCfQPp9SGWidpzrMs7tTrlu6Vb8XGaRGck8QSNZJJp538Wrb60Lax4fPwR64ViY468OIUTbRlGZg==}
+
+  commander@10.0.1:
+    resolution: {integrity: sha512-y4Mg2tXshplEbSGzx7amzPwKKOCGuoSRP/CjEdwwk0FOGlUbq6lKuoyDZTNZkmxHdJtp54hdfY/JUrdL7Xfdug==}
+    engines: {node: '>=14'}
 
   commander@13.1.0:
     resolution: {integrity: sha512-/rFeCpNJQbhSZjGVwO9RFV3xPqbnERS8MmIQzCtD/zl6gpJuV/bMLuN92oG3F7d8oDEHHRrujSXNUr8fpjntKw==}
@@ -2694,6 +2710,14 @@ snapshots:
   '@openai/codex@0.128.0-win32-x64':
     optional: true
 
+  '@picovoice/porcupine-web@4.0.0':
+    dependencies:
+      '@picovoice/web-utils': 1.4.3
+
+  '@picovoice/web-utils@1.4.3':
+    dependencies:
+      commander: 10.0.1
+
   '@pinojs/redact@0.4.0': {}
 
   '@protobufjs/aspromise@1.1.2': {}
@@ -3023,6 +3047,8 @@ snapshots:
       delayed-stream: 1.0.0
 
   comma-separated-tokens@2.0.3: {}
+
+  commander@10.0.1: {}
 
   commander@13.1.0: {}
 

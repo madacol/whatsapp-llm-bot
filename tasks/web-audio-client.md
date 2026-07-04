@@ -38,7 +38,7 @@ Research update on 2026-07-01:
 
 ## Current Status
 
-Active. The manual record/send/playback slice is deployed and verified end to end. The first word-detection slice is implemented as active-page browser-native speech phrase detection, but the user reported zero observed "Jarvis" detections on the target phone/browser. Current work is focused on making that first Web Speech path observable and less fragile before considering another browser wake engine.
+Active. The manual record/send/playback slice is deployed and verified end to end. The Web Speech wake path was removed from the MVP because Chrome/Android repeatedly ended and restarted recognition, causing audible mic activation cycles and unreliable wake behavior. Current work is local-only browser wake detection: one app-owned microphone stream feeds Porcupine Web's built-in Jarvis detector, then the same stream is reused for command capture and upload.
 
 ## Progress
 
@@ -66,6 +66,9 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - `Web Speech v7` also keeps the browser microphone stream open during wake listening and attempts to start `SpeechRecognition` from the shared live audio track before falling back to native browser microphone recognition. This avoids the app explicitly releasing/reacquiring the mic on wake-listening start and restart loops, though browsers that ignore `start(audioTrack)` may still use their own recognition microphone path.
 - 2026-07-02 regression: user reported v7 no longer detects Jarvis on the phone. Treat the phone result as authoritative for native Web Speech; the stub smoke only validates app wiring after a recognition result, not real Android Chrome recognition.
 - `Web Speech v8` restores the previous native Web Speech wake path by releasing any app-owned microphone stream before starting `SpeechRecognition`, removing the shared pre-wake mic stream and ambient monitor. Adaptive endpointing remains for post-wake capture, using a short post-wake calibration window to estimate background RMS before applying ambient-relative voice/release thresholds.
+- 2026-07-04 direction change: user rejected Web Speech compatibility/fallback work and asked for the simplest MVP that works. The web client now has one wake path: Picovoice Porcupine Web, built-in `Jarvis`, one app-owned `getUserMedia` stream, Web Audio PCM framing/downsampling, local Porcupine `process(Int16Array)` calls, same-stream command `MediaRecorder` capture, silence endpointing, upload, response playback, and auto-return to local wake listening after each completed turn.
+- Added exact pinned dependency `@picovoice/porcupine-web@4.0.0`, vendored the browser IIFE bundle under `clients/web/vendor/picovoice/`, and vendored the official common Porcupine model under `clients/web/vendor/porcupine/porcupine_params.pv`.
+- The page now requires a Picovoice AccessKey for local Jarvis detection. That is separate from the HTTP API bearer token and is used by the browser-side wake engine.
 
 ## Deployment
 
@@ -139,14 +142,22 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 - `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v8|app.js\\?v=20260702-wake-v8|native wake"` verified the deployed v8 marker and cache-busted script URL.
 - `curl -fsSL --max-time 15 'https://private-host-redacted/app.js?v=20260702-wake-v8' | rg "WAKE_DETECTOR_BUILD|VAD_POST_WAKE_CALIBRATION_MS|Calibrating ambient|recognition.start\\(\\)"` verified the deployed native Web Speech start path and post-wake calibration markers.
 - `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 30000 --stub-recognition --wait-complete` passed against deployed v8: status reached `Silence detected; submitting.`, uploaded a 25.1 KiB `audio/webm;codecs=opus` blob, and received stub response text `wake smoke recognized`. This remains a post-wake app-path smoke only; it does not prove native Android Chrome wake recognition.
+- `pnpm type-check` after local-only Porcupine MVP changes.
+- `pnpm type-check:tests` after local-only Porcupine MVP changes.
+- `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after local-only Porcupine MVP changes.
+- `node scripts/web-wake-smoke.js --url http://127.0.0.1:4173/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 45000 --stub-porcupine --wait-complete` passed locally: stubbed Porcupine detected Jarvis, command capture stopped on silence, uploaded a 25.3 KiB `audio/webm;codecs=opus` blob to the stubbed API, and rendered response text `wake smoke recognized`.
+- `node scripts/web-wake-smoke.js --url http://127.0.0.1:4173/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 45000 --stub-porcupine --expect-restart` passed locally: after the completed stubbed turn, the page returned to `Listening locally for "jarvis".`
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed the local-only Porcupine MVP to `private-host-redacted`.
+- `curl -fsSL --max-time 15 https://private-host-redacted/` returned deployed HTML with `Picovoice AccessKey`, `Local Porcupine v10`, and no `Web Speech`, `wake-engine`, or `wake-language` controls.
+- `curl -I --max-time 15 https://private-host-redacted/vendor/porcupine/porcupine_params.pv` returned HTTP 200 with `content-length: 984948`.
+- `curl -I --max-time 15 https://private-host-redacted/vendor/picovoice/porcupine-web.iife.js` returned HTTP 200 with `content-type: text/javascript; charset=utf-8`.
 
 Manual browser microphone testing on the phone remains useful, but the deployed backend path has now been verified independently with synthetic speech.
 
 ## Remaining
 
-- Decide whether Picovoice Porcupine Web licensing/account requirements are acceptable before adding it.
-- Manually test the browser-native word detection on the target phone/browser again and inspect Diagnostics if it still does not trigger. A useful failure report now needs the visible `Heard: ...` status or the wake recognition diagnostic event/error.
-- Replace or augment the browser-native wake trigger with a real local web wake engine. The repo does not currently contain an openWakeWord browser model/runtime asset; the Python client loads openWakeWord through its Python package.
+- Manually test real Porcupine Jarvis detection on the target phone/browser with a Picovoice AccessKey. The local smoke proves app wiring with a stubbed detector, not real acoustic detection quality.
+- If built-in Jarvis is not good enough in the target environment, train/download a custom Porcupine Web `.ppn` keyword model and swap the built-in keyword for that model.
 
 ## Acceptance
 

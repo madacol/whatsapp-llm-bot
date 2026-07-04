@@ -44,34 +44,34 @@ async function main() {
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
 
-    if (options.stubRecognition) {
-      await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
-        source: speechRecognitionStub(),
-      });
-    }
-
     await cdp.send("Page.navigate", { url: options.url });
     await waitForPageReady(cdp);
+    if (options.stubPorcupine) {
+      await installPorcupineStub(cdp);
+    }
     await installFetchStub(cdp);
     const capability = await evaluate(cdp, `(() => ({
       secure: isSecureContext,
       hasMediaDevices: Boolean(navigator.mediaDevices?.getUserMedia),
-      hasSpeechRecognition: Boolean(window.SpeechRecognition || window.webkitSpeechRecognition),
+      hasPorcupine: Boolean(window.PorcupineWeb?.Porcupine),
       wakeStatus: document.querySelector("#wake-status")?.textContent || "",
       detectorVersion: document.querySelector("#wake-detector-version")?.textContent || ""
     }))()`);
 
     await click(cdp, "#start-listening");
-    const result = await waitForWakeDetection(cdp, options.timeoutMs, options.waitComplete);
+    const result = await waitForWakeDetection(cdp, options.timeoutMs, {
+      waitComplete: options.waitComplete,
+      expectRestart: options.expectRestart,
+    });
     const report = {
-      mode: options.stubRecognition ? "stub-recognition" : "native-web-speech",
+      mode: options.stubPorcupine ? "stub-porcupine" : "local-porcupine",
       url: options.url,
       audio: options.audio,
       capability,
       ...result,
     };
     console.log(JSON.stringify(report, null, 2));
-    if (options.waitComplete ? !result.completed : !result.detected) {
+    if (options.expectRestart ? !result.restarted : options.waitComplete ? !result.completed : !result.detected) {
       process.exitCode = 1;
     }
     await cdp.close();
@@ -98,15 +98,16 @@ async function cleanupProfile(profileDir) {
 
 /**
  * @param {string[]} argv
- * @returns {{ url: string, audio: string, timeoutMs: number, stubRecognition: boolean, headed: boolean, waitComplete: boolean }}
+ * @returns {{ url: string, audio: string, timeoutMs: number, stubPorcupine: boolean, headed: boolean, waitComplete: boolean, expectRestart: boolean }}
  */
 function parseArgs(argv) {
   let url = DEFAULT_URL;
   let audio = DEFAULT_AUDIO;
   let timeoutMs = 15_000;
-  let stubRecognition = false;
+  let stubPorcupine = false;
   let headed = false;
   let waitComplete = false;
+  let expectRestart = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = argv[index + 1];
@@ -119,22 +120,43 @@ function parseArgs(argv) {
     } else if (arg === "--timeout-ms" && next) {
       timeoutMs = Number.parseInt(next, 10);
       index += 1;
-    } else if (arg === "--stub-recognition") {
-      stubRecognition = true;
+    } else if (arg === "--stub-porcupine") {
+      stubPorcupine = true;
     } else if (arg === "--headed") {
       headed = true;
     } else if (arg === "--wait-complete") {
       waitComplete = true;
+    } else if (arg === "--expect-restart") {
+      expectRestart = true;
+      waitComplete = true;
     }
+  }
+  if (stubPorcupine) {
+    url = withUrlParam(url, "porcupineAccessKey", "smoke-test-access-key");
   }
   return {
     url,
     audio,
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 15_000,
-    stubRecognition,
+    stubPorcupine,
     headed,
     waitComplete,
+    expectRestart,
   };
+}
+
+/**
+ * @param {string} url
+ * @param {string} key
+ * @param {string} value
+ * @returns {string}
+ */
+function withUrlParam(url, key, value) {
+  const parsed = new URL(url);
+  if (!parsed.searchParams.has(key)) {
+    parsed.searchParams.set(key, value);
+  }
+  return parsed.toString();
 }
 
 /**
@@ -288,6 +310,38 @@ async function installFetchStub(cdp) {
 
 /**
  * @param {CdpClient} cdp
+ * @returns {Promise<void>}
+ */
+async function installPorcupineStub(cdp) {
+  await cdp.send("Runtime.evaluate", {
+    expression: `
+      (() => {
+        window.PorcupineWeb = {
+          BuiltInKeyword: { Jarvis: "Jarvis" },
+          Porcupine: {
+            async create(_accessKey, _keywords, callback) {
+              let frames = 0;
+              return {
+                frameLength: 512,
+                sampleRate: 16000,
+                async process() {
+                  frames += 1;
+                  if (frames === 4) {
+                    callback({ label: "Jarvis", index: 0 });
+                  }
+                },
+                async release() {}
+              };
+            }
+          }
+        };
+      })()
+    `,
+  });
+}
+
+/**
+ * @param {CdpClient} cdp
  * @param {string} selector
  * @returns {Promise<void>}
  */
@@ -323,15 +377,15 @@ function isPoint(value) {
 /**
  * @param {CdpClient} cdp
  * @param {number} timeoutMs
- * @param {boolean} waitComplete
- * @returns {Promise<{ detected: boolean, completed: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
+ * @param {{ waitComplete: boolean, expectRestart: boolean }} options
+ * @returns {Promise<{ detected: boolean, completed: boolean, restarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
  */
-async function waitForWakeDetection(cdp, timeoutMs, waitComplete) {
+async function waitForWakeDetection(cdp, timeoutMs, options) {
   const deadline = Date.now() + timeoutMs;
   let last = await readPageState(cdp);
   while (Date.now() < deadline) {
     last = await readPageState(cdp);
-    if (waitComplete ? last.completed : last.detected) {
+    if (options.expectRestart ? last.restarted : options.waitComplete ? last.completed : last.detected) {
       return last;
     }
     await delay(250);
@@ -341,7 +395,7 @@ async function waitForWakeDetection(cdp, timeoutMs, waitComplete) {
 
 /**
  * @param {CdpClient} cdp
- * @returns {Promise<{ detected: boolean, completed: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
+ * @returns {Promise<{ detected: boolean, completed: boolean, restarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }>}
  */
 async function readPageState(cdp) {
   const state = await evaluate(cdp, `(() => {
@@ -351,8 +405,9 @@ async function readPageState(cdp) {
     const diagnostics = document.querySelector("#diagnostics-output")?.textContent || "";
     const combined = wakeStatus + " " + statusText + " " + assistantText + " " + diagnostics;
     return {
-      detected: /Wake phrase detected|Capturing command|wake smoke recognized/i.test(combined),
+      detected: /Wake phrase detected|Jarvis detected locally|Capturing command|wake smoke recognized/i.test(combined),
       completed: /wake smoke recognized|Assistant returned text but no audio/i.test(combined),
+      restarted: /Listening (locally )?for/i.test(wakeStatus) && /wake smoke recognized/i.test(assistantText),
       wakeStatus,
       statusText,
       assistantText,
@@ -367,12 +422,13 @@ async function readPageState(cdp) {
 
 /**
  * @param {unknown} value
- * @returns {value is { detected: boolean, completed: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }}
+ * @returns {value is { detected: boolean, completed: boolean, restarted: boolean, wakeStatus: string, statusText: string, assistantText: string, diagnostics: string }}
  */
 function isPageState(value) {
   return typeof value === "object" && value !== null
     && typeof /** @type {{ detected?: unknown }} */ (value).detected === "boolean"
     && typeof /** @type {{ completed?: unknown }} */ (value).completed === "boolean"
+    && typeof /** @type {{ restarted?: unknown }} */ (value).restarted === "boolean"
     && typeof /** @type {{ wakeStatus?: unknown }} */ (value).wakeStatus === "string"
     && typeof /** @type {{ statusText?: unknown }} */ (value).statusText === "string"
     && typeof /** @type {{ assistantText?: unknown }} */ (value).assistantText === "string"
@@ -394,39 +450,6 @@ async function evaluate(cdp, expression) {
     throw new Error(JSON.stringify(result.exceptionDetails));
   }
   return result.result?.value;
-}
-
-/**
- * @returns {string}
- */
-function speechRecognitionStub() {
-  return `
-    (() => {
-      class SmokeSpeechRecognition {
-        constructor() {
-          this.continuous = false;
-          this.interimResults = false;
-          this.lang = "en-US";
-          this.maxAlternatives = 1;
-          this.onresult = null;
-          this.onerror = null;
-          this.onend = null;
-        }
-        start() {
-          setTimeout(() => {
-            const alternative = { transcript: "hey jarvis", confidence: 0.99 };
-            const result = { 0: alternative, length: 1, isFinal: true, item(index) { return this[index]; } };
-            const results = { 0: result, length: 1, item(index) { return this[index]; } };
-            this.onresult?.({ resultIndex: 0, results });
-          }, 300);
-        }
-        stop() { this.onend?.(); }
-        abort() { this.onend?.(); }
-      }
-      window.SpeechRecognition = SmokeSpeechRecognition;
-      window.webkitSpeechRecognition = SmokeSpeechRecognition;
-    })();
-  `;
 }
 
 await main();

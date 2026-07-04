@@ -1,53 +1,34 @@
 const STORAGE_KEY = "madabot.webAudioClient.settings.v1";
 const LOCAL_DEV_API_BASE_URL = "http://127.0.0.1:3200";
 const DEPLOYED_API_BASE_URL = "https://private-host-redacted";
-const WAKE_DETECTOR_BUILD = "Web Speech v8";
+const WAKE_DETECTOR_BUILD = "Local Porcupine v10";
+const PORCUPINE_MODEL_PATH = "./vendor/porcupine/porcupine_params.pv";
+const DEFAULT_PORCUPINE_SENSITIVITY = 0.65;
 
 /**
- * @typedef {{
- *   transcript: string;
- *   confidence?: number;
- * }} SpeechRecognitionAlternativeLike
- *
- * @typedef {{
- *   isFinal: boolean;
- *   length: number;
- *   item(index: number): SpeechRecognitionAlternativeLike;
- *   [index: number]: SpeechRecognitionAlternativeLike;
- * }} SpeechRecognitionResultLike
- *
- * @typedef {{
- *   length: number;
- *   item(index: number): SpeechRecognitionResultLike;
- *   [index: number]: SpeechRecognitionResultLike;
- * }} SpeechRecognitionResultListLike
- *
- * @typedef {{
- *   resultIndex: number;
- *   results: SpeechRecognitionResultListLike;
- * }} SpeechRecognitionEventLike
- *
- * @typedef {{
- *   error: string;
- *   message?: string;
- * }} SpeechRecognitionErrorEventLike
- *
- * @typedef {EventTarget & {
- *   continuous: boolean;
- *   interimResults: boolean;
- *   lang: string;
- *   maxAlternatives: number;
- *   start(audioTrack?: MediaStreamTrack): void;
- *   stop(): void;
- *   abort(): void;
- *   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
- *   onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
- *   onend: (() => void) | null;
- * }} SpeechRecognitionLike
- *
- * @typedef {new () => SpeechRecognitionLike} SpeechRecognitionConstructor
- *
  * @typedef {new () => AudioContext} AudioContextConstructor
+ *
+ * @typedef {{ label: string; index: number }} PorcupineDetectionLike
+ *
+ * @typedef {{
+ *   frameLength: number;
+ *   sampleRate: number;
+ *   process(pcm: Int16Array): Promise<void>;
+ *   release(): Promise<void>;
+ * }} PorcupineHandleLike
+ *
+ * @typedef {{
+ *   BuiltInKeyword: { Jarvis: unknown };
+ *   Porcupine: {
+ *     create(
+ *       accessKey: string,
+ *       keywords: unknown,
+ *       keywordDetectionCallback: (detection: PorcupineDetectionLike) => void,
+ *       model: { publicPath: string; customWritePath: string; version: number },
+ *       options?: { processErrorCallback?: (error: unknown) => void },
+ *     ): Promise<PorcupineHandleLike>;
+ *   };
+ * }} PorcupineWebLike
  */
 
 const DEFAULT_SETTINGS = {
@@ -58,7 +39,8 @@ const DEFAULT_SETTINGS = {
   senderId: "web-user",
   senderName: "Web",
   wakePhrase: "jarvis",
-  wakeLanguage: defaultWakeLanguage(),
+  porcupineAccessKey: "",
+  porcupineSensitivity: DEFAULT_PORCUPINE_SENSITIVITY,
   wakeCaptureSeconds: 120,
   wakeSilenceSeconds: 1.5,
 };
@@ -83,18 +65,7 @@ const VAD_BASELINE_FAST_ALPHA = 0.18;
 const VAD_POST_WAKE_CALIBRATION_MS = 350;
 const VAD_NO_SPEECH_TIMEOUT_MS = 5000;
 const VAD_POST_ROLL_MS = 300;
-const JARVIS_WAKE_VARIANTS = [
-  "jarvis",
-  "hey jarvis",
-  "jervis",
-  "hey jervis",
-  "jarves",
-  "jar vice",
-  "jar viss",
-  "jar vess",
-  "javis",
-  "hey service",
-];
+const WAKE_RESTART_DELAY_MS = 650;
 const WAKE_CUE_TONES = [
   [660, 0.16],
   [0, 0.05],
@@ -120,7 +91,6 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   busy: boolean;
  *   lastBlob: Blob | null;
  *   assistantAudioUrl: string;
- *   recognition: SpeechRecognitionLike | null;
  *   wakeListening: boolean;
  *   wakeTriggered: boolean;
  *   wakeRecorder: MediaRecorder | null;
@@ -145,8 +115,17 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   vadBaselineRms: number;
  *   vadVoiceThresholdRms: number;
  *   vadReleaseThresholdRms: number;
- *   wakeRecognitionEnds: number;
- *   wakeRecognitionSource: string;
+ *   wakeAutoRestart: boolean;
+ *   wakeRestartTimer: number;
+ *   porcupine: PorcupineHandleLike | null;
+ *   porcupineConfigKey: string;
+ *   localWakeAudioContext: AudioContext | null;
+ *   localWakeSource: MediaStreamAudioSourceNode | null;
+ *   localWakeProcessor: ScriptProcessorNode | null;
+ *   localWakeMute: GainNode | null;
+ *   localWakePcm: number[];
+ *   localWakeInputRemainder: Float32Array;
+ *   localWakeProcessChain: Promise<void>;
  *   diagnosticsHistory: unknown[];
  * }}
  */
@@ -159,7 +138,6 @@ const state = {
   busy: false,
   lastBlob: null,
   assistantAudioUrl: "",
-  recognition: null,
   wakeListening: false,
   wakeTriggered: false,
   wakeRecorder: null,
@@ -184,8 +162,17 @@ const state = {
   vadBaselineRms: 0,
   vadVoiceThresholdRms: VAD_RMS_THRESHOLD,
   vadReleaseThresholdRms: VAD_RELEASE_RMS_FLOOR,
-  wakeRecognitionEnds: 0,
-  wakeRecognitionSource: "",
+  wakeAutoRestart: false,
+  wakeRestartTimer: 0,
+  porcupine: null,
+  porcupineConfigKey: "",
+  localWakeAudioContext: null,
+  localWakeSource: null,
+  localWakeProcessor: null,
+  localWakeMute: null,
+  localWakePcm: [],
+  localWakeInputRemainder: new Float32Array(0),
+  localWakeProcessChain: Promise.resolve(),
   diagnosticsHistory: [],
 };
 
@@ -198,7 +185,8 @@ const els = {
   senderId: getElement("sender-id", HTMLInputElement),
   senderName: getElement("sender-name", HTMLInputElement),
   wakePhrase: getElement("wake-phrase", HTMLInputElement),
-  wakeLanguage: getElement("wake-language", HTMLInputElement),
+  porcupineAccessKey: getElement("porcupine-access-key", HTMLInputElement),
+  porcupineSensitivity: getElement("porcupine-sensitivity", HTMLInputElement),
   wakeCaptureSeconds: getElement("wake-capture-seconds", HTMLInputElement),
   wakeSilenceSeconds: getElement("wake-silence-seconds", HTMLInputElement),
   checkApi: getElement("check-api", HTMLButtonElement),
@@ -225,7 +213,8 @@ renderControls();
 
 els.form.addEventListener("input", saveSettings);
 els.wakePhrase.addEventListener("input", saveSettings);
-els.wakeLanguage.addEventListener("input", saveSettings);
+els.porcupineAccessKey.addEventListener("input", saveSettings);
+els.porcupineSensitivity.addEventListener("input", saveSettings);
 els.wakeCaptureSeconds.addEventListener("input", saveSettings);
 els.wakeSilenceSeconds.addEventListener("input", saveSettings);
 els.checkApi.addEventListener("click", () => void checkApi());
@@ -268,7 +257,8 @@ function hydrateSettings() {
   els.senderId.value = mergedSettings.senderId;
   els.senderName.value = mergedSettings.senderName;
   els.wakePhrase.value = mergedSettings.wakePhrase;
-  els.wakeLanguage.value = effectiveWakeLanguage(mergedSettings.wakePhrase, mergedSettings.wakeLanguage);
+  els.porcupineAccessKey.value = mergedSettings.porcupineAccessKey;
+  els.porcupineSensitivity.value = String(clampPorcupineSensitivity(mergedSettings.porcupineSensitivity));
   els.wakeCaptureSeconds.value = String(mergedSettings.wakeCaptureSeconds);
   els.wakeSilenceSeconds.value = String(mergedSettings.wakeSilenceSeconds);
 }
@@ -290,19 +280,29 @@ function isLocalPage() {
 }
 
 /**
- * @returns {string}
- */
-function defaultWakeLanguage() {
-  return "en-US";
-}
-
-/**
  * @returns {Partial<typeof DEFAULT_SETTINGS>}
  */
 function readUrlSettings() {
   const params = new URLSearchParams(location.search);
   const baseUrl = params.get("api") || params.get("apiBaseUrl") || params.get("baseUrl");
-  return baseUrl ? { baseUrl: stripTrailingSlash(baseUrl) } : {};
+  /** @type {Partial<typeof DEFAULT_SETTINGS>} */
+  const settings = {};
+  if (baseUrl) {
+    settings.baseUrl = stripTrailingSlash(baseUrl);
+  }
+  const porcupineAccessKey = params.get("picovoiceAccessKey") || params.get("porcupineAccessKey");
+  if (porcupineAccessKey) {
+    settings.porcupineAccessKey = porcupineAccessKey;
+  }
+  const porcupineSensitivity = params.get("porcupineSensitivity");
+  if (porcupineSensitivity) {
+    settings.porcupineSensitivity = clampPorcupineSensitivity(Number.parseFloat(porcupineSensitivity));
+  }
+  const wakePhrase = params.get("wakePhrase");
+  if (wakePhrase) {
+    settings.wakePhrase = wakePhrase;
+  }
+  return settings;
 }
 
 /**
@@ -323,7 +323,8 @@ function readStoredSettings() {
       senderId: stringOrDefault(stored.senderId, DEFAULT_SETTINGS.senderId),
       senderName: stringOrDefault(stored.senderName, DEFAULT_SETTINGS.senderName),
       wakePhrase: stringOrDefault(stored.wakePhrase, DEFAULT_SETTINGS.wakePhrase),
-      wakeLanguage: stringOrDefault(stored.wakeLanguage, DEFAULT_SETTINGS.wakeLanguage),
+      porcupineAccessKey: typeof stored.porcupineAccessKey === "string" ? stored.porcupineAccessKey : "",
+      porcupineSensitivity: clampPorcupineSensitivity(numberOrDefault(stored.porcupineSensitivity, DEFAULT_SETTINGS.porcupineSensitivity)),
       wakeCaptureSeconds: numberOrDefault(stored.wakeCaptureSeconds, DEFAULT_SETTINGS.wakeCaptureSeconds),
       wakeSilenceSeconds: numberOrDefault(stored.wakeSilenceSeconds, DEFAULT_SETTINGS.wakeSilenceSeconds),
     };
@@ -384,7 +385,6 @@ function saveSettings() {
  */
 function readSettings() {
   const wakePhrase = els.wakePhrase.value.trim();
-  const wakeLanguage = els.wakeLanguage.value.trim();
   return {
     baseUrl: stripTrailingSlash(els.baseUrl.value),
     token: els.token.value.trim(),
@@ -393,22 +393,11 @@ function readSettings() {
     senderId: els.senderId.value.trim(),
     senderName: els.senderName.value.trim(),
     wakePhrase,
-    wakeLanguage: effectiveWakeLanguage(wakePhrase, wakeLanguage),
+    porcupineAccessKey: els.porcupineAccessKey.value.trim(),
+    porcupineSensitivity: clampPorcupineSensitivity(Number.parseFloat(els.porcupineSensitivity.value)),
     wakeCaptureSeconds: clampWakeCaptureSeconds(Number.parseFloat(els.wakeCaptureSeconds.value)),
     wakeSilenceSeconds: clampWakeSilenceSeconds(Number.parseFloat(els.wakeSilenceSeconds.value)),
   };
-}
-
-/**
- * @param {string} wakePhrase
- * @param {string} configuredLanguage
- * @returns {string}
- */
-function effectiveWakeLanguage(wakePhrase, configuredLanguage) {
-  if (isJarvisWakePhrase(wakePhrase)) {
-    return "en-US";
-  }
-  return configuredLanguage.trim() || DEFAULT_SETTINGS.wakeLanguage;
 }
 
 /**
@@ -434,6 +423,17 @@ function clampWakeSilenceSeconds(value) {
 }
 
 /**
+ * @param {number} value
+ * @returns {number}
+ */
+function clampPorcupineSensitivity(value) {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_PORCUPINE_SENSITIVITY;
+  }
+  return Math.min(1, Math.max(0.1, Math.round(value * 20) / 20));
+}
+
+/**
  * @param {string} value
  * @returns {string}
  */
@@ -454,9 +454,9 @@ function renderCapability() {
     setStatus("Error", "This browser does not support MediaRecorder.", "error");
   }
   els.inputFormat.textContent = preferredMimeType() || "Browser default";
-  els.wakeStatus.textContent = speechRecognitionCtor()
+  els.wakeStatus.textContent = porcupineWakeSupported()
     ? `Detector idle. ${WAKE_DETECTOR_BUILD} loaded.`
-    : "Word detection is not available in this browser.";
+    : "Local Jarvis detection is not available in this browser.";
 }
 
 /**
@@ -470,14 +470,23 @@ function preferredMimeType() {
 }
 
 /**
- * @returns {SpeechRecognitionConstructor | null}
+ * @returns {PorcupineWebLike | null}
  */
-function speechRecognitionCtor() {
-  const speechWindow = /** @type {Window & {
-   *   SpeechRecognition?: SpeechRecognitionConstructor;
-   *   webkitSpeechRecognition?: SpeechRecognitionConstructor;
-   * }} */ (window);
-  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
+function porcupineWeb() {
+  const picovoiceWindow = /** @type {Window & { PorcupineWeb?: PorcupineWebLike }} */ (/** @type {unknown} */ (window));
+  return picovoiceWindow.PorcupineWeb ?? null;
+}
+
+/**
+ * @returns {boolean}
+ */
+function porcupineWakeSupported() {
+  return isSecureContext
+    && Boolean(navigator.mediaDevices?.getUserMedia)
+    && typeof MediaRecorder !== "undefined"
+    && typeof WebAssembly !== "undefined"
+    && audioContextCtor() !== null
+    && porcupineWeb() !== null;
 }
 
 /**
@@ -647,58 +656,64 @@ function stopRecording() {
 }
 
 async function startWakeListening() {
-  const Recognition = speechRecognitionCtor();
-  if (!Recognition) {
-    throwAndShow("Word detection is not available in this browser.");
-    return;
-  }
-  if (!isSecureContext) {
-    throwAndShow("Word detection requires HTTPS, localhost, or another secure context.");
-    return;
-  }
-
   const settings = readSettings();
-  if (!settings.wakePhrase) {
-    throwAndShow("Enter a wake phrase.");
+  await startPorcupineWakeListening(settings);
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @returns {Promise<void>}
+ */
+async function startPorcupineWakeListening(settings) {
+  if (!porcupineWakeSupported()) {
+    throwAndShow("Local Jarvis detection is not available in this browser.");
+    return;
+  }
+  if (!settings.porcupineAccessKey) {
+    throwAndShow("Enter a Picovoice AccessKey for local Jarvis detection.");
+    return;
+  }
+  if (!isJarvisWakePhrase(settings.wakePhrase)) {
+    throwAndShow("Local Jarvis detection currently supports the Jarvis wake phrase.");
     return;
   }
   saveSettings();
 
   try {
+    clearWakeRestartTimer();
     clearWakeCaptureTimer();
-    stopWakeRecognitionOnly();
     stopSilenceDetection();
+    stopLocalWakeProcessing(false);
     state.wakeTriggered = false;
     state.wakeDetectedAt = 0;
-    state.wakeRecognitionSource = "browser-microphone";
-    releaseMicrophone();
-    const recognition = new Recognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = effectiveWakeLanguage(settings.wakePhrase, settings.wakeLanguage);
-    recognition.maxAlternatives = 5;
-    recognition.onresult = (event) => handleWakeRecognitionResult(event);
-    recognition.onerror = (event) => handleWakeRecognitionError(event);
-    recognition.onend = () => handleWakeRecognitionEnd();
-    state.recognition = recognition;
+    state.wakeAutoRestart = true;
     state.wakeListening = true;
-    state.wakeTriggered = false;
-    state.wakeRecognitionEnds = 0;
-    startWakeRecognition(recognition);
-    setWakeStatus(`Listening for "${settings.wakePhrase}" (${recognition.lang}).`);
-    setStatus("Listening", `Listening for "${settings.wakePhrase}".`);
+    await ensurePorcupine(settings);
+    if (!hasLiveMicrophone()) {
+      await enableMicrophone();
+    }
+    if (!hasLiveMicrophone()) {
+      throw new Error("Microphone is not enabled.");
+    }
+    await startLocalWakeProcessing();
+    setWakeStatus(`Listening locally for "${settings.wakePhrase}".`);
+    setStatus("Listening", `Listening locally for "${settings.wakePhrase}".`);
     appendDiagnostics({
-      wakeRecognition: {
+      localWake: {
         event: "start",
-        language: recognition.lang,
+        engine: "porcupine",
         wakePhrase: settings.wakePhrase,
-        source: state.wakeRecognitionSource,
+        sensitivity: settings.porcupineSensitivity,
+        sampleRate: state.porcupine?.sampleRate ?? 0,
+        frameLength: state.porcupine?.frameLength ?? 0,
       },
     });
   } catch (error) {
     state.wakeListening = false;
-    state.recognition = null;
+    state.wakeTriggered = false;
+    stopLocalWakeProcessing(false);
     stopSilenceDetection();
+    await releasePorcupine().catch(() => undefined);
     handleError(error);
   } finally {
     renderControls();
@@ -706,95 +721,222 @@ async function startWakeListening() {
 }
 
 /**
- * @param {SpeechRecognitionLike} recognition
- * @returns {void}
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @returns {Promise<void>}
  */
-function startWakeRecognition(recognition) {
-  recognition.start();
-  state.wakeRecognitionSource = "browser-microphone";
-  appendDiagnostics({ wakeRecognition: { event: "recognition-start", source: state.wakeRecognitionSource } });
+async function ensurePorcupine(settings) {
+  const PorcupineWeb = porcupineWeb();
+  if (!PorcupineWeb) {
+    throw new Error("Porcupine Web is not loaded.");
+  }
+  const configKey = porcupineConfigKey(settings);
+  if (state.porcupine && state.porcupineConfigKey === configKey) {
+    return;
+  }
+  await releasePorcupine();
+  state.porcupine = await PorcupineWeb.Porcupine.create(
+    settings.porcupineAccessKey,
+    {
+      builtin: PorcupineWeb.BuiltInKeyword.Jarvis,
+      sensitivity: settings.porcupineSensitivity,
+    },
+    handlePorcupineDetection,
+    {
+      publicPath: PORCUPINE_MODEL_PATH,
+      customWritePath: "porcupine_params_v4",
+      version: 4,
+    },
+    {
+      processErrorCallback: (error) => {
+        const message = errorMessage(error);
+        appendDiagnostics({ localWake: { event: "process-error", message } });
+      },
+    },
+  );
+  state.porcupineConfigKey = configKey;
 }
 
 /**
- * @param {SpeechRecognitionEventLike} event
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @returns {string}
+ */
+function porcupineConfigKey(settings) {
+  return JSON.stringify({
+    accessKey: settings.porcupineAccessKey,
+    sensitivity: settings.porcupineSensitivity,
+  });
+}
+
+/**
+ * @param {PorcupineDetectionLike} detection
  * @returns {void}
  */
-function handleWakeRecognitionResult(event) {
-  const settings = readSettings();
-  const transcript = transcriptFromRecognitionEvent(event);
-  if (!transcript) {
+function handlePorcupineDetection(detection) {
+  if (!state.wakeListening || state.wakeTriggered || state.busy || state.recorder) {
     return;
   }
+  const settings = readSettings();
+  state.wakeTriggered = true;
   appendDiagnostics({
-    wakeRecognition: {
-      event: "result",
-      transcript,
-      wakePhrase: settings.wakePhrase,
-      matched: containsWakePhrase(transcript, settings.wakePhrase),
+    localWake: {
+      event: "detected",
+      keyword: detection.label,
+      index: detection.index,
+      engine: "porcupine",
     },
   });
-  if (state.wakeTriggered || !containsWakePhrase(transcript, settings.wakePhrase)) {
-    setWakeStatus(`Heard: ${transcript.slice(0, 120)}`);
-    return;
-  }
-  state.wakeTriggered = true;
-  setWakeStatus("Wake phrase detected.");
+  setWakeStatus("Jarvis detected locally.");
   void triggerWakeCapture(settings);
 }
 
 /**
- * @param {SpeechRecognitionErrorEventLike} event
+ * @returns {Promise<void>}
+ */
+async function startLocalWakeProcessing() {
+  stopLocalWakeProcessing(true);
+  const stream = state.stream;
+  const porcupine = state.porcupine;
+  const AudioContextClass = audioContextCtor();
+  if (!stream || !porcupine || !AudioContextClass) {
+    throw new Error("Local wake detector is not ready.");
+  }
+  const audioContext = new AudioContextClass();
+  const source = audioContext.createMediaStreamSource(stream);
+  const processor = audioContext.createScriptProcessor(4096, 1, 1);
+  const mute = audioContext.createGain();
+  mute.gain.value = 0;
+  processor.onaudioprocess = (event) => {
+    processLocalWakeInput(event.inputBuffer.getChannelData(0), audioContext.sampleRate);
+  };
+  source.connect(processor);
+  processor.connect(mute);
+  mute.connect(audioContext.destination);
+  state.localWakeAudioContext = audioContext;
+  state.localWakeSource = source;
+  state.localWakeProcessor = processor;
+  state.localWakeMute = mute;
+  state.localWakePcm = [];
+  state.localWakeInputRemainder = new Float32Array(0);
+  state.localWakeProcessChain = Promise.resolve();
+  await audioContext.resume().catch(() => undefined);
+}
+
+/**
+ * @param {Float32Array} input
+ * @param {number} inputSampleRate
  * @returns {void}
  */
-function handleWakeRecognitionError(event) {
-  if (!state.wakeListening && event.error === "aborted") {
+function processLocalWakeInput(input, inputSampleRate) {
+  const porcupine = state.porcupine;
+  if (!porcupine || !state.wakeListening || state.wakeTriggered) {
     return;
   }
-  const message = event.message || event.error || "Word detection failed.";
-  appendDiagnostics({
-    wakeRecognition: {
-      event: "error",
-      error: event.error,
-      message,
-    },
-  });
-  setWakeStatus(`Detector error: ${message}`);
-  if (event.error !== "no-speech") {
-    void stopWakeListening("Detector stopped.");
-    handleError(new Error(`Word detection error: ${message}`));
+  const samples = resampleToInt16(input, inputSampleRate, porcupine.sampleRate);
+  if (samples.length === 0) {
+    return;
+  }
+  for (const sample of samples) {
+    state.localWakePcm.push(sample);
+  }
+  const maxQueueSamples = porcupine.sampleRate * 5;
+  if (state.localWakePcm.length > maxQueueSamples) {
+    state.localWakePcm.splice(0, state.localWakePcm.length - maxQueueSamples);
+  }
+  while (state.localWakePcm.length >= porcupine.frameLength) {
+    const frame = Int16Array.from(state.localWakePcm.slice(0, porcupine.frameLength));
+    state.localWakePcm.splice(0, porcupine.frameLength);
+    enqueuePorcupineFrame(frame);
   }
 }
 
-function handleWakeRecognitionEnd() {
-  if (!state.wakeListening || state.wakeTriggered || state.busy || state.recorder) {
-    return;
+/**
+ * @param {Int16Array} frame
+ * @returns {void}
+ */
+function enqueuePorcupineFrame(frame) {
+  state.localWakeProcessChain = state.localWakeProcessChain
+    .then(async () => {
+      if (!state.porcupine || !state.wakeListening || state.wakeTriggered) {
+        return;
+      }
+      await state.porcupine.process(frame);
+    })
+    .catch((error) => {
+      const message = errorMessage(error);
+      appendDiagnostics({ localWake: { event: "process-failed", message } });
+      void stopWakeListening("Detector stopped.");
+      handleError(new Error(`Local Jarvis detection failed: ${message}`));
+    });
+}
+
+/**
+ * @param {Float32Array} input
+ * @param {number} inputSampleRate
+ * @param {number} outputSampleRate
+ * @returns {Int16Array}
+ */
+function resampleToInt16(input, inputSampleRate, outputSampleRate) {
+  if (inputSampleRate <= 0 || outputSampleRate <= 0) {
+    return new Int16Array(0);
   }
-  state.wakeRecognitionEnds += 1;
-  setWakeStatus(`Recognition ended without detecting Jarvis. Restarting (${state.wakeRecognitionEnds}).`);
-  appendDiagnostics({
-    wakeRecognition: {
-      event: "end",
-      count: state.wakeRecognitionEnds,
-      source: state.wakeRecognitionSource,
-    },
-  });
-  const recognition = state.recognition;
-  if (!recognition) {
-    return;
+  if (Math.abs(inputSampleRate - outputSampleRate) < 1) {
+    return float32ToInt16(input);
   }
-  window.setTimeout(() => {
-    if (!state.wakeListening || state.wakeTriggered || state.busy || state.recorder) {
-      return;
+  const source = state.localWakeInputRemainder.length
+    ? concatenateFloat32(state.localWakeInputRemainder, input)
+    : input;
+  const ratio = inputSampleRate / outputSampleRate;
+  const outputLength = Math.floor(source.length / ratio);
+  if (outputLength <= 0) {
+    state.localWakeInputRemainder = source.slice();
+    return new Int16Array(0);
+  }
+  const consumed = Math.min(source.length, Math.floor(outputLength * ratio));
+  state.localWakeInputRemainder = source.slice(consumed);
+  const output = new Int16Array(outputLength);
+  for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
+    const start = Math.floor(outputIndex * ratio);
+    const end = Math.min(consumed, Math.max(start + 1, Math.floor((outputIndex + 1) * ratio)));
+    let sum = 0;
+    for (let inputIndex = start; inputIndex < end; inputIndex += 1) {
+      sum += source[inputIndex] ?? 0;
     }
-    try {
-      startWakeRecognition(recognition);
-      appendDiagnostics({ wakeRecognition: { event: "restart" } });
-    } catch {
-      state.wakeListening = false;
-      setWakeStatus("Detector stopped.");
-      renderControls();
-    }
-  }, 250);
+    output[outputIndex] = floatSampleToInt16(sum / (end - start));
+  }
+  return output;
+}
+
+/**
+ * @param {Float32Array} samples
+ * @returns {Int16Array}
+ */
+function float32ToInt16(samples) {
+  const output = new Int16Array(samples.length);
+  for (let index = 0; index < samples.length; index += 1) {
+    output[index] = floatSampleToInt16(samples[index] ?? 0);
+  }
+  return output;
+}
+
+/**
+ * @param {number} sample
+ * @returns {number}
+ */
+function floatSampleToInt16(sample) {
+  const clipped = Math.max(-1, Math.min(1, sample));
+  return clipped < 0 ? clipped * 0x8000 : clipped * 0x7fff;
+}
+
+/**
+ * @param {Float32Array} first
+ * @param {Float32Array} second
+ * @returns {Float32Array}
+ */
+function concatenateFloat32(first, second) {
+  const combined = new Float32Array(first.length + second.length);
+  combined.set(first, 0);
+  combined.set(second, first.length);
+  return combined;
 }
 
 /**
@@ -803,11 +945,11 @@ function handleWakeRecognitionEnd() {
  */
 async function triggerWakeCapture(settings) {
   state.wakeListening = false;
-  stopWakeRecognitionOnly();
-  if (!state.stream) {
+  stopLocalWakeProcessing(true);
+  if (!hasLiveMicrophone()) {
     await enableMicrophone();
   }
-  if (!state.stream) {
+  if (!hasLiveMicrophone()) {
     setStatus("Error", "Microphone is not enabled for wake capture.", "error");
     setWakeStatus("Wake phrase detected, but microphone capture did not start.");
     return;
@@ -1084,6 +1226,9 @@ function stopSilenceDetection() {
 async function finishWakeCapture(message) {
   clearWakeCaptureTimer();
   stopSilenceDetection();
+  /** @type {{ assistantAudioStarted: boolean }} */
+  let submitResult = { assistantAudioStarted: false };
+  let submitted = false;
   try {
     const blob = await stopWakeRecorder(true);
     stopTimer();
@@ -1098,11 +1243,15 @@ async function finishWakeCapture(message) {
     els.lastSize.textContent = formatBytes(blob.size);
     setWakeStatus(message);
     void playCue(END_CUE_TONES);
-    await submitAudio(blob);
+    submitResult = await submitAudio(blob);
+    submitted = true;
   } catch (error) {
     handleError(error);
   } finally {
     renderControls();
+    if (submitted) {
+      scheduleWakeRestartAfterTurn(submitResult);
+    }
   }
 }
 
@@ -1191,53 +1340,6 @@ function trimWakeChunks() {
 }
 
 /**
- * @param {SpeechRecognitionEventLike} event
- * @returns {string}
- */
-function transcriptFromRecognitionEvent(event) {
-  /** @type {string[]} */
-  const transcripts = [];
-  for (let index = 0; index < event.results.length; index += 1) {
-    const result = event.results[index] ?? event.results.item(index);
-    if (!result || result.length === 0) {
-      continue;
-    }
-    for (let alternativeIndex = 0; alternativeIndex < result.length; alternativeIndex += 1) {
-      const alternative = result[alternativeIndex] ?? result.item(alternativeIndex);
-      if (alternative?.transcript) {
-        transcripts.push(alternative.transcript);
-      }
-    }
-  }
-  return transcripts.join(" ");
-}
-
-/**
- * @param {string} transcript
- * @param {string} phrase
- * @returns {boolean}
- */
-function containsWakePhrase(transcript, phrase) {
-  const normalizedTranscript = normalizeWakeText(transcript);
-  const normalizedPhrase = normalizeWakeText(phrase);
-  if (!normalizedPhrase) {
-    return false;
-  }
-  if (normalizedTranscript.includes(normalizedPhrase)) {
-    return true;
-  }
-  if (normalizedPhrase === "jarvis") {
-    if (JARVIS_WAKE_VARIANTS.some((variant) => normalizedTranscript.includes(variant))) {
-      return true;
-    }
-    return normalizedTranscript
-      .split(" ")
-      .some((word) => word.length >= 5 && levenshteinDistance(word, "jarvis") <= 2);
-  }
-  return false;
-}
-
-/**
  * @param {string} phrase
  * @returns {boolean}
  */
@@ -1261,64 +1363,67 @@ function normalizeWakeText(text) {
 }
 
 /**
- * @param {string} left
- * @param {string} right
- * @returns {number}
- */
-function levenshteinDistance(left, right) {
-  if (left === right) {
-    return 0;
-  }
-  /** @type {number[]} */
-  let previous = Array.from({ length: right.length + 1 }, (_value, index) => index);
-  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
-    /** @type {number[]} */
-    const current = [leftIndex + 1];
-    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
-      const substitutionCost = left[leftIndex] === right[rightIndex] ? 0 : 1;
-      current[rightIndex + 1] = Math.min(
-        current[rightIndex] + 1,
-        previous[rightIndex + 1] + 1,
-        previous[rightIndex] + substitutionCost,
-      );
-    }
-    previous = current;
-  }
-  return previous[right.length] ?? Math.max(left.length, right.length);
-}
-
-/**
  * @param {string} message
  * @returns {Promise<void>}
  */
 async function stopWakeListening(message = "Detector stopped.") {
   const wasWakeCapturing = state.wakeTriggered;
+  state.wakeAutoRestart = false;
   state.wakeListening = false;
   state.wakeTriggered = false;
   state.wakeDetectedAt = 0;
+  clearWakeRestartTimer();
   clearWakeCaptureTimer();
   if (wasWakeCapturing) {
     stopTimer();
   }
-  stopWakeRecognitionOnly();
+  stopLocalWakeProcessing(true);
   stopSilenceDetection();
   await stopWakeRecorder(false).catch((error) => handleError(error));
+  await releasePorcupine().catch((error) => handleError(error));
+  releaseMicrophone();
   if (message) {
     setWakeStatus(message);
   }
   renderControls();
 }
 
-function stopWakeRecognitionOnly() {
-  const recognition = state.recognition;
-  state.recognition = null;
-  if (!recognition) {
-    return;
+/**
+ * @param {boolean} resetAudioQueue
+ * @returns {void}
+ */
+function stopLocalWakeProcessing(resetAudioQueue) {
+  const processor = state.localWakeProcessor;
+  if (processor) {
+    processor.onaudioprocess = null;
   }
-  try {
-    recognition.abort();
-  } catch {
-    recognition.stop();
+  state.localWakeSource?.disconnect();
+  state.localWakeProcessor?.disconnect();
+  state.localWakeMute?.disconnect();
+  const audioContext = state.localWakeAudioContext;
+  state.localWakeAudioContext = null;
+  state.localWakeSource = null;
+  state.localWakeProcessor = null;
+  state.localWakeMute = null;
+  if (resetAudioQueue) {
+    state.localWakePcm = [];
+    state.localWakeInputRemainder = new Float32Array(0);
+    state.localWakeProcessChain = Promise.resolve();
+  }
+  if (audioContext && audioContext.state !== "closed") {
+    void audioContext.close().catch(() => undefined);
+  }
+}
+
+/**
+ * @returns {Promise<void>}
+ */
+async function releasePorcupine() {
+  const porcupine = state.porcupine;
+  state.porcupine = null;
+  state.porcupineConfigKey = "";
+  if (porcupine) {
+    await porcupine.release();
   }
 }
 
@@ -1327,6 +1432,63 @@ function clearWakeCaptureTimer() {
     window.clearTimeout(state.wakeCaptureTimer);
     state.wakeCaptureTimer = 0;
   }
+}
+
+function clearWakeRestartTimer() {
+  if (state.wakeRestartTimer) {
+    window.clearTimeout(state.wakeRestartTimer);
+    state.wakeRestartTimer = 0;
+  }
+}
+
+/**
+ * @param {{ assistantAudioStarted: boolean }} submitResult
+ * @returns {void}
+ */
+function scheduleWakeRestartAfterTurn(submitResult) {
+  clearWakeRestartTimer();
+  if (!state.wakeAutoRestart) {
+    return;
+  }
+  if (submitResult.assistantAudioStarted) {
+    setWakeStatus("Waiting for assistant audio to finish before listening again.");
+    scheduleWakeRestartAfterAssistantAudio();
+    return;
+  }
+  setWakeStatus("Restarting wake listener.");
+  state.wakeRestartTimer = window.setTimeout(() => {
+    void restartWakeListeningIfStillArmed();
+  }, WAKE_RESTART_DELAY_MS);
+}
+
+function scheduleWakeRestartAfterAssistantAudio() {
+  const audio = els.assistantAudio;
+  const done = () => {
+    audio.removeEventListener("ended", done);
+    audio.removeEventListener("error", done);
+    clearWakeRestartTimer();
+    if (!state.wakeAutoRestart) {
+      return;
+    }
+    state.wakeRestartTimer = window.setTimeout(() => {
+      void restartWakeListeningIfStillArmed();
+    }, WAKE_RESTART_DELAY_MS);
+  };
+  audio.addEventListener("ended", done);
+  audio.addEventListener("error", done);
+  const durationMs = Number.isFinite(audio.duration)
+    ? Math.min(45_000, Math.max(5_000, audio.duration * 1000 + 2000))
+    : 45_000;
+  state.wakeRestartTimer = window.setTimeout(done, durationMs);
+}
+
+async function restartWakeListeningIfStillArmed() {
+  clearWakeRestartTimer();
+  if (!state.wakeAutoRestart || state.wakeListening || state.wakeTriggered || state.busy || state.recorder || state.wakeRecorder) {
+    return;
+  }
+  setWakeStatus("Listening again.");
+  await startWakeListening();
 }
 
 /**
@@ -1339,7 +1501,7 @@ function setWakeStatus(message) {
 
 /**
  * @param {Blob} blob
- * @returns {Promise<void>}
+ * @returns {Promise<{ assistantAudioStarted: boolean }>}
  */
 async function submitAudio(blob) {
   const settings = readSettings();
@@ -1374,7 +1536,7 @@ async function submitAudio(blob) {
     if (!response.ok) {
       throw new Error(formatHttpError(response.status, raw));
     }
-    await renderAssistantResponse(settings, body);
+    return await renderAssistantResponse(settings, body);
   } finally {
     setBusy(false);
   }
@@ -1441,7 +1603,7 @@ function formatHttpError(status, body) {
 /**
  * @param {typeof DEFAULT_SETTINGS} settings
  * @param {unknown} responseBody
- * @returns {Promise<void>}
+ * @returns {Promise<{ assistantAudioStarted: boolean }>}
  */
 async function renderAssistantResponse(settings, responseBody) {
   if (!isRecord(responseBody)) {
@@ -1453,7 +1615,7 @@ async function renderAssistantResponse(settings, responseBody) {
   const audio = isRecord(responseBody.audio) ? responseBody.audio : null;
   if (!audio) {
     setStatus("Done", "Assistant returned text but no audio.");
-    return;
+    return { assistantAudioStarted: false };
   }
 
   const audioUrl = resolveAudioUrl(settings.baseUrl, audio);
@@ -1468,8 +1630,15 @@ async function renderAssistantResponse(settings, responseBody) {
   }
   state.assistantAudioUrl = URL.createObjectURL(audioBlob);
   els.assistantAudio.src = state.assistantAudioUrl;
-  await els.assistantAudio.play().catch(() => undefined);
+  let assistantAudioStarted = false;
+  try {
+    await els.assistantAudio.play();
+    assistantAudioStarted = true;
+  } catch {
+    assistantAudioStarted = false;
+  }
   setStatus("Done", "Assistant response is ready.");
+  return { assistantAudioStarted };
 }
 
 /**
@@ -1563,21 +1732,23 @@ function setBusy(value) {
 function renderControls() {
   const isRecording = state.recorder !== null && state.recorder.state === "recording";
   const isWakeCapturing = state.wakeRecorder !== null || state.wakeTriggered;
+  const isWakeArmed = state.wakeListening || state.wakeTriggered || state.wakeAutoRestart;
   const isCaptureActive = isRecording || isWakeCapturing;
   const captureSupported = isSecureContext
     && Boolean(navigator.mediaDevices?.getUserMedia)
     && typeof MediaRecorder !== "undefined";
-  const wakeSupported = captureSupported && speechRecognitionCtor() !== null;
-  els.enableMic.disabled = state.busy || isCaptureActive || state.wakeListening || !captureSupported;
-  els.startRecording.disabled = state.busy || isCaptureActive || state.wakeListening || !captureSupported;
+  const wakeSupported = porcupineWakeSupported();
+  els.enableMic.disabled = state.busy || isCaptureActive || isWakeArmed || !captureSupported;
+  els.startRecording.disabled = state.busy || isCaptureActive || isWakeArmed || !captureSupported;
   els.stopSend.disabled = state.busy || !isRecording;
   els.discardRecording.disabled = state.busy || !isRecording;
-  els.startListening.disabled = state.busy || isCaptureActive || state.wakeListening || !wakeSupported;
-  els.stopListening.disabled = !state.wakeListening && !state.wakeTriggered;
-  els.wakePhrase.disabled = state.wakeListening || isCaptureActive;
-  els.wakeLanguage.disabled = state.wakeListening || isCaptureActive;
-  els.wakeCaptureSeconds.disabled = state.wakeListening || isCaptureActive;
-  els.wakeSilenceSeconds.disabled = state.wakeListening || isCaptureActive;
+  els.startListening.disabled = state.busy || isCaptureActive || isWakeArmed || !wakeSupported;
+  els.stopListening.disabled = !isWakeArmed;
+  els.wakePhrase.disabled = isWakeArmed || isCaptureActive;
+  els.porcupineAccessKey.disabled = isWakeArmed || isCaptureActive;
+  els.porcupineSensitivity.disabled = isWakeArmed || isCaptureActive;
+  els.wakeCaptureSeconds.disabled = isWakeArmed || isCaptureActive;
+  els.wakeSilenceSeconds.disabled = isWakeArmed || isCaptureActive;
 }
 
 /**
@@ -1585,9 +1756,26 @@ function renderControls() {
  * @returns {void}
  */
 function handleError(error) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   setStatus("Error", message, "error");
   writeDiagnostics({ error: message });
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function errorMessage(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  if (isRecord(error) && typeof error.message === "string") {
+    return error.message;
+  }
+  return String(error);
 }
 
 /**
