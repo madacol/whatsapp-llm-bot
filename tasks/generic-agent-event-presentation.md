@@ -8,7 +8,11 @@ Ensure every executed tool action or agent runtime event has some visible chat r
 
 ## Evidence
 
-User supplied a mobile Telegram screenshot on 2026-07-05 from the `Get Bookmarklets` chat. Visible messages showed:
+User supplied a mobile WhatsApp screenshot on 2026-07-05 from the `Get Bookmarklets` chat:
+
+- [Screenshot](../.media/9a236b80e18b959a3717926535735d5d9038393aa9d9530ca9481a2f6b2ac377.jpg)
+
+Visible messages showed:
 
 - The assistant said it was checking a running screenshot capture, inspecting an image, and rerunning checks.
 - A `Thought` placeholder and later `Shell` and `List` tool blocks were visible.
@@ -26,7 +30,7 @@ Inspect before implementation:
 
 - Agent/runtime event emission for tool and non-tool execution events.
 - Shared outbound event types and presentation conversion.
-- WhatsApp/Telegram chat renderers for recognized tool blocks and fallback messages.
+- WhatsApp chat renderer and shared transport renderers for recognized tool blocks and fallback messages.
 - Diagnostics or traces for the screenshot scenario to identify the exact missing event shape.
 
 ## Acceptance Criteria
