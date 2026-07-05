@@ -44,7 +44,7 @@ Direction correction on 2026-07-04:
 
 ## Current Status
 
-Active. The manual record/send/playback slice is deployed and verified end to end. The Web Speech wake path was removed from the MVP because Chrome/Android repeatedly ended and restarted recognition, causing audible mic activation cycles and no real Jarvis detections in target testing. The Picovoice/Porcupine path was removed because it requires a vendor AccessKey. Current work is absolute-local browser wake detection: one app-owned microphone stream feeds a vendored openWakeWord-compatible ONNX Jarvis detector, then the same stream is reused for command capture and upload. As of v13, the client re-arms local wake listening immediately after command capture stops, resets openWakeWord's internal buffers between cycles, and suppresses residual post-capture detections briefly so rearm lands in word detection rather than command capture.
+Completed. The manual record/send/playback slice is deployed and verified end to end. The Web Speech wake path was removed from the MVP because Chrome/Android repeatedly ended and restarted recognition, causing audible mic activation cycles and no real Jarvis detections in target testing. The Picovoice/Porcupine path was removed because it requires a vendor AccessKey. The completed POC uses absolute-local browser wake detection: one app-owned microphone stream feeds a vendored openWakeWord-compatible ONNX Jarvis detector, then the same stream is reused for command capture and upload. As of v13, the client re-arms local wake listening immediately after command capture stops, resets openWakeWord's internal buffers between cycles, and suppresses residual post-capture detections briefly so rearm lands in word detection rather than command capture.
 
 ## Progress
 
@@ -187,7 +187,11 @@ Active. The manual record/send/playback slice is deployed and verified end to en
 
 Manual browser microphone testing on the phone remains useful, but the deployed backend path has now been verified independently with synthetic speech.
 
-## Remaining
+## Completion Notes
+
+Archived on 2026-07-05 at the user's request. This archive update is task tracking only; no code verification was run for this docs-only change.
+
+## Follow-Up Notes
 
 - Manually test real openWakeWord Jarvis detection on the target phone/browser. The local Chromium fake-mic smoke proves real browser ONNX inference and app wiring; real acoustic phone performance still needs target-device testing.
 - If the openWakeWord `hey_jarvis_v0.1` model is not good enough in the target environment, evaluate tuning the threshold, using a custom local openWakeWord model, or switching to another fully local browser-runnable model asset.

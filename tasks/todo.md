@@ -2,8 +2,6 @@
 
 ## Active
 
-- Web audio client POC. [details](web-audio-client.md)
-
 ## Todo
 
 - Add `/BTW` as a transport-agnostic forked side session command. [details](btw-forked-side-session-command.md)
