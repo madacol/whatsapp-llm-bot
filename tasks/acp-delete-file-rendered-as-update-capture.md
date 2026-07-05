@@ -7,6 +7,11 @@ Source session files:
 - `/home/mada/.codex/sessions/2026/07/05/rollout-2026-07-05T13-07-57-019f3264-8a6d-7760-b290-2de3de9437b0.jsonl`
 - `/home/mada/.codex/sessions/2026/07/05/rollout-2026-07-05T13-11-41-019f3267-f623-7da1-9172-47206a0ba19f.jsonl`
 
+Raw ACP stream log:
+
+- [`logs/codex-acp/app-server.log`](../logs/codex-acp/app-server.log)
+- Relevant lines in the current log: `524378`, `524388`, `524390`, `524392`
+
 ## Observed Rendered Output
 
 ```text
@@ -51,6 +56,39 @@ tool: apply_patch
 Success. Updated the following files:
 M /home/mada/.codex/AGENTS.md
 D /home/mada/.codex/skills/snapshot-ignore/SKILL.md
+```
+
+## Raw ACP Events
+
+Line `524378`: `item/started` carries a `fileChange` item with:
+
+```json
+{
+  "path": "/home/mada/.codex/skills/snapshot-ignore/SKILL.md",
+  "kind": { "type": "delete" },
+  "diff": "---\nname: snapshot-ignore\ndescription: Use when the user asks to ignore paths from snapshots.\n---\n\n# Snapshot Ignore\n\nAdd the requested paths to `snapshot-ignore.txt` as simple relative globs, e.g. `node_modules/**`.\n"
+}
+```
+
+Line `524388`: `item/fileChange/outputDelta` reports:
+
+```text
+Success. Updated the following files:
+M /home/mada/.codex/AGENTS.md
+D /home/mada/.codex/skills/snapshot-ignore/SKILL.md
+```
+
+Line `524390`: `item/completed` repeats the completed `fileChange` with the same `kind: delete` entry.
+
+Line `524392`: `turn/diff/updated` includes a git-style delete diff:
+
+```diff
+diff --git a/snapshot-ignore/SKILL.md b/snapshot-ignore/SKILL.md
+deleted file mode 100644
+index 9e71f1e34052506ba9343b7568de1aa92b5d2365..0000000000000000000000000000000000000000
+--- a/snapshot-ignore/SKILL.md
++++ /dev/null
+@@ -1,8 +0,0 @@
 ```
 
 ## Fixture Intent
