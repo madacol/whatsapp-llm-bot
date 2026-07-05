@@ -7,6 +7,7 @@
 ## Todo
 
 - Add `/BTW` as a transport-agnostic forked side session command. [details](btw-forked-side-session-command.md)
+- Add generic chat presentation for otherwise-unrendered tool or agent events. [details](generic-agent-event-presentation.md)
 - Seed `/wait` batches with replied media instead of starting empty. [details](wait-replied-media-batch-regression.md)
 - Investigate reasoning/transcription inspect details auto-opening under current extras settings. [details](inspectable-progress-auto-open-current-settings.md)
 - Move chat enablement/routing policy toward transport-owned defaults. [details](transport-owned-chat-enablement.md)
