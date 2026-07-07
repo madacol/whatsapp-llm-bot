@@ -1542,6 +1542,29 @@ describe("sendEvent – runtime events", () => {
     });
   });
 
+  it("renders generic fallback details for otherwise unhandled ACP item events", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-generic-item-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "item.started",
+        provider: "acp",
+        item: {
+          id: "screenshot-capture-1",
+          kind: "unknown",
+          text: "Checking the running screenshot capture before rerunning checks.",
+        },
+      },
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(
+      sent[0]?.msg.text,
+      "🔄 *ACP*  unknown item started: Checking the running screenshot capture before rerunning checks.",
+    );
+  });
+
   it("starts a fresh runtime status message when the previous edit handle expired", async () => {
     const { sock, sent } = createMockSock();
     /** @type {import("../store.js").WhatsAppEditHandleRow | null} */

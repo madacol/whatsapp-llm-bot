@@ -496,6 +496,19 @@ function formatRuntimePayload(value) {
 }
 
 /**
+ * @param {string | undefined} value
+ * @returns {string | null}
+ */
+function formatRuntimeSummaryDetail(value) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const firstLine = trimmed.split(/\r?\n/)[0] ?? "";
+  return firstLine.length > 120 ? `${firstLine.slice(0, 117)}...` : firstLine;
+}
+
+/**
  * @param {string | undefined} provider
  * @returns {string}
  */
@@ -1029,14 +1042,18 @@ function formatRuntimeEventPresentation(event) {
     }
     case "item.started":
     case "item.updated":
-    case "item.completed":
+    case "item.completed": {
+      const status = event.type.split(".")[1];
+      const summary = `${event.item.kind} item ${status}`;
+      const detail = formatRuntimeSummaryDetail(event.item.text);
       return {
         kind: "compact",
         icon: "🔄",
         provider,
-        summary: `${event.item.kind} item ${event.type.split(".")[1]}`,
+        summary: detail ? `${summary}: ${detail}` : summary,
         ...(event.item.text ? { detail: event.item.text } : {}),
       };
+    }
     case "extension.notification":
     case "extension.request": {
       const payload = formatRuntimePayload(event.payload);
@@ -1095,7 +1112,11 @@ function shouldSuppressRuntimeEvent(event) {
   }
 
   if (event.provider === "acp" && event.type.startsWith("item.")) {
-    return true;
+    return event.type === "item.started"
+      || event.type === "item.updated"
+      || event.type === "item.completed"
+      ? event.item.kind === "assistant" || event.item.kind === "reasoning"
+      : true;
   }
 
   return false;
