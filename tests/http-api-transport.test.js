@@ -111,6 +111,40 @@ async function postTurn(transport, payload, query = "") {
   });
 }
 
+/**
+ * @param {Awaited<ReturnType<typeof createHttpApiTransport>>} transport
+ * @param {string} chatId
+ * @returns {Promise<HttpEventsResponse>}
+ */
+async function listTransportEvents(transport, chatId) {
+  const eventsRes = await fetch(`${transport.baseUrl}/api/transports/voice/events?chatId=${encodeURIComponent(chatId)}`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  assert.equal(eventsRes.status, 200);
+  return /** @type {HttpEventsResponse} */ (await eventsRes.json());
+}
+
+/**
+ * @param {Awaited<ReturnType<typeof createHttpApiTransport>>} transport
+ * @param {string} requestId
+ * @param {string} [chatId]
+ * @returns {Promise<Response>}
+ */
+async function postAudioTurn(transport, requestId, chatId = "api:client-1") {
+  return fetch(`${transport.baseUrl}/api/transports/voice/audio-turns?wait=true`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${TOKEN}`,
+      "content-type": "audio/ogg; codecs=opus",
+      "x-request-id": requestId,
+      "x-chat-id": chatId,
+      "x-sender-id": "android-user",
+      "x-sender-name": "Android User",
+    },
+    body: Buffer.from("fake ogg opus"),
+  });
+}
+
 describe("http-api transport", () => {
   it("accepts a JSON text turn through the transport API and emits semantic outbound events", async () => {
     const transport = await createHttpApiTransport({
@@ -255,6 +289,76 @@ describe("http-api transport", () => {
     assert.equal(body.requestId, "wait-request");
     assert.equal(body.status, "completed");
     assert.equal(body.text, "Light is on.");
+  });
+
+  it("synthesizes and emits audio for each completed assistant message before the turn ends", async () => {
+    const chatId = "api:progressive-audio";
+    /** @type {string[]} */
+    const synthesizedTexts = [];
+    const transport = await createHttpApiTransport({
+      port: 0,
+      host: "127.0.0.1",
+      authToken: TOKEN,
+      synthesizeSpeech: async ({ text }) => {
+        synthesizedTexts.push(text);
+        return {
+          buffer: Buffer.from(`audio:${text}`),
+          mimeType: "audio/mpeg",
+        };
+      },
+    });
+    transports.push(transport);
+    /** @type {() => void} */
+    let releaseSecondMessage = () => {};
+    const secondMessageReleased = new Promise((resolve) => {
+      releaseSecondMessage = () => resolve(undefined);
+    });
+    await transport.start(async (turn) => {
+      await turn.io.reply({
+        kind: "assistant_output",
+        content: [{ type: "text", text: "First answer." }],
+      });
+      await secondMessageReleased;
+      await turn.io.reply({
+        kind: "assistant_output",
+        content: [{ type: "text", text: "Second answer." }],
+      });
+    });
+
+    let postSettled = false;
+    const postPromise = postAudioTurn(transport, "progressive-audio-request", chatId)
+      .then((response) => {
+        postSettled = true;
+        return response;
+      });
+
+    await waitFor(async () => {
+      const eventsBody = await listTransportEvents(transport, chatId);
+      assert.deepEqual(eventsBody.events.map((event) => event.kind), ["assistant_output", "assistant_output"]);
+      assert.deepEqual(eventsBody.events[0]?.event.content, [{ type: "text", text: "First answer." }]);
+      assert.equal(Array.isArray(eventsBody.events[1]?.event.content), true);
+      assert.equal(/** @type {Array<{ type?: string }>} */ (eventsBody.events[1]?.event.content)[0]?.type, "audio");
+    });
+    assert.equal(postSettled, false);
+    assert.deepEqual(synthesizedTexts, ["First answer."]);
+
+    releaseSecondMessage();
+    const res = await postPromise;
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.text, "First answer.\nSecond answer.");
+    assert.equal(body.audio.mimeType, "audio/mpeg");
+    assert.deepEqual(synthesizedTexts, ["First answer.", "Second answer."]);
+
+    const eventsBody = await listTransportEvents(transport, chatId);
+    assert.deepEqual(eventsBody.events.map((event) => event.kind), [
+      "assistant_output",
+      "assistant_output",
+      "assistant_output",
+      "assistant_output",
+    ]);
+    assert.deepEqual(eventsBody.events[2]?.event.content, [{ type: "text", text: "Second answer." }]);
+    assert.equal(/** @type {Array<{ type?: string }>} */ (eventsBody.events[3]?.event.content)[0]?.type, "audio");
   });
 
   it("accepts raw audio turns and returns synthesized assistant audio", async () => {

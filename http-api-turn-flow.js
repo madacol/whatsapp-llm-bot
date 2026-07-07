@@ -29,10 +29,13 @@ function normalizeStreamWriter(writer) {
  * handles routing and response headers; this module owns turn records, active
  * turn correlation, event cursors, assistant text accumulation, and stream
  * fanout.
- * @param {import("./http-api-transport-ledger.js").HttpTransportTurnLedgerOptions} [options]
+ * @param {import("./http-api-transport-ledger.js").HttpTransportTurnLedgerOptions & {
+ *   onEvent?: (row: HttpApiOutboundEvent) => void,
+ * }} [options]
  */
 export function createHttpApiTurnFlow(options = {}) {
   const ledger = createHttpTransportTurnLedger(options);
+  const onEvent = options.onEvent ?? (() => {});
   /** @type {Set<HttpApiEventStreamClient>} */
   const streamClients = new Set();
 
@@ -49,6 +52,7 @@ export function createHttpApiTurnFlow(options = {}) {
         client.writer.write(row);
       }
     }
+    onEvent(row);
     return row;
   }
 

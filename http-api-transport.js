@@ -54,6 +54,17 @@ const CORS_ALLOWED_HEADERS = "authorization,content-type,last-event-id,x-request
  * }} HttpApiSpeechSynthesisResult
  *
  * @typedef {{
+ *   path: string;
+ *   mimeType: string;
+ *   url: string;
+ * }} HttpApiAudioResponse
+ *
+ * @typedef {{
+ *   chain: Promise<void>;
+ *   lastAudio: HttpApiAudioResponse | null;
+ * }} HttpApiTurnSpeechState
+ *
+ * @typedef {{
  *   port?: number;
  *   host?: string;
  *   authToken?: string;
@@ -331,6 +342,45 @@ function buildAudioResponse(baseUrl, mediaPath, mimeType) {
 }
 
 /**
+ * @param {SendContent} content
+ * @returns {string}
+ */
+function extractTextContent(content) {
+  if (typeof content === "string") {
+    return isTransientAssistantStatus(content) ? "" : content;
+  }
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks
+    .map((block) => {
+      if ((block.type === "text" || block.type === "markdown") && typeof block.text === "string") {
+        return isTransientAssistantStatus(block.text) ? "" : block.text;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isTransientAssistantStatus(text) {
+  return text.trim() === "Thinking...";
+}
+
+/**
+ * @param {OutboundEvent} event
+ * @returns {string}
+ */
+function assistantOutputText(event) {
+  if (event.kind !== "assistant_output") {
+    return "";
+  }
+  return extractTextContent(event.content).trim();
+}
+
+/**
  * Create a simple HTTP API transport for non-WhatsApp clients.
  *
  * @param {HttpApiTransportOptions} [options]
@@ -343,6 +393,10 @@ export async function createHttpApiTransport(options = {}) {
   const maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
   const maxAudioBytes = options.maxAudioBytes ?? DEFAULT_MAX_AUDIO_BYTES;
   const synthesizeSpeech = options.synthesizeSpeech ?? synthesizeSpeechForHttpApi;
+  /** @type {Map<string, HttpApiTurnSpeechState>} */
+  const speechByTurnId = new Map();
+  /** @type {Set<string>} */
+  const speechEnabledTurnIds = new Set();
   /** @type {(input: ChannelInput) => Promise<void>} */
   let onTurn = async () => {};
   /** @type {import("node:http").Server | null} */
@@ -350,12 +404,95 @@ export async function createHttpApiTransport(options = {}) {
   /** @type {number | null} */
   let assignedPort = null;
   let started = false;
-  const turnFlow = createHttpApiTurnFlow({ maxEvents });
+  const turnFlow = createHttpApiTurnFlow({
+    maxEvents,
+    onEvent: (row) => {
+      queueSpeechForAssistantOutput(row);
+    },
+  });
   const turnIntake = createHttpApiTurnIntake({
     turnFlow,
     getBaseUrl: () => transport.baseUrl,
     log,
   });
+
+  /**
+   * @param {string} turnId
+   * @returns {HttpApiTurnSpeechState}
+   */
+  function getTurnSpeechState(turnId) {
+    let state = speechByTurnId.get(turnId);
+    if (!state) {
+      state = {
+        chain: Promise.resolve(),
+        lastAudio: null,
+      };
+      speechByTurnId.set(turnId, state);
+    }
+    return state;
+  }
+
+  /**
+   * @param {HttpApiOutboundEvent} row
+   * @returns {void}
+   */
+  function queueSpeechForAssistantOutput(row) {
+    const turnId = row.turnId;
+    if (!turnId) {
+      return;
+    }
+    if (!speechEnabledTurnIds.has(turnId)) {
+      return;
+    }
+    const text = assistantOutputText(row.event);
+    if (!text) {
+      return;
+    }
+    const state = getTurnSpeechState(turnId);
+    state.chain = state.chain.then(async () => {
+      let speech;
+      try {
+        speech = await synthesizeSpeech({
+          text,
+          chatId: row.chatId,
+          turnId,
+        });
+      } catch (error) {
+        log.warn("HTTP API speech synthesis failed for assistant event.", error);
+        return;
+      }
+      if (!speech?.buffer?.byteLength || !speech.mimeType) {
+        return;
+      }
+      const outputPath = await writeMedia(speech.buffer, speech.mimeType, "audio");
+      const audioResponse = buildAudioResponse(transport.baseUrl, outputPath, speech.mimeType);
+      state.lastAudio = audioResponse;
+      turnFlow.appendEvent(row.chatId, {
+        kind: "assistant_output",
+        content: [{
+          type: /** @type {const} */ ("audio"),
+          path: outputPath,
+          mime_type: speech.mimeType,
+        }],
+      }, turnId);
+    }).catch((error) => {
+      log.warn("HTTP API queued speech synthesis failed.", error);
+    });
+  }
+
+  /**
+   * @param {string} turnId
+   * @returns {Promise<HttpApiAudioResponse | null>}
+   */
+  async function waitForTurnSpeech(turnId) {
+    const state = speechByTurnId.get(turnId);
+    if (!state) {
+      return null;
+    }
+    await state.chain;
+    speechByTurnId.delete(turnId);
+    return state.lastAudio;
+  }
 
   /**
    * @param {import("node:http").IncomingMessage} req
@@ -467,34 +604,16 @@ export async function createHttpApiTransport(options = {}) {
       payload,
       waitForCompletion,
       runTurn: onTurn,
+      onTurnCreated: ({ record }) => {
+        speechEnabledTurnIds.add(record.turnId);
+      },
       afterTurnCompleted: async ({ record }) => {
-        if (record.text.trim()) {
-          let speech;
-          try {
-            speech = await synthesizeSpeech({
-              text: record.text,
-              chatId: payload.chatId,
-              turnId: record.turnId,
-            });
-          } catch (error) {
-            log.warn("HTTP API speech synthesis failed; returning text without audio.", error);
-            return null;
-          }
-          if (speech?.buffer?.byteLength && speech.mimeType) {
-            const outputPath = await writeMedia(speech.buffer, speech.mimeType, "audio");
-            const audioEventBlock = {
-              type: /** @type {const} */ ("audio"),
-              path: outputPath,
-              mime_type: speech.mimeType,
-            };
-            appendEvent(payload.chatId, {
-              kind: "assistant_output",
-              content: [audioEventBlock],
-            }, record.turnId);
-            return { audio: buildAudioResponse(transport.baseUrl, outputPath, speech.mimeType) };
-          }
+        try {
+          const audio = await waitForTurnSpeech(record.turnId);
+          return audio ? { audio } : null;
+        } finally {
+          speechEnabledTurnIds.delete(record.turnId);
         }
-        return null;
       },
     });
     sendJson(res, response.statusCode, response.body);

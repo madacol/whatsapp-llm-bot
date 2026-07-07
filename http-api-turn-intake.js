@@ -110,6 +110,18 @@ export function createHttpApiTurnIntake({
      *     record: HttpApiTurnRecord,
      *     appendEvent: (chatId: string, event: OutboundEvent, turnId: string | null) => HttpApiOutboundEvent,
      *   }) => Promise<Record<string, unknown> | null | undefined>,
+     *   onTurnCreated?: (input: {
+     *     payload: {
+     *       requestId: string,
+     *       chatId: string,
+     *       senderIds: string[],
+     *       senderName: string,
+     *       timestamp: Date,
+     *       content: IncomingContentBlock[],
+     *       facts: ChannelInputFacts,
+     *     },
+     *     record: HttpApiTurnRecord,
+     *   }) => void,
      * }} input
      * @returns {Promise<HttpApiTurnIntakeResponse>}
      */
@@ -119,6 +131,7 @@ export function createHttpApiTurnIntake({
       waitForCompletion,
       runTurn,
       afterTurnCompleted,
+      onTurnCreated,
     }) {
       const ledgerTurn = turnFlow.createOrGetTurn(transportId, payload);
       if (!ledgerTurn.created) {
@@ -126,6 +139,7 @@ export function createHttpApiTurnIntake({
       }
 
       const record = ledgerTurn.record;
+      onTurnCreated?.({ payload, record });
       const turn = buildChannelInput({ payload, record, turnFlow });
 
       /**
