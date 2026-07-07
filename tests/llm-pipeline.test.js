@@ -156,6 +156,29 @@ describe("ACP pipeline via createMessageHandler", () => {
     assert.equal(getLastUserText(capturedTurns[0].messages ?? []), "/status");
   });
 
+  it("ignores !zzz messages without storing them or invoking ACP", async () => {
+    const chatId = "pipe-zzz-ignore";
+    await seedAcpChat(chatId, { enabled: true });
+
+    const { context, responses } = createChannelInput({
+      chatId,
+      content: [
+        { type: "text", text: "!zzz keep this out of context" },
+        {
+          type: "image",
+          encoding: "base64",
+          mime_type: "image/png",
+          data: Buffer.from("ignored image").toString("base64"),
+        },
+      ],
+    });
+    await handleMessage(context);
+
+    assert.equal(capturedTurns.length, 0);
+    assert.deepEqual(await store.getMessages(chatId), []);
+    assert.deepEqual(responses, []);
+  });
+
   it("clear then continue: ACP only sees post-clear messages", async () => {
     await seedAcpChat("pipe-clear-cont", { enabled: true });
 

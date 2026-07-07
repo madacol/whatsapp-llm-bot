@@ -79,6 +79,10 @@ export function createBangCommandRouter({
     const inputText = firstBlock.text.slice(1).trim();
     const { name, argsText, lowered } = parseBangCommandText(inputText);
 
+    if (name === "zzz") {
+      return;
+    }
+
     if (await tryHandleWorkspaceCommand({
       context,
       binding: resolvedBinding,
