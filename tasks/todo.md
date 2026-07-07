@@ -5,7 +5,6 @@
 ## Todo
 
 - Add `/BTW` as a transport-agnostic forked side session command. [details](btw-forked-side-session-command.md)
-- Remove manual recording controls from the web audio client. [details](web-audio-remove-manual-capture.md)
 - Research whether a PWA can run web audio wake detection with the screen off. [details](web-audio-pwa-background-wake-research.md)
 - Add generic chat presentation for otherwise-unrendered tool or agent events. [details](generic-agent-event-presentation.md)
 - Render ACP delete-file events as deletes, not updates. [details](acp-delete-file-rendered-as-update.md)

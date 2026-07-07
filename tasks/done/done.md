@@ -2,6 +2,7 @@
 
 Completed task details are archived here instead of deleted.
 
+- Web audio client manual recording controls removed; wake listening remains the primary capture path. [details](web-audio-remove-manual-capture.md)
 - Web audio client POC deployed and verified with local openWakeWord browser wake detection and audio-turn playback. [details](web-audio-client.md)
 - ACP EPIPE crash after `/clear` follow-up fixed. [details](acp-epipe-crash-after-clear.md)
 - Removed inspect output truncation. [details](remove-inspect-output-truncation.md)

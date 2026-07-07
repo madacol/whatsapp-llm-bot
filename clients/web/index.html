@@ -46,10 +46,10 @@
         </form>
       </section>
 
-      <section class="control-panel" aria-labelledby="recording-heading">
+      <section class="control-panel" aria-labelledby="wake-heading">
         <div class="section-heading compact">
-          <p class="eyebrow">Manual capture</p>
-          <h2 id="recording-heading">Record And Send</h2>
+          <p class="eyebrow">Word detection</p>
+          <h2 id="wake-heading">Wake Capture</h2>
         </div>
 
         <div class="status-strip" aria-live="polite">
@@ -57,58 +57,30 @@
           <span id="status-text">Ready.</span>
         </div>
 
-        <div class="recording-readout">
-          <div>
-            <span class="readout-label">Duration</span>
-            <strong id="duration">00:00.0</strong>
-          </div>
-          <div>
-            <span class="readout-label">Input format</span>
-            <strong id="input-format">Detecting...</strong>
-          </div>
-          <div>
-            <span class="readout-label">Last capture</span>
-            <strong id="last-size">None</strong>
-          </div>
+        <div class="wake-grid">
+          <label>
+            <span>Wake phrase</span>
+            <input id="wake-phrase" name="wakePhrase" type="text" autocomplete="off" required>
+          </label>
+          <label>
+            <span>Wake threshold</span>
+            <input id="wake-threshold" name="wakeThreshold" type="number" min="0.05" max="0.95" step="0.05" required>
+          </label>
+          <label>
+            <span>Max seconds</span>
+            <input id="wake-capture-seconds" name="wakeCaptureSeconds" type="number" min="2" max="120" step="1" required>
+          </label>
+          <label>
+            <span>Silence seconds</span>
+            <input id="wake-silence-seconds" name="wakeSilenceSeconds" type="number" min="0.5" max="5" step="0.1" required>
+          </label>
         </div>
-
         <div class="button-row">
-          <button id="enable-mic" class="secondary-button" type="button">Enable Mic</button>
-          <button id="start-recording" class="primary-button" type="button">Start Recording</button>
-          <button id="stop-send" class="primary-button danger" type="button" disabled>Stop And Send</button>
-          <button id="discard-recording" class="secondary-button" type="button" disabled>Discard</button>
+          <button id="start-listening" class="primary-button" type="button">Start Listening</button>
+          <button id="stop-listening" class="secondary-button" type="button" disabled>Stop Listening</button>
         </div>
-
-        <div class="wake-panel">
-          <div class="section-heading mini">
-            <p class="eyebrow">Word detection</p>
-            <h3>Wake Capture</h3>
-          </div>
-          <div class="wake-grid">
-            <label>
-              <span>Wake phrase</span>
-              <input id="wake-phrase" name="wakePhrase" type="text" autocomplete="off" required>
-            </label>
-            <label>
-              <span>Wake threshold</span>
-              <input id="wake-threshold" name="wakeThreshold" type="number" min="0.05" max="0.95" step="0.05" required>
-            </label>
-            <label>
-              <span>Max seconds</span>
-              <input id="wake-capture-seconds" name="wakeCaptureSeconds" type="number" min="2" max="120" step="1" required>
-            </label>
-            <label>
-              <span>Silence seconds</span>
-              <input id="wake-silence-seconds" name="wakeSilenceSeconds" type="number" min="0.5" max="5" step="0.1" required>
-            </label>
-          </div>
-          <div class="button-row">
-            <button id="start-listening" class="primary-button" type="button">Start Listening</button>
-            <button id="stop-listening" class="secondary-button" type="button" disabled>Stop Listening</button>
-          </div>
-          <p id="wake-detector-version" class="field-note detector-version">Detector build: Local openWakeWord v13, single mic stream.</p>
-          <p id="wake-status" class="field-note">Detector idle.</p>
-        </div>
+        <p id="wake-detector-version" class="field-note detector-version">Detector build: Local openWakeWord v13, single mic stream.</p>
+        <p id="wake-status" class="field-note">Detector idle.</p>
 
         <div class="playback-panel">
           <div class="section-heading mini">
@@ -127,6 +99,6 @@
     </main>
 
     <script src="./vendor/onnxruntime/ort.wasm.min.js"></script>
-    <script type="module" src="./app.js?v=20260707-same-origin-api"></script>
+    <script type="module" src="./app.js?v=20260707-wake-only-client"></script>
   </body>
 </html>

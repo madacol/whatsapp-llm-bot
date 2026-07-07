@@ -8,7 +8,6 @@
   --line: #d8ded8;
   --accent: #0f766e;
   --accent-strong: #0b5f59;
-  --danger: #b45309;
   --danger-strong: #92400e;
   --focus: #2563eb;
   --shadow: 0 18px 50px rgba(30, 36, 34, 0.08);
@@ -214,40 +213,6 @@ input {
   color: var(--muted);
 }
 
-.recording-readout {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.recording-readout > div {
-  min-width: 0;
-  padding: 16px;
-  background: var(--panel-muted);
-}
-
-.recording-readout > div + div {
-  border-left: 1px solid var(--line);
-}
-
-.readout-label {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.recording-readout strong {
-  display: block;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 1.06rem;
-}
-
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -263,14 +228,6 @@ input {
   background: var(--accent-strong);
 }
 
-.primary-button.danger {
-  background: var(--danger);
-}
-
-.primary-button.danger:hover:not(:disabled) {
-  background: var(--danger-strong);
-}
-
 .secondary-button {
   border: 1px solid var(--line);
   background: #ffffff;
@@ -278,13 +235,6 @@ input {
 }
 
 .secondary-button:hover:not(:disabled) {
-  background: var(--panel-muted);
-}
-
-.wake-panel {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 16px;
   background: var(--panel-muted);
 }
 
@@ -358,14 +308,8 @@ pre {
   }
 
   .field-grid,
-  .recording-readout,
   .wake-grid {
     grid-template-columns: 1fr;
-  }
-
-  .recording-readout > div + div {
-    border-left: 0;
-    border-top: 1px solid var(--line);
   }
 
   .button-row > button {

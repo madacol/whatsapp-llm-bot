@@ -25,9 +25,11 @@ describe("web audio client static server", () => {
     const indexText = await index.text();
     assert.match(indexText, /Web Audio Client/);
     assert.match(indexText, /Word detection/);
+    assert.match(indexText, /Start Listening/);
     assert.match(indexText, /Wake threshold/);
     assert.match(indexText, /Local openWakeWord v13/);
     assert.match(indexText, /ort\.wasm\.min\.js/);
+    assert.doesNotMatch(indexText, /Start Recording|Stop And Send|Manual capture|Record And Send/);
     assert.doesNotMatch(indexText, /Picovoice|Porcupine|AccessKey|Web Speech|SpeechRecognition/);
 
     const script = await fetch(`${baseUrl}/app.js`);
@@ -37,6 +39,7 @@ describe("web audio client static server", () => {
     assert.match(scriptText, /audio-turns/);
     assert.match(scriptText, /OpenWakeWordJarvisDetector/);
     assert.match(scriptText, /Local openWakeWord v13/);
+    assert.doesNotMatch(scriptText, /startRecording|stopAndSend|discardRecording/);
     assert.doesNotMatch(scriptText, /Picovoice|Porcupine|AccessKey|Web Speech|SpeechRecognition/);
 
     const openWakeWordModule = await fetch(`${baseUrl}/openwakeword.js`);

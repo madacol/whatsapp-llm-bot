@@ -64,13 +64,8 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
 
 /** @type {{
  *   stream: MediaStream | null;
- *   recorder: MediaRecorder | null;
- *   chunks: Blob[];
- *   recordingStartedAt: number;
- *   timer: number;
  *   busy: boolean;
  *   busyCount: number;
- *   lastBlob: Blob | null;
  *   assistantAudioUrl: string;
  *   wakeListening: boolean;
  *   wakeTriggered: boolean;
@@ -115,13 +110,8 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  */
 const state = {
   stream: null,
-  recorder: null,
-  chunks: [],
-  recordingStartedAt: 0,
-  timer: 0,
   busy: false,
   busyCount: 0,
-  lastBlob: null,
   assistantAudioUrl: "",
   wakeListening: false,
   wakeTriggered: false,
@@ -176,18 +166,11 @@ const els = {
   wakeCaptureSeconds: getElement("wake-capture-seconds", HTMLInputElement),
   wakeSilenceSeconds: getElement("wake-silence-seconds", HTMLInputElement),
   checkApi: getElement("check-api", HTMLButtonElement),
-  enableMic: getElement("enable-mic", HTMLButtonElement),
-  startRecording: getElement("start-recording", HTMLButtonElement),
-  stopSend: getElement("stop-send", HTMLButtonElement),
-  discardRecording: getElement("discard-recording", HTMLButtonElement),
   startListening: getElement("start-listening", HTMLButtonElement),
   stopListening: getElement("stop-listening", HTMLButtonElement),
   statePill: getElement("state-pill", HTMLSpanElement),
   statusText: getElement("status-text", HTMLSpanElement),
   wakeStatus: getElement("wake-status", HTMLElement),
-  duration: getElement("duration", HTMLElement),
-  inputFormat: getElement("input-format", HTMLElement),
-  lastSize: getElement("last-size", HTMLElement),
   assistantText: getElement("assistant-text", HTMLElement),
   assistantAudio: getElement("assistant-audio", HTMLAudioElement),
   diagnostics: getElement("diagnostics-output", HTMLPreElement),
@@ -203,10 +186,6 @@ els.wakeThreshold.addEventListener("input", saveSettings);
 els.wakeCaptureSeconds.addEventListener("input", saveSettings);
 els.wakeSilenceSeconds.addEventListener("input", saveSettings);
 els.checkApi.addEventListener("click", () => void checkApi());
-els.enableMic.addEventListener("click", () => void enableMicrophone());
-els.startRecording.addEventListener("click", () => void startRecording());
-els.stopSend.addEventListener("click", () => void stopAndSend());
-els.discardRecording.addEventListener("click", () => void discardRecording());
 els.startListening.addEventListener("click", () => void startWakeListening());
 els.stopListening.addEventListener("click", () => void stopWakeListening("Detector stopped."));
 window.addEventListener("beforeunload", cleanup);
@@ -464,7 +443,6 @@ function renderCapability() {
   } else if (typeof MediaRecorder === "undefined") {
     setStatus("Error", "This browser does not support MediaRecorder.", "error");
   }
-  els.inputFormat.textContent = preferredMimeType() || "Browser default";
   els.wakeStatus.textContent = localWakeSupported()
     ? `Detector idle. ${WAKE_DETECTOR_BUILD} loaded.`
     : "Local Jarvis detection is not available in this browser.";
@@ -577,93 +555,6 @@ async function enableMicrophone() {
     setBusy(false);
     renderControls();
   }
-}
-
-async function startRecording() {
-  try {
-    clearWakeCaptureTimer();
-    if (!state.stream) {
-      await enableMicrophone();
-    }
-    const stream = state.stream;
-    if (!stream) {
-      return;
-    }
-    saveSettings();
-    const mimeType = preferredMimeType();
-    state.chunks = [];
-    state.lastBlob = null;
-    state.recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    state.recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) {
-        state.chunks.push(event.data);
-      }
-    });
-    state.recorder.start(250);
-    state.recordingStartedAt = performance.now();
-    state.timer = window.setInterval(renderDuration, 100);
-    setStatus("Recording", "Recording microphone audio.", "recording");
-    renderControls();
-  } catch (error) {
-    handleError(error);
-    renderControls();
-  }
-}
-
-async function stopAndSend() {
-  try {
-    clearWakeCaptureTimer();
-    const blob = await stopRecording();
-    if (!blob || blob.size === 0) {
-      setStatus("Ready", "No audio captured.");
-      return;
-    }
-    state.lastBlob = blob;
-    els.lastSize.textContent = formatBytes(blob.size);
-    await submitAudio(blob);
-  } catch (error) {
-    handleError(error);
-  } finally {
-    renderControls();
-  }
-}
-
-async function discardRecording() {
-  try {
-    clearWakeCaptureTimer();
-    await stopRecording();
-    setStatus("Ready", "Recording discarded.");
-  } catch (error) {
-    handleError(error);
-  } finally {
-    renderControls();
-  }
-}
-
-/**
- * @returns {Promise<Blob | null>}
- */
-function stopRecording() {
-  clearWakeCaptureTimer();
-  const recorder = state.recorder;
-  if (!recorder || recorder.state === "inactive") {
-    stopTimer();
-    return Promise.resolve(null);
-  }
-  return new Promise((resolve, reject) => {
-    recorder.addEventListener("stop", () => {
-      stopTimer();
-      const type = recorder.mimeType || preferredMimeType() || "audio/webm";
-      resolve(new Blob(state.chunks, { type }));
-      state.recorder = null;
-      state.chunks = [];
-    }, { once: true });
-    recorder.addEventListener("error", () => {
-      stopTimer();
-      reject(new Error("Recording failed."));
-    }, { once: true });
-    recorder.stop();
-  });
 }
 
 async function startWakeListening() {
@@ -780,7 +671,7 @@ function configureOrtRuntime(ort) {
  * @returns {void}
  */
 function handleOpenWakeWordDetection(prediction) {
-  if (!state.wakeListening || state.wakeTriggered || state.recorder) {
+  if (!state.wakeListening || state.wakeTriggered) {
     return;
   }
   if (shouldSuppressLocalWakeDetection()) {
@@ -1033,8 +924,6 @@ async function triggerWakeCapture(settings) {
   startSilenceDetection(settings);
   setStatus("Detected", "Wake phrase detected. Capturing command.", "recording");
   void playCue(WAKE_CUE_TONES);
-  state.recordingStartedAt = performance.now();
-  state.timer = window.setInterval(renderDuration, 100);
   const captureMs = settings.wakeCaptureSeconds * 1000;
   setWakeStatus(`Capturing until speech ends, ${settings.wakeCaptureSeconds}s max.`);
   state.wakeCaptureTimer = window.setTimeout(() => {
@@ -1287,7 +1176,6 @@ async function finishWakeCapture(message) {
   stopSilenceDetection();
   try {
     const blob = await stopWakeRecorder(true);
-    stopTimer();
     state.wakeTriggered = false;
     state.wakeDetectedAt = 0;
     if (!blob || blob.size === 0) {
@@ -1295,8 +1183,6 @@ async function finishWakeCapture(message) {
       setWakeStatus("No wake audio captured.");
       return;
     }
-    state.lastBlob = blob;
-    els.lastSize.textContent = formatBytes(blob.size);
     setWakeStatus(message);
     void playCue(END_CUE_TONES);
     if (state.wakeAutoRestart) {
@@ -1314,7 +1200,7 @@ async function finishWakeCapture(message) {
  * @returns {Promise<void>}
  */
 async function restartWakeListeningAfterCapture() {
-  if (!state.wakeAutoRestart || state.wakeListening || state.wakeTriggered || state.recorder || state.wakeRecorder) {
+  if (!state.wakeAutoRestart || state.wakeListening || state.wakeTriggered || state.wakeRecorder) {
     return;
   }
   try {
@@ -1452,16 +1338,12 @@ function normalizeWakeText(text) {
  * @returns {Promise<void>}
  */
 async function stopWakeListening(message = "Detector stopped.") {
-  const wasWakeCapturing = state.wakeTriggered;
   state.wakeAutoRestart = false;
   state.wakeListening = false;
   state.wakeTriggered = false;
   state.wakeDetectedAt = 0;
   state.localWakeSuppressUntil = 0;
   clearWakeCaptureTimer();
-  if (wasWakeCapturing) {
-    stopTimer();
-  }
   stopLocalWakeProcessing(true);
   stopSilenceDetection();
   await stopWakeRecorder(false).catch((error) => handleError(error));
@@ -2047,34 +1929,6 @@ function isRecord(value) {
   return typeof value === "object" && value !== null;
 }
 
-function renderDuration() {
-  if (!state.recordingStartedAt) {
-    els.duration.textContent = "00:00.0";
-    return;
-  }
-  const elapsed = Math.max(0, performance.now() - state.recordingStartedAt);
-  els.duration.textContent = formatDuration(elapsed);
-}
-
-function stopTimer() {
-  window.clearInterval(state.timer);
-  state.timer = 0;
-  state.recordingStartedAt = 0;
-  renderDuration();
-}
-
-/**
- * @param {number} ms
- * @returns {string}
- */
-function formatDuration(ms) {
-  const totalTenths = Math.floor(ms / 100);
-  const minutes = Math.floor(totalTenths / 600);
-  const seconds = Math.floor((totalTenths % 600) / 10);
-  const tenths = totalTenths % 10;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
-}
-
 /**
  * @param {number} bytes
  * @returns {string}
@@ -2118,18 +1972,10 @@ function setBusy(value) {
 }
 
 function renderControls() {
-  const isRecording = state.recorder !== null && state.recorder.state === "recording";
   const isWakeCapturing = state.wakeRecorder !== null || state.wakeTriggered;
   const isWakeArmed = state.wakeListening || state.wakeTriggered || state.wakeAutoRestart;
-  const isCaptureActive = isRecording || isWakeCapturing;
-  const captureSupported = isSecureContext
-    && Boolean(navigator.mediaDevices?.getUserMedia)
-    && typeof MediaRecorder !== "undefined";
+  const isCaptureActive = isWakeCapturing;
   const wakeSupported = localWakeSupported();
-  els.enableMic.disabled = state.busy || isCaptureActive || isWakeArmed || !captureSupported;
-  els.startRecording.disabled = state.busy || isCaptureActive || isWakeArmed || !captureSupported;
-  els.stopSend.disabled = state.busy || !isRecording;
-  els.discardRecording.disabled = state.busy || !isRecording;
   els.startListening.disabled = state.busy || isCaptureActive || isWakeArmed || !wakeSupported;
   els.stopListening.disabled = !isWakeArmed;
   els.wakePhrase.disabled = isWakeArmed || isCaptureActive;

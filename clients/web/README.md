@@ -3,12 +3,12 @@
 Browser frontend for the HTTP API audio transport. This client is separate from
 the Android client and currently implements:
 
-- record microphone audio in the browser;
-- upload the recorded blob to `POST /api/transports/:transportId/audio-turns?wait=true`;
+- active-page browser word detection through local openWakeWord-compatible ONNX
+  inference;
+- capture speech after the wake phrase and upload the recorded blob to
+  `POST /api/transports/:transportId/audio-turns?wait=true`;
 - show assistant text returned by the server;
 - fetch and play the assistant audio response.
-- active-page browser word detection through local openWakeWord-compatible ONNX
-  inference.
 
 Word detection is local to the browser. The page keeps one app-owned microphone
 stream open, down-samples PCM to 16 kHz, feeds 80 ms frames into vendored ONNX
@@ -18,8 +18,8 @@ it follows the same capture workflow as the Pi client: keep a local pre-roll
 buffer, play a wake cue, capture speech, stop after speech has ended and the
 configured silence window has elapsed, fall back to a no-speech timeout or
 maximum utterance timeout, play an end cue, and submit the captured audio through
-the same backend path as manual capture. This is not a locked-screen or
-background wake-word engine.
+the backend audio-turn path. This is not a locked-screen or background wake-word
+engine.
 
 ## Run
 
@@ -43,8 +43,7 @@ serve the page over HTTPS or use another trusted secure-origin setup.
 
 Browser word detection additionally requires WebAssembly, Web Audio, and the
 vendored ONNX Runtime Web assets under `vendor/onnxruntime/` plus the vendored
-openWakeWord assets under `vendor/openwakeword/`. Browsers that cannot run that
-local inference path can still use manual recording.
+openWakeWord assets under `vendor/openwakeword/`.
 
 ## Backend
 
