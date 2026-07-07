@@ -47,6 +47,24 @@ function isHttpApiClientChat(chatId) {
 }
 
 /**
+ * Keep payload content carried by a control command, such as quoted or attached
+ * media, while stripping the command text itself from any eventual agent turn.
+ * @param {IncomingContentBlock[]} content
+ * @param {TextContentBlock} commandBlock
+ * @returns {IncomingContentBlock[]}
+ */
+function getContentWithoutCommandBlock(content, commandBlock) {
+  let removed = false;
+  return content.filter((block) => {
+    if (!removed && block === commandBlock) {
+      removed = true;
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
  * @param {IncomingContentBlock[]} content
  * @param {Map<string, number>} [counts]
  * @returns {Map<string, number>}
@@ -468,7 +486,16 @@ export function createConversationRunner({
 
     const waitSendCommand = firstBlock ? parseWaitSendBatchCommandText(firstBlock.text) : null;
     if (waitSendCommand?.command === "wait" && firstBlock) {
-      const batchState = waitSendBatches.startOrAppend(turn, []);
+      const seedContent = getContentWithoutCommandBlock(content, firstBlock);
+      const seedInputText = seedContent.length > 0
+        ? await buildBatchInputText({
+          chatId,
+          chatInfo,
+          content: seedContent,
+          context,
+        })
+        : "";
+      const batchState = waitSendBatches.startOrAppend(turn, seedContent, seedInputText);
       await appOutput.replyWithPlain(
         batchState.alreadyOpen
           ? `Batch already open. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send /send when ready.`

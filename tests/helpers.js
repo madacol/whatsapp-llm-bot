@@ -800,6 +800,7 @@ export function createMockBaileysSocket(options = {}) {
  *   video?: { mimetype: string; caption?: string };
  *   audio?: { mimetype: string };
  *   quotedText?: string;
+ *   quotedImage?: { mimetype: string; caption?: string };
  *   quotedSenderId?: string;
  * }} [options]
  * @returns {BaileysMessage}
@@ -817,6 +818,7 @@ export function createWAMessage(options = {}) {
     video,
     audio,
     quotedText,
+    quotedImage,
     quotedSenderId,
   } = options;
 
@@ -842,9 +844,17 @@ export function createWAMessage(options = {}) {
   // Build contextInfo for quotes
   /** @type {Record<string, unknown> | undefined} */
   let contextInfo;
-  if (quotedText) {
+  if (quotedText || quotedImage) {
     contextInfo = {
-      quotedMessage: { conversation: quotedText },
+      quotedMessage: quotedImage
+        ? {
+          imageMessage: {
+            mimetype: quotedImage.mimetype,
+            ...(quotedImage.caption && { caption: quotedImage.caption }),
+            url: "https://mock/quoted-image",
+          },
+        }
+        : { conversation: quotedText },
     };
     if (quotedSenderId) {
       contextInfo.participant = `${quotedSenderId}@s.whatsapp.net`;

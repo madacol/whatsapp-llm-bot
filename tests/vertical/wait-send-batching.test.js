@@ -290,6 +290,61 @@ describe("Wait/send batching vertical user case", () => {
     );
   });
 
+  it("seeds a new batch from media quoted by /wait without including command text", async () => {
+    const chatId = "wait-send-quoted-media-user@s.whatsapp.net";
+    const { handleMessage, socket, harnessState } = await createWaitSendVertical({
+      chatId,
+      harnessName: "wait-send-quoted-media-harness",
+    });
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({
+        chatId,
+        senderId: "wait-send-quoted-media-user",
+        text: "/wait ignored control text",
+        quotedImage: { mimetype: "image/png", caption: "quoted screenshot caption" },
+        quotedSenderId: "quoted-media-user",
+      }),
+      mediaBytes: Buffer.from("fake quoted screenshot bytes"),
+    });
+
+    assert.equal(harnessState.turns.length, 0);
+    assert.ok(
+      socket.getTextMessages().some((text) => text.includes("Batch started. 1 message queued.")),
+      `Expected seeded /wait acknowledgement, got ${JSON.stringify(socket.getTextMessages())}`,
+    );
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-quoted-media-user", text: "/send ignored control text" }),
+    });
+
+    assert.equal(harnessState.turns.length, 1);
+    const turn = harnessState.turns[0];
+    assert.equal(turn?.input?.includes("ignored control text"), false, turn?.input);
+    assert.ok(turn?.input?.includes("quoted screenshot caption"), turn?.input);
+    assert.equal(turn?.messages?.at(-1)?.role, "user");
+    const latestContent = turn?.messages?.at(-1)?.content ?? [];
+    assert.deepEqual(
+      latestContent.map((block) => block.type),
+      ["quote"],
+    );
+    const quoteBlock = latestContent[0];
+    assert.equal(quoteBlock?.type, "quote");
+    assert.deepEqual(
+      quoteBlock.content.map((block) => block.type),
+      ["image", "text"],
+    );
+    assert.equal(
+      quoteBlock.content.filter((block) =>
+        block.type === "text" && block.text === "quoted screenshot caption").length,
+      1,
+    );
+  });
+
   it("does not batch non-agent command messages while a batch is open", async () => {
     const chatId = "wait-send-command-user@s.whatsapp.net";
     const { handleMessage, socket, harnessState } = await createWaitSendVertical({
