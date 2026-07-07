@@ -383,6 +383,37 @@ describe("getMessageContent", () => {
     );
   });
 
+  it("does not duplicate quoted media captions", async () => {
+    const fakeBuffer = Buffer.from("fake-image-data");
+    const mockDownload = async () => fakeBuffer;
+    const msg = asBaileysMessage({
+      message: {
+        extendedTextMessage: {
+          text: "About this image",
+          contextInfo: {
+            quotedMessage: {
+              imageMessage: {
+                mimetype: "image/jpeg",
+                caption: "Image caption",
+                url: "https://example.com/img",
+              },
+            },
+          },
+        },
+      },
+    });
+    const { content } = await getMessageContent(msg, mockDownload);
+
+    const quote = requireQuoteBlock(content);
+    const captionBlocks = quote.content.filter((block) =>
+      block.type === "text" && block.text === "Image caption");
+    assert.equal(captionBlocks.length, 1);
+    assert.deepEqual(
+      quote.content.map((block) => block.type),
+      ["image", "text"],
+    );
+  });
+
   it("extracts document caption as text", async () => {
     const msg = asBaileysMessage({
       message: { documentMessage: { caption: "See attached" } },
@@ -547,9 +578,14 @@ describe("getMessageContent", () => {
       quote.content.some((b) => b.type === "text" && b.text === "Quoted document"),
       "Should preserve quoted document caption as text",
     );
+    assert.equal(
+      quote.content.filter((b) => b.type === "text" && b.text === "Quoted document").length,
+      1,
+      "Should not duplicate quoted document caption",
+    );
   });
 
-  it("falls back to text placeholder when quoted media download fails", async () => {
+  it("does not inject placeholder text when quoted media download fails", async () => {
     const mockDownload = async () => { throw new Error("download failed"); };
     const msg = asBaileysMessage({
       message: {
@@ -557,7 +593,11 @@ describe("getMessageContent", () => {
           text: "What's this?",
           contextInfo: {
             quotedMessage: {
-              imageMessage: { mimetype: "image/jpeg", url: "https://example.com/img" },
+              imageMessage: {
+                mimetype: "image/jpeg",
+                caption: "Still useful caption",
+                url: "https://example.com/img",
+              },
             },
           },
         },
@@ -568,8 +608,13 @@ describe("getMessageContent", () => {
     const quote = /** @type {QuoteContentBlock} */ (content.find(b => b.type === "quote"));
     assert.ok(quote, "Should have quote block");
     assert.ok(
+      quote.content.some(b => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "Still useful caption"),
+      "Should preserve quoted media caption",
+    );
+    assert.equal(
       quote.content.some(b => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "[Quoted image]"),
-      "Should fall back to text placeholder",
+      false,
+      "Should not add quoted media placeholder text",
     );
   });
 

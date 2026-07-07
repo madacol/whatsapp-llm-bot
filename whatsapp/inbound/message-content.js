@@ -173,16 +173,15 @@ async function extractQuotedContent(contextInfo, downloadFn) {
     quoteBlock.quotedSenderId = quotedSenderId;
   }
 
-  const quoteText = getQuotedText(quotedMessage);
-  if (quoteText) {
-    quoteBlock.content.push({ type: "text", text: quoteText });
-  }
-
   const quotedImage = quotedMessage.imageMessage;
   const quotedVideo = quotedMessage.videoMessage || quotedMessage.ptvMessage;
   const quotedAudio = quotedMessage.audioMessage;
   const quotedDocument = quotedMessage.documentMessage;
   const quotedMedia = quotedImage || quotedVideo || quotedAudio || quotedDocument;
+  const quoteText = getQuotedText(quotedMessage);
+  if (quoteText && !quotedMedia) {
+    quoteBlock.content.push({ type: "text", text: quoteText });
+  }
 
   if (quotedMedia) {
     const mediaType = quotedImage ? "image" : quotedAudio ? "audio" : quotedDocument ? "file" : "video";
@@ -191,10 +190,9 @@ async function extractQuotedContent(contextInfo, downloadFn) {
       const mediaBlocks = await downloadMediaToBlocks(fakeMessage, quotedMedia, mediaType, downloadFn);
       quoteBlock.content.push(...mediaBlocks);
     } catch {
-      quoteBlock.content.push({
-        type: "text",
-        text: `[Quoted ${mediaType}]`,
-      });
+      if (quoteText) {
+        quoteBlock.content.push({ type: "text", text: quoteText });
+      }
     }
   }
 
