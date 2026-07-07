@@ -49,9 +49,9 @@ local inference path can still use manual recording.
 ## Backend
 
 Configure the app UI with the HTTP API transport base URL, transport id, and
-chat id. The bearer token field is optional; leave it blank for the current
-tailnet test API. Backend speech synthesis must be configured for the response
-to include assistant audio.
+chat id. Token deployments carry authentication in the API base URL itself.
+Backend speech synthesis must be configured for the response to include
+assistant audio.
 
 When using the deployed HTTPS page, use an API base URL that is reachable from
 the browser device and served over HTTPS. Browsers may block requests from the

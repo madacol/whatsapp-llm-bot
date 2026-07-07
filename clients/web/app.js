@@ -16,7 +16,6 @@ const DEFAULT_WAKE_THRESHOLD = 0.5;
 
 const DEFAULT_SETTINGS = {
   baseUrl: defaultApiBaseUrl(),
-  token: "",
   transportId: "voice",
   chatId: "api:web-1",
   senderId: "web-user",
@@ -165,7 +164,6 @@ const state = {
 const els = {
   form: getElement("settings-form", HTMLFormElement),
   baseUrl: getElement("base-url", HTMLInputElement),
-  token: getElement("token", HTMLInputElement),
   transportId: getElement("transport-id", HTMLInputElement),
   chatId: getElement("chat-id", HTMLInputElement),
   senderId: getElement("sender-id", HTMLInputElement),
@@ -235,7 +233,6 @@ function hydrateSettings() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedSettings));
   }
   els.baseUrl.value = mergedSettings.baseUrl;
-  els.token.value = mergedSettings.token;
   els.transportId.value = mergedSettings.transportId;
   els.chatId.value = mergedSettings.chatId;
   els.senderId.value = mergedSettings.senderId;
@@ -296,7 +293,6 @@ function readStoredSettings() {
     const storedBaseUrl = stringOrDefault(stored.baseUrl, DEFAULT_SETTINGS.baseUrl);
     return {
       baseUrl: normalizeStoredBaseUrl(storedBaseUrl),
-      token: stringOrDefault(stored.token, DEFAULT_SETTINGS.token),
       transportId: stringOrDefault(stored.transportId, DEFAULT_SETTINGS.transportId),
       chatId: stringOrDefault(stored.chatId, DEFAULT_SETTINGS.chatId),
       senderId: stringOrDefault(stored.senderId, DEFAULT_SETTINGS.senderId),
@@ -365,7 +361,6 @@ function readSettings() {
   const wakePhrase = els.wakePhrase.value.trim();
   return {
     baseUrl: stripTrailingSlash(els.baseUrl.value),
-    token: els.token.value.trim(),
     transportId: els.transportId.value.trim(),
     chatId: els.chatId.value.trim(),
     senderId: els.senderId.value.trim(),
@@ -1501,7 +1496,6 @@ function setWakeStatus(message) {
 async function submitAudio(blob) {
   const settings = readSettings();
   validateApiBaseUrl(settings.baseUrl);
-  validateOptionalBearerToken(settings.token);
   const mimeType = normalizeAudioType(blob.type || preferredMimeType());
   const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const url = buildApiUrl(
@@ -1510,7 +1504,6 @@ async function submitAudio(blob) {
     { wait: "true" },
   );
   const headers = {
-    ...authHeaders(settings.token),
     "content-type": mimeType,
     "x-request-id": requestId,
     "x-chat-id": settings.chatId,
@@ -1587,31 +1580,13 @@ function buildApiUrl(baseUrl, apiPath, searchParams = {}) {
 }
 
 /**
- * @param {string} token
- * @returns {void}
- */
-function validateOptionalBearerToken(token) {
-  if (/^Bearer\s+/i.test(token)) {
-    throw new Error("Paste only the bearer token value. The client adds the Bearer prefix.");
-  }
-}
-
-/**
- * @param {string} token
- * @returns {Record<string, string>}
- */
-function authHeaders(token) {
-  return token ? { authorization: `Bearer ${token}` } : {};
-}
-
-/**
  * @param {number} status
  * @param {string} body
  * @returns {string}
  */
 function formatHttpError(status, body) {
   if (status === 401) {
-    return "Unauthorized. Enter the API bearer token from API_TRANSPORT_TOKEN and paste only the token value.";
+    return "Unauthorized. Open the client with a tokenized API URL.";
   }
   return `HTTP ${status}: ${body}`;
 }
@@ -1636,7 +1611,7 @@ async function renderAssistantResponse(settings, responseBody) {
 
   const audioUrl = resolveAudioUrl(settings.baseUrl, audio);
   setStatus("Playing", "Downloading assistant audio.");
-  const audioResponse = await fetch(audioUrl, { headers: authHeaders(settings.token) });
+  const audioResponse = await fetch(audioUrl);
   if (!audioResponse.ok) {
     throw new Error(`Audio download failed with HTTP ${audioResponse.status}.`);
   }
