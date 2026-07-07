@@ -2,6 +2,7 @@ process.env.TESTING = "1";
 
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { createWebAudioClientServer, contentTypeForPath, resolveStaticPath } from "../clients/web/server.js";
 
 /** @type {import("node:http").Server[]} */
@@ -84,6 +85,51 @@ describe("web audio client static server", () => {
     await discardResponseBody(traversal);
   });
 
+  it("proxies same-origin API requests to the configured backend", async () => {
+    let upstreamCalled = false;
+    const upstream = createServer((req, res) => {
+      upstreamCalled = true;
+      assert.equal(req.method, "POST");
+      assert.equal(req.url, "/api/transports/voice/audio-turns?wait=true&token=share-token");
+      assert.equal(req.headers["x-chat-id"], "api:web-1");
+
+      /** @type {Buffer[]} */
+      const chunks = [];
+      req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      req.on("end", () => {
+        assert.equal(Buffer.concat(chunks).toString("utf8"), "fake audio");
+        res.writeHead(202, {
+          "content-type": "application/json; charset=utf-8",
+          "x-upstream": "http-api",
+        });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+    servers.push(upstream);
+    await listen(upstream);
+
+    const server = createWebAudioClientServer({
+      apiTarget: `http://127.0.0.1:${listeningPort(upstream)}`,
+    });
+    servers.push(server);
+    await listen(server);
+    const baseUrl = `http://127.0.0.1:${listeningPort(server)}`;
+
+    const response = await fetch(`${baseUrl}/api/transports/voice/audio-turns?wait=true&token=share-token`, {
+      method: "POST",
+      headers: {
+        "content-type": "audio/ogg",
+        "x-chat-id": "api:web-1",
+      },
+      body: "fake audio",
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(response.headers.get("x-upstream"), "http-api");
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(upstreamCalled, true);
+  });
+
   it("resolves content types and static paths defensively", () => {
     assert.equal(contentTypeForPath("index.html"), "text/html; charset=utf-8");
     assert.equal(contentTypeForPath("app.js"), "text/javascript; charset=utf-8");
@@ -106,6 +152,14 @@ function listeningPort(server) {
     throw new Error("Expected server to listen on an AddressInfo endpoint");
   }
   return address.port;
+}
+
+/**
+ * @param {import("node:http").Server} server
+ * @returns {Promise<void>}
+ */
+function listen(server) {
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
 }
 
 /**

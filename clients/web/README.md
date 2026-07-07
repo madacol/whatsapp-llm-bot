@@ -49,9 +49,10 @@ local inference path can still use manual recording.
 ## Backend
 
 Configure the app UI with the HTTP API transport base URL, transport id, and
-chat id. Token deployments carry authentication in the API base URL itself.
-Backend speech synthesis must be configured for the response to include
-assistant audio.
+chat id. By default the deployed client uses its own origin as the API base URL,
+including the page token query parameter, and the web server proxies `/api/*` to
+the backend HTTP API transport. Backend speech synthesis must be configured for
+the response to include assistant audio.
 
 When using the deployed HTTPS page, use an API base URL that is reachable from
 the browser device and served over HTTPS. Browsers may block requests from the
@@ -61,17 +62,14 @@ HTTPS page to a plain HTTP backend, except for local development cases such as
 ## Deployment
 
 Registered in the repo-root `website.json` as `web-audio-client` and deployed as
-a private/tailnet static site:
+a private/tailnet plus token service:
 
 ```text
 https://private-host-redacted/
 ```
 
-The deployed client can take the API base URL from the page URL:
+The deployed client does not need a separate API subdomain. The same service
+serves the browser app and proxies same-origin `/api/*` requests to the
+configured HTTP API target.
 
-```text
-https://private-host-redacted/?api=https%3A%2F%private-host-redacted
-```
-
-The API proxy is registered as `web-audio-api` and points at the configured HTTP
-API transport listener.
+Use `site-manager link web-audio-client` to get the external token URL.

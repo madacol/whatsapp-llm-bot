@@ -23,22 +23,13 @@
       ]
     },
     "service": {
+      "environment": {
+        "WEB_AUDIO_API_TARGET": "http://127.0.0.1:3200"
+      },
       "command": [
         "/usr/bin/node",
         "clients/web/server.js"
       ]
-    }
-  },
-  {
-    "subdomain": "web-audio-api",
-    "access": {
-      "mode": [
-        "tailnet",
-        "token"
-      ]
-    },
-    "proxy": {
-      "target": "127.0.0.1:3200"
     }
   }
 ]

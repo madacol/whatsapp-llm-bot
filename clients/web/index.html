@@ -17,10 +17,10 @@
         <form id="settings-form" class="settings-form">
           <label>
             <span>API base URL</span>
-            <input id="base-url" name="baseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://private-host-redacted" required>
+            <input id="base-url" name="baseUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://private-host-redacted?token=..." required>
           </label>
           <p id="api-url-help" class="field-note">
-            Use an HTTPS API URL reachable from this browser. Deployed links can set it with <code>?api=...</code>.
+            Defaults to this page's origin. Token links carry the page token into API calls.
           </p>
           <div class="field-grid">
             <label>
@@ -127,6 +127,6 @@
     </main>
 
     <script src="./vendor/onnxruntime/ort.wasm.min.js"></script>
-    <script type="module" src="./app.js?v=20260707-progress-sse"></script>
+    <script type="module" src="./app.js?v=20260707-same-origin-api"></script>
   </body>
 </html>

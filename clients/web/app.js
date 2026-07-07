@@ -2,7 +2,6 @@ import { OpenWakeWordJarvisDetector, OPEN_WAKE_WORD_MODEL_BASE_PATH } from "./op
 
 const STORAGE_KEY = "madabot.webAudioClient.settings.v1";
 const LOCAL_DEV_API_BASE_URL = "http://127.0.0.1:3200";
-const DEPLOYED_API_BASE_URL = "https://private-host-redacted";
 const WAKE_DETECTOR_BUILD = "Local openWakeWord v13";
 const DEFAULT_WAKE_THRESHOLD = 0.5;
 
@@ -251,7 +250,26 @@ function hydrateSettings() {
  * @returns {string}
  */
 function defaultApiBaseUrl() {
-  return isLocalPage() ? LOCAL_DEV_API_BASE_URL : DEPLOYED_API_BASE_URL;
+  return isHttpPage() ? sameOriginApiBaseUrl() : LOCAL_DEV_API_BASE_URL;
+}
+
+/**
+ * @returns {boolean}
+ */
+function isHttpPage() {
+  return location.protocol === "http:" || location.protocol === "https:";
+}
+
+/**
+ * @returns {string}
+ */
+function sameOriginApiBaseUrl() {
+  const url = new URL(location.origin);
+  const token = new URLSearchParams(location.search).get("token");
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return stripTrailingSlash(url.toString());
 }
 
 /**
@@ -336,7 +354,10 @@ function numberOrDefault(value, fallback) {
  */
 function normalizeStoredBaseUrl(baseUrl) {
   if (!isLocalPage() && isLoopbackUrl(baseUrl)) {
-    return DEPLOYED_API_BASE_URL;
+    return sameOriginApiBaseUrl();
+  }
+  if (isLegacyDeployedApiUrl(baseUrl)) {
+    return sameOriginApiBaseUrl();
   }
   return baseUrl;
 }
@@ -349,6 +370,20 @@ function isLoopbackUrl(value) {
   try {
     const url = new URL(value);
     return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isLegacyDeployedApiUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.hostname === "private-host-redacted"
+      || url.hostname === "private-host-redacted";
   } catch {
     return false;
   }
