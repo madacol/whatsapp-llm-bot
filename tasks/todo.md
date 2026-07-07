@@ -5,6 +5,7 @@
 ## Todo
 
 - Add `/BTW` as a transport-agnostic forked side session command. [details](btw-forked-side-session-command.md)
+- Improve WhatsApp presentation for subagent activity. [details](subagent-whatsapp-presentation.md)
 - Add generic chat presentation for otherwise-unrendered tool or agent events. [details](generic-agent-event-presentation.md)
 - Render ACP delete-file events as deletes, not updates. [details](acp-delete-file-rendered-as-update.md)
 - Add `!zzz` no-op command to ignore a message. [details](zzz-ignore-message-command.md)
