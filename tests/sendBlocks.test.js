@@ -3315,6 +3315,84 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(sentTextMessages(calls)[0]?.text, "Thinking...");
   });
 
+  it("ignores inspect marker echoes that only identify the group chat", async () => {
+    const { sock, calls } = createCaptureSock();
+    sock.user = { id: "393792375735:1@s.whatsapp.net" };
+    const reactionRuntime = createReactionRuntime();
+    const chatId = "120363042584279820@g.us";
+
+    const handle = await sendBlocks(
+      sock,
+      chatId,
+      "plain",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspectable reasoning should stay hidden.",
+    });
+    await waitFor(() => calls.some((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    }));
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: chatId },
+      reaction: { text: "👁" },
+      senderId: "120363042584279820",
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(sentTextMessages(calls).length, 1);
+    assert.equal(sentTextMessages(calls)[0]?.text, "Thinking...");
+  });
+
+  it("does not arm pending inspect mode from group-only marker echoes", async () => {
+    const { sock, calls } = createCaptureSock();
+    sock.user = { id: "393792375735:1@s.whatsapp.net" };
+    const reactionRuntime = createReactionRuntime();
+    const chatId = "120363042584279820@g.us";
+
+    const handle = await sendBlocks(
+      sock,
+      chatId,
+      "plain",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: chatId },
+      reaction: { text: "👁" },
+      senderId: "120363042584279820",
+    }]);
+
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspect data arrived later.",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(sentTextMessages(calls).length, 1);
+    assert.equal(sentTextMessages(calls)[0]?.text, "Thinking...");
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: chatId },
+      reaction: { text: "👁" },
+      senderId: "213597330374785",
+    }]);
+
+    await waitFor(() => sentTextMessages(calls).some((msg) =>
+      msg.edit && msg.text?.includes("Inspect data arrived later.")));
+  });
+
   it("keeps audio transcription inspect hidden for marker echoes whose alternate sender id matches the bot", async () => {
     const { sock, calls } = createCaptureSock();
     sock.user = { id: "393792375735:1@s.whatsapp.net" };
@@ -3345,6 +3423,44 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       reaction: { text: "👁" },
       senderId: "147025689575646",
       senderIds: ["147025689575646", "393792375735"],
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(sentTextMessages(calls).length, 2);
+    assert.equal(sentTextMessages(calls)[0]?.text, "Transcribing audio...");
+    assert.equal(sentTextMessages(calls)[1]?.text, "Transcribed");
+  });
+
+  it("keeps audio transcription inspect hidden for marker echoes that only identify the group chat", async () => {
+    const { sock, calls } = createCaptureSock();
+    sock.user = { id: "393792375735:1@s.whatsapp.net" };
+    const reactionRuntime = createReactionRuntime();
+    const chatId = "120363042584279820@g.us";
+
+    const handle = await sendBlocks(
+      sock,
+      chatId,
+      "plain",
+      [{ type: "text", text: "Transcribing audio..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "text",
+      text: "Audio transcript should stay hidden until user inspection.",
+    });
+    await handle.update({ kind: "text", text: "Transcribed" });
+    await waitFor(() => calls.some((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    }));
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: chatId },
+      reaction: { text: "👁" },
+      senderId: "120363042584279820",
     }]);
 
     await new Promise((resolve) => setTimeout(resolve, 20));

@@ -156,6 +156,47 @@ export function whatsappReactionMessage({
 }
 
 /**
+ * @param {{
+ *   chatId: string,
+ *   targetMessageId: string,
+ *   reaction: string,
+ *   id?: string,
+ *   timestamp?: number,
+ *   targetParticipantJid?: string,
+ * }} input
+ * @returns {import("@whiskeysockets/baileys").WAMessage}
+ */
+export function whatsappGroupOnlyReactionMessage({
+  chatId,
+  targetMessageId,
+  reaction,
+  id = "MSG-VERTICAL-GROUP-ONLY-REACTION-1",
+  timestamp = 1782322730,
+  targetParticipantJid,
+}) {
+  return /** @type {import("@whiskeysockets/baileys").WAMessage} */ (/** @type {unknown} */ ({
+    key: {
+      remoteJid: chatId,
+      fromMe: false,
+      id,
+    },
+    messageTimestamp: timestamp,
+    message: {
+      reactionMessage: {
+        key: {
+          remoteJid: chatId,
+          fromMe: true,
+          id: targetMessageId,
+          ...(targetParticipantJid ? { participant: targetParticipantJid } : {}),
+        },
+        text: reaction,
+        senderTimestampMs: timestamp * 1_000,
+      },
+    },
+  }));
+}
+
+/**
  * @param {WhatsAppTransportTestbedOptions} [options]
  * @returns {Promise<{
  *   transport: ChatTransport,

@@ -113,8 +113,51 @@ function isRecord(value) {
 function getSocketSelfIds(sock) {
   const ids = [sock.user?.id, sock.user?.lid]
     .filter((id) => typeof id === "string" && id.length > 0)
-    .map((id) => /** @type {string} */ (id).split(":")[0].split("@")[0]);
+    .map((id) => normalizeReactionIdentityId(/** @type {string} */ (id)));
   return [...new Set(ids)];
+}
+
+/**
+ * @param {string} id
+ * @returns {string}
+ */
+function normalizeReactionIdentityId(id) {
+  return id.split(":")[0].split("@")[0];
+}
+
+/**
+ * @param {string} senderId
+ * @param {import("../runtime/reaction-runtime.js").ReactionMetadata} [metadata]
+ * @returns {string[]}
+ */
+function getReactionSenderIdentityIds(senderId, metadata = {}) {
+  return [senderId, ...(metadata.senderIds ?? [])]
+    .map((id) => normalizeReactionIdentityId(id))
+    .filter((id) => id.length > 0);
+}
+
+/**
+ * @param {string} chatId
+ * @returns {boolean}
+ */
+function isGroupChatId(chatId) {
+  return chatId.endsWith("@g.us");
+}
+
+/**
+ * @param {string} senderId
+ * @param {string} chatId
+ * @param {import("../runtime/reaction-runtime.js").ReactionMetadata} [metadata]
+ * @returns {boolean}
+ */
+function isAmbiguousGroupReactionSender(senderId, chatId, metadata = {}) {
+  if (!isGroupChatId(chatId)) {
+    return false;
+  }
+  const chatIdentityId = normalizeReactionIdentityId(chatId);
+  const senderIds = getReactionSenderIdentityIds(senderId, metadata);
+  return senderIds.length === 0
+    || senderIds.every((id) => id === "unknown" || id === chatIdentityId);
 }
 
 /**
@@ -125,8 +168,7 @@ function getSocketSelfIds(sock) {
  */
 function isReactionFromSelf(senderId, sock, metadata = {}) {
   const selfIds = getSocketSelfIds(sock);
-  const senderIds = [senderId, ...(metadata.senderIds ?? [])]
-    .map((id) => id.split(":")[0].split("@")[0]);
+  const senderIds = getReactionSenderIdentityIds(senderId, metadata);
   return senderIds.some((id) => selfIds.includes(id));
 }
 
@@ -2517,6 +2559,10 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       }
       if (isReactionFromSelf(senderId, sock, metadata)) {
         appendInspectReactionDecisionDiagnostic("ignored", "sender-matches-self", senderId, metadata);
+        return;
+      }
+      if (isAmbiguousGroupReactionSender(senderId, chatId, metadata)) {
+        appendInspectReactionDecisionDiagnostic("ignored", "ambiguous-group-sender", senderId, metadata);
         return;
       }
       displayMode = "inspect";
