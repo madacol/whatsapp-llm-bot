@@ -130,6 +130,31 @@ describe("web audio client static server", () => {
     assert.equal(upstreamCalled, true);
   });
 
+  it("proxies the same-origin health check to the configured backend", async () => {
+    const upstream = createServer((req, res) => {
+      assert.equal(req.method, "GET");
+      assert.equal(req.url, "/health?token=share-token");
+      res.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+      });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    servers.push(upstream);
+    await listen(upstream);
+
+    const server = createWebAudioClientServer({
+      apiTarget: `http://127.0.0.1:${listeningPort(upstream)}`,
+    });
+    servers.push(server);
+    await listen(server);
+    const baseUrl = `http://127.0.0.1:${listeningPort(server)}`;
+
+    const response = await fetch(`${baseUrl}/health?token=share-token`);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+  });
+
   it("resolves content types and static paths defensively", () => {
     assert.equal(contentTypeForPath("index.html"), "text/html; charset=utf-8");
     assert.equal(contentTypeForPath("app.js"), "text/javascript; charset=utf-8");

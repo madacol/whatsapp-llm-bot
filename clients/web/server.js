@@ -69,7 +69,7 @@ export function createWebAudioClientServer(options = {}) {
   const apiTarget = normalizeApiTarget(options.apiTarget ?? process.env.WEB_AUDIO_API_TARGET ?? DEFAULT_API_TARGET);
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname.startsWith("/api/")) {
+    if (isApiProxyPath(url.pathname)) {
       proxyApiRequest(req, res, apiTarget);
       return;
     }
@@ -99,6 +99,14 @@ export function createWebAudioClientServer(options = {}) {
     });
     createReadStream(filePath).pipe(res);
   });
+}
+
+/**
+ * @param {string} pathname
+ * @returns {boolean}
+ */
+function isApiProxyPath(pathname) {
+  return pathname === "/health" || pathname.startsWith("/api/");
 }
 
 /**
