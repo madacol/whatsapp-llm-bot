@@ -498,7 +498,7 @@ async function checkApi() {
     validateApiBaseUrl(settings.baseUrl);
     setBusy(true);
     setStatus("Checking", "Checking API health.");
-    const response = await fetch(`${settings.baseUrl}/health`);
+    const response = await fetch(buildApiUrl(settings.baseUrl, "/health"));
     const body = await response.text();
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${body}`);
@@ -1504,7 +1504,11 @@ async function submitAudio(blob) {
   validateOptionalBearerToken(settings.token);
   const mimeType = normalizeAudioType(blob.type || preferredMimeType());
   const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const url = `${settings.baseUrl}/api/transports/${encodeURIComponent(settings.transportId)}/audio-turns?wait=true`;
+  const url = buildApiUrl(
+    settings.baseUrl,
+    `/api/transports/${encodeURIComponent(settings.transportId)}/audio-turns`,
+    { wait: "true" },
+  );
   const headers = {
     ...authHeaders(settings.token),
     "content-type": mimeType,
@@ -1563,6 +1567,23 @@ function validateApiBaseUrl(baseUrl) {
   if (location.protocol === "https:" && url.protocol !== "https:" && !isLoopbackUrl(baseUrl)) {
     throw new Error("Use an HTTPS API base URL from this deployed page.");
   }
+}
+
+/**
+ * @param {string} baseUrl
+ * @param {string} apiPath
+ * @param {Record<string, string>} [searchParams]
+ * @returns {string}
+ */
+function buildApiUrl(baseUrl, apiPath, searchParams = {}) {
+  const url = new URL(baseUrl);
+  const basePath = url.pathname.replace(/\/+$/, "");
+  const path = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+  url.pathname = `${basePath}${path}`;
+  for (const [key, value] of Object.entries(searchParams)) {
+    url.searchParams.set(key, value);
+  }
+  return url.toString();
 }
 
 /**
@@ -1643,10 +1664,17 @@ async function renderAssistantResponse(settings, responseBody) {
  */
 function resolveAudioUrl(baseUrl, audio) {
   if (typeof audio.path === "string" && audio.path.trim()) {
-    return `${baseUrl}/api/media/${encodeURIComponent(audio.path.trim())}`;
+    return buildApiUrl(baseUrl, `/api/media/${encodeURIComponent(audio.path.trim())}`);
   }
   if (typeof audio.url === "string" && audio.url.trim()) {
-    return new URL(audio.url, baseUrl).toString();
+    const url = new URL(audio.url, baseUrl);
+    const base = new URL(baseUrl);
+    for (const [key, value] of base.searchParams) {
+      if (!url.searchParams.has(key)) {
+        url.searchParams.set(key, value);
+      }
+    }
+    return url.toString();
   }
   throw new Error("Response audio did not include a path or URL.");
 }
