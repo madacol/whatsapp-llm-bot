@@ -10,21 +10,13 @@ Improve how subagent activity is presented in WhatsApp so it is readable, identi
 
 ## Evidence
 
-### User Text
-
-The triggering user request was:
+### Textual Request
 
 > add to tasks: we need to improve the subagent WhatsApp presentation. we need to find (or make up) a subagent name or human-readable-identifier, and also change its format to differentiate from the tool name, I suggest using inline code block
 
-### Media Evidence
+### Referenced Media
 
-The user attached a WhatsApp screenshot as the concrete evidence for the task. The screenshot shows the `Baby Jarvis - tmp` group chat where subagent research work appears as repeated wrench-prefixed messages. Each message starts with raw prompt text such as "Research task only; do not edit files and do not commit" and then shows actions like finding `Microphone`, opening Chrome/Apple docs, or searching for PWA-related queries.
-
-The screenshot is the motivating example because those messages look like generic tool calls, do not show a useful subagent name or human-readable identifier, and make the subagent/tool distinction hard to scan in WhatsApp.
-
-### Inferred Context
-
-The presentation problem is not just message length. The renderer is probably treating subagent activity like ordinary tool progress, using the tool/action label as the main visible identity. The fix should make the subagent identity explicit and visually separate from the action.
+Attached WhatsApp screenshot showing the `Baby Jarvis - tmp` group chat with repeated wrench-prefixed subagent research updates that begin with raw prompt text such as "Research task only; do not edit files and do not commit".
 
 ## Scope
 
