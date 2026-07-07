@@ -110,6 +110,8 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   localWakeLastScoreAt: number;
  *   localWakeSuppressUntil: number;
  *   diagnosticsHistory: unknown[];
+ *   assistantAudioQueue: Record<string, unknown>[];
+ *   assistantAudioPlaying: boolean;
  * }}
  */
 const state = {
@@ -159,6 +161,8 @@ const state = {
   localWakeLastScoreAt: 0,
   localWakeSuppressUntil: 0,
   diagnosticsHistory: [],
+  assistantAudioQueue: [],
+  assistantAudioPlaying: false,
 };
 
 const els = {
@@ -1514,7 +1518,11 @@ async function submitAudio(blob) {
 
   setBusy(true);
   setStatus("Uploading", `Uploading ${formatBytes(blob.size)} as ${mimeType}.`);
+  els.assistantText.textContent = "Waiting for assistant...";
+  state.assistantAudioQueue = [];
   writeDiagnostics({ request: { url, requestId, mimeType, bytes: blob.size } });
+  const eventStream = await createTurnEventStream(settings, requestId);
+  eventStream.start();
 
   try {
     const response = await fetch(url, {
@@ -1524,12 +1532,23 @@ async function submitAudio(blob) {
     });
     const raw = await response.text();
     const body = parseJsonOrText(raw);
+    await eventStream.flush();
     writeDiagnostics({ request: { url, requestId, mimeType, bytes: blob.size }, response: body });
     if (!response.ok) {
       throw new Error(formatHttpError(response.status, raw));
     }
+    if (eventStream.hasAssistantOutput()) {
+      setStatus(
+        "Done",
+        eventStream.hasAssistantAudio()
+          ? "Assistant response is ready."
+          : "Assistant returned text but no audio.",
+      );
+      return { assistantAudioStarted: eventStream.audioStarted() };
+    }
     return await renderAssistantResponse(settings, body);
   } finally {
+    await eventStream.stop();
     setBusy(false);
   }
 }
@@ -1589,6 +1608,337 @@ function formatHttpError(status, body) {
     return "Unauthorized. Open the client with a tokenized API URL.";
   }
   return `HTTP ${status}: ${body}`;
+}
+
+/**
+ * @typedef {{
+ *   eventId: string;
+ *   kind: string;
+ *   event: unknown;
+ * }} HttpApiEventRow
+ *
+ * @typedef {{
+ *   start: () => void;
+ *   flush: () => Promise<void>;
+ *   stop: () => Promise<void>;
+ *   hasAssistantOutput: () => boolean;
+ *   hasAssistantAudio: () => boolean;
+ *   audioStarted: () => boolean;
+ * }} TurnEventStream
+ */
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @param {string} requestId
+ * @returns {Promise<TurnEventStream>}
+ */
+async function createTurnEventStream(settings, requestId) {
+  let after = await readCurrentEventCursor(settings);
+  /** @type {EventSource | null} */
+  let source = null;
+  let stopped = false;
+  let assistantOutputCount = 0;
+  let assistantAudioCount = 0;
+  let assistantAudioStarted = false;
+
+  /**
+   * @param {HttpApiEventRow} row
+   * @returns {void}
+   */
+  function handleRow(row) {
+    after = row.eventId;
+    const result = handleAssistantEvent(settings, row);
+    if (result.text) {
+      assistantOutputCount += 1;
+    }
+    if (result.audio) {
+      assistantAudioCount += 1;
+      assistantAudioStarted = result.audioStarted || assistantAudioStarted;
+    }
+  }
+
+  return {
+    start() {
+      if (after === null || typeof EventSource === "undefined") {
+        return;
+      }
+      stopped = false;
+      const url = buildApiUrl(
+        settings.baseUrl,
+        `/api/transports/${encodeURIComponent(settings.transportId)}/events/stream`,
+        {
+          chatId: settings.chatId,
+          after,
+        },
+      );
+      source = new EventSource(url);
+      source.onmessage = (event) => {
+        const parsed = parseJsonOrText(event.data);
+        if (isHttpApiEventRow(parsed)) {
+          handleRow(parsed);
+        }
+      };
+      source.onerror = () => {
+        if (!stopped) {
+          appendDiagnostics({ requestId, eventStream: "Event stream disconnected." });
+        }
+      };
+    },
+    async flush() {
+      try {
+        for (const row of await readEventsAfter(settings, after)) {
+          handleRow(row);
+        }
+      } catch (error) {
+        appendDiagnostics({ requestId, eventStreamFlush: errorMessage(error) });
+      }
+    },
+    async stop() {
+      stopped = true;
+      source?.close();
+      source = null;
+    },
+    hasAssistantOutput() {
+      return assistantOutputCount > 0 || assistantAudioCount > 0;
+    },
+    hasAssistantAudio() {
+      return assistantAudioCount > 0;
+    },
+    audioStarted() {
+      return assistantAudioStarted;
+    },
+  };
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @returns {Promise<string | null>}
+ */
+async function readCurrentEventCursor(settings) {
+  try {
+    const response = await fetch(buildApiUrl(
+      settings.baseUrl,
+      `/api/transports/${encodeURIComponent(settings.transportId)}/events`,
+      {
+        chatId: settings.chatId,
+        after: "0",
+      },
+    ));
+    if (!response.ok) {
+      return null;
+    }
+    const body = parseJsonOrText(await response.text());
+    if (isRecord(body) && typeof body.nextEventId === "string") {
+      return body.nextEventId;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @param {string | null} after
+ * @returns {Promise<HttpApiEventRow[]>}
+ */
+async function readEventsAfter(settings, after) {
+  if (after === null) {
+    return [];
+  }
+  const response = await fetch(buildApiUrl(
+    settings.baseUrl,
+    `/api/transports/${encodeURIComponent(settings.transportId)}/events`,
+    {
+      chatId: settings.chatId,
+      after,
+    },
+  ));
+  if (!response.ok) {
+    throw new Error(`Event catch-up failed with HTTP ${response.status}.`);
+  }
+  const body = parseJsonOrText(await response.text());
+  if (!isRecord(body) || !Array.isArray(body.events)) {
+    return [];
+  }
+  return body.events.filter(isHttpApiEventRow);
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @param {HttpApiEventRow} row
+ * @returns {{ text: boolean, audio: boolean, audioStarted: boolean }}
+ */
+function handleAssistantEvent(settings, row) {
+  if (row.kind !== "assistant_output" || !isRecord(row.event)) {
+    return { text: false, audio: false, audioStarted: false };
+  }
+  const text = assistantEventText(row.event);
+  if (text) {
+    appendAssistantText(text);
+    setStatus("Responding", "Assistant message received.");
+  }
+  const audioBlocks = assistantEventAudioBlocks(row.event);
+  for (const audio of audioBlocks) {
+    enqueueAssistantAudio(settings, audio);
+  }
+  return {
+    text: Boolean(text),
+    audio: audioBlocks.length > 0,
+    audioStarted: audioBlocks.length > 0,
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} event
+ * @returns {string}
+ */
+function assistantEventText(event) {
+  const content = event.content;
+  if (typeof content === "string") {
+    return isTransientAssistantStatus(content) ? "" : content;
+  }
+  const blocks = Array.isArray(content) ? content : isRecord(content) ? [content] : [];
+  return blocks
+    .map((block) => {
+      if (!isRecord(block)) {
+        return "";
+      }
+      if ((block.type === "text" || block.type === "markdown") && typeof block.text === "string") {
+        return isTransientAssistantStatus(block.text) ? "" : block.text;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isTransientAssistantStatus(text) {
+  return text.trim() === "Thinking...";
+}
+
+/**
+ * @param {Record<string, unknown>} event
+ * @returns {Record<string, unknown>[]}
+ */
+function assistantEventAudioBlocks(event) {
+  const content = event.content;
+  const blocks = Array.isArray(content) ? content : isRecord(content) ? [content] : [];
+  return blocks.filter((block) => (
+    isRecord(block)
+    && block.type === "audio"
+    && (typeof block.path === "string" || typeof block.url === "string")
+  ));
+}
+
+/**
+ * @param {string} text
+ * @returns {void}
+ */
+function appendAssistantText(text) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  const current = els.assistantText.textContent?.trim() ?? "";
+  if (!current || current === "No response yet." || current === "Assistant returned no text." || current === "Waiting for assistant...") {
+    els.assistantText.textContent = trimmed;
+  } else {
+    els.assistantText.textContent = `${current}\n\n${trimmed}`;
+  }
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @param {Record<string, unknown>} audio
+ * @returns {void}
+ */
+function enqueueAssistantAudio(settings, audio) {
+  state.assistantAudioQueue.push(audio);
+  void drainAssistantAudioQueue(settings).catch((error) => {
+    handleError(error);
+  });
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @returns {Promise<void>}
+ */
+async function drainAssistantAudioQueue(settings) {
+  if (state.assistantAudioPlaying) {
+    return;
+  }
+  state.assistantAudioPlaying = true;
+  try {
+    while (state.assistantAudioQueue.length > 0) {
+      const audio = state.assistantAudioQueue.shift();
+      if (!audio) {
+        continue;
+      }
+      await playAssistantAudio(settings, audio);
+    }
+  } finally {
+    state.assistantAudioPlaying = false;
+  }
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @param {Record<string, unknown>} audio
+ * @returns {Promise<boolean>}
+ */
+async function playAssistantAudio(settings, audio) {
+  const audioUrl = resolveAudioUrl(settings.baseUrl, audio);
+  setStatus("Playing", "Downloading assistant audio.");
+  const audioResponse = await fetch(audioUrl);
+  if (!audioResponse.ok) {
+    throw new Error(`Audio download failed with HTTP ${audioResponse.status}.`);
+  }
+  const audioBlob = await audioResponse.blob();
+  if (state.assistantAudioUrl) {
+    URL.revokeObjectURL(state.assistantAudioUrl);
+  }
+  state.assistantAudioUrl = URL.createObjectURL(audioBlob);
+  els.assistantAudio.src = state.assistantAudioUrl;
+  try {
+    await els.assistantAudio.play();
+    await waitForAssistantAudioEnd();
+    setStatus("Responding", "Assistant audio played.");
+    return true;
+  } catch {
+    setStatus("Ready", "Assistant audio is ready.");
+    return false;
+  }
+}
+
+/**
+ * @returns {Promise<void>}
+ */
+function waitForAssistantAudioEnd() {
+  return new Promise((resolve) => {
+    const done = () => {
+      els.assistantAudio.removeEventListener("ended", done);
+      els.assistantAudio.removeEventListener("error", done);
+      resolve();
+    };
+    els.assistantAudio.addEventListener("ended", done, { once: true });
+    els.assistantAudio.addEventListener("error", done, { once: true });
+  });
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is HttpApiEventRow}
+ */
+function isHttpApiEventRow(value) {
+  return isRecord(value)
+    && typeof value.eventId === "string"
+    && typeof value.kind === "string"
+    && "event" in value;
 }
 
 /**
