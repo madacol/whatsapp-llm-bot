@@ -17,7 +17,10 @@
   {
     "subdomain": "web-audio-client",
     "access": {
-      "mode": "tailnet"
+      "mode": [
+        "tailnet",
+        "token"
+      ]
     },
     "service": {
       "command": [
@@ -29,7 +32,10 @@
   {
     "subdomain": "web-audio-api",
     "access": {
-      "mode": "tailnet"
+      "mode": [
+        "tailnet",
+        "token"
+      ]
     },
     "proxy": {
       "target": "127.0.0.1:3200"
