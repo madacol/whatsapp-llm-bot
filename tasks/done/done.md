@@ -2,6 +2,7 @@
 
 Completed task details are archived here instead of deleted.
 
+- Selected Matt Pocock skills installed in user-level `.agents/skills`; broad repo-local install spillover cleaned up. [details](update-matt-pocock-skills.md)
 - PWA background wake detection research found locked-screen browser wake detection is not reliable; native Android foreground service is the practical path. [details](web-audio-pwa-background-wake-research.md)
 - Web audio client manual recording controls removed; wake listening remains the primary capture path. [details](web-audio-remove-manual-capture.md)
 - Web audio client POC deployed and verified with local openWakeWord browser wake detection and audio-turn playback. [details](web-audio-client.md)
