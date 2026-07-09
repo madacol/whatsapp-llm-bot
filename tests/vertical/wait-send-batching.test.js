@@ -156,7 +156,7 @@ describe("Wait/send batching vertical user case", () => {
 
     assert.equal(harnessState.turns.length, 0);
     assert.ok(
-      socket.getTextMessages().some((text) => text.includes("Batch started")),
+      socket.getTextMessages().some((text) => text.includes("Batch started. 0 messages queued. Send `/send` when ready.")),
       `Expected /wait acknowledgement, got ${JSON.stringify(socket.getTextMessages())}`,
     );
 
@@ -290,6 +290,53 @@ describe("Wait/send batching vertical user case", () => {
     );
   });
 
+  it("seeds a new batch from media captioned with /wait while preserving caption text", async () => {
+    const chatId = "wait-send-captioned-media-user@s.whatsapp.net";
+    const { handleMessage, socket, harnessState } = await createWaitSendVertical({
+      chatId,
+      harnessName: "wait-send-captioned-media-harness",
+    });
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({
+        chatId,
+        senderId: "wait-send-captioned-media-user",
+        image: { mimetype: "image/png", caption: "/wait screenshot caption" },
+      }),
+      mediaBytes: Buffer.from("fake captioned screenshot bytes"),
+    });
+
+    assert.equal(harnessState.turns.length, 0);
+    assert.ok(
+      socket.getTextMessages().some((text) => text.includes("Batch started. 1 message queued. Send `/send` when ready.")),
+      `Expected seeded /wait acknowledgement, got ${JSON.stringify(socket.getTextMessages())}`,
+    );
+
+    await sendWhatsAppMessage({
+      handleMessage,
+      socket,
+      message: createWAMessage({ chatId, senderId: "wait-send-captioned-media-user", text: "/send" }),
+    });
+
+    assert.equal(harnessState.turns.length, 1);
+    const turn = harnessState.turns[0];
+    assert.ok(turn?.input?.includes("screenshot caption"), turn?.input);
+    assert.equal(turn?.input?.includes("/wait"), false, turn?.input);
+    assert.equal(turn?.messages?.at(-1)?.role, "user");
+    const latestContent = turn?.messages?.at(-1)?.content ?? [];
+    assert.deepEqual(
+      latestContent.map((block) => block.type),
+      ["image", "text"],
+    );
+    assert.equal(
+      latestContent.filter((block) =>
+        block.type === "text" && block.text === "screenshot caption").length,
+      1,
+    );
+  });
+
   it("seeds a new batch from media quoted by /wait without including command text", async () => {
     const chatId = "wait-send-quoted-media-user@s.whatsapp.net";
     const { handleMessage, socket, harnessState } = await createWaitSendVertical({
@@ -312,7 +359,7 @@ describe("Wait/send batching vertical user case", () => {
 
     assert.equal(harnessState.turns.length, 0);
     assert.ok(
-      socket.getTextMessages().some((text) => text.includes("Batch started. 1 message queued.")),
+      socket.getTextMessages().some((text) => text.includes("Batch started. 1 message queued. Send `/send` when ready.")),
       `Expected seeded /wait acknowledgement, got ${JSON.stringify(socket.getTextMessages())}`,
     );
 

@@ -51,17 +51,45 @@ function isHttpApiClientChat(chatId) {
  * media, while stripping the command text itself from any eventual agent turn.
  * @param {IncomingContentBlock[]} content
  * @param {TextContentBlock} commandBlock
+ * @param {string} [replacementText]
  * @returns {IncomingContentBlock[]}
  */
-function getContentWithoutCommandBlock(content, commandBlock) {
+function getContentWithoutCommandBlock(content, commandBlock, replacementText = "") {
   let removed = false;
-  return content.filter((block) => {
+  /** @type {IncomingContentBlock[]} */
+  const blocks = [];
+  for (const block of content) {
     if (!removed && block === commandBlock) {
       removed = true;
-      return false;
+      if (replacementText) {
+        blocks.push({ ...commandBlock, text: replacementText });
+      }
+      continue;
     }
-    return true;
-  });
+    blocks.push(block);
+  }
+  return blocks;
+}
+
+/**
+ * @param {TextContentBlock} commandBlock
+ * @param {"wait" | "send" | "cancel"} command
+ * @returns {string}
+ */
+function getWaitSendCommandPayloadText(commandBlock, command) {
+  const match = commandBlock.text.match(new RegExp(`^/${command}(?:\\s+([\\s\\S]*))?$`, "i"));
+  return match?.[1]?.trim() ?? "";
+}
+
+/**
+ * @param {IncomingContentBlock[]} content
+ * @param {TextContentBlock} commandBlock
+ * @returns {boolean}
+ */
+function hasDirectMediaPayload(content, commandBlock) {
+  return content.some((block) =>
+    block !== commandBlock
+    && (block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file"));
 }
 
 /**
@@ -486,7 +514,10 @@ export function createConversationRunner({
 
     const waitSendCommand = firstBlock ? parseWaitSendBatchCommandText(firstBlock.text) : null;
     if (waitSendCommand?.command === "wait" && firstBlock) {
-      const seedContent = getContentWithoutCommandBlock(content, firstBlock);
+      const commandPayloadText = hasDirectMediaPayload(content, firstBlock)
+        ? getWaitSendCommandPayloadText(firstBlock, waitSendCommand.command)
+        : "";
+      const seedContent = getContentWithoutCommandBlock(content, firstBlock, commandPayloadText);
       const seedInputText = seedContent.length > 0
         ? await buildBatchInputText({
           chatId,
@@ -498,8 +529,8 @@ export function createConversationRunner({
       const batchState = waitSendBatches.startOrAppend(turn, seedContent, seedInputText);
       await appOutput.replyWithPlain(
         batchState.alreadyOpen
-          ? `Batch already open. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send /send when ready.`
-          : `Batch started. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send /send when ready.`,
+          ? `Batch already open. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send \`/send\` when ready.`
+          : `Batch started. ${batchState.messageCount} message${batchState.messageCount === 1 ? "" : "s"} queued. Send \`/send\` when ready.`,
       );
       return null;
     }
