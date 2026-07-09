@@ -3,7 +3,7 @@ import { createLogger } from "./logger.js";
 import { createHttpApiTurnFlow } from "./http-api-turn-flow.js";
 import { createHttpApiTurnIntake } from "./http-api-turn-intake.js";
 import { mediaPathToMimeType, readMediaBuffer, validateMediaPath, writeMedia } from "./media-store.js";
-import { synthesizeSpeechForHttpApi } from "./http-api-speech.js";
+import { stripMarkdownLinkTargetsForSpeech, synthesizeSpeechForHttpApi } from "./http-api-speech.js";
 
 const log = createLogger("http-api-transport");
 const DEFAULT_HOST = "127.0.0.1";
@@ -448,12 +448,16 @@ export async function createHttpApiTransport(options = {}) {
     if (!text) {
       return;
     }
+    const speechText = stripMarkdownLinkTargetsForSpeech(text).trim();
+    if (!speechText) {
+      return;
+    }
     const state = getTurnSpeechState(turnId);
     state.chain = state.chain.then(async () => {
       let speech;
       try {
         speech = await synthesizeSpeech({
-          text,
+          text: speechText,
           chatId: row.chatId,
           turnId,
         });

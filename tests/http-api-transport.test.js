@@ -361,6 +361,46 @@ describe("http-api transport", () => {
     assert.equal(/** @type {Array<{ type?: string }>} */ (eventsBody.events[3]?.event.content)[0]?.type, "audio");
   });
 
+  it("sends Markdown link labels to speech synthesis while preserving displayed assistant text", async () => {
+    const chatId = "api:tts-markdown-links";
+    const assistantText = "Read [the docs](https://example.com/docs?q=1) and keep https://example.com/raw.";
+    /** @type {string[]} */
+    const synthesizedTexts = [];
+    const transport = await createHttpApiTransport({
+      port: 0,
+      host: "127.0.0.1",
+      authToken: TOKEN,
+      synthesizeSpeech: async ({ text }) => {
+        synthesizedTexts.push(text);
+        return {
+          buffer: Buffer.from(`audio:${text}`),
+          mimeType: "audio/mpeg",
+        };
+      },
+    });
+    transports.push(transport);
+    await transport.start(async (turn) => {
+      await turn.io.reply({
+        kind: "assistant_output",
+        content: [{ type: "markdown", text: assistantText }],
+      });
+    });
+
+    const res = await postAudioTurn(transport, "tts-markdown-links-request", chatId);
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.text, assistantText);
+    assert.equal(body.audio.mimeType, "audio/mpeg");
+    assert.deepEqual(synthesizedTexts, [
+      "Read the docs and keep https://example.com/raw.",
+    ]);
+
+    const eventsBody = await listTransportEvents(transport, chatId);
+    assert.deepEqual(eventsBody.events[0]?.event.content, [{ type: "markdown", text: assistantText }]);
+    assert.equal(/** @type {Array<{ type?: string }>} */ (eventsBody.events[1]?.event.content)[0]?.type, "audio");
+  });
+
   it("accepts raw audio turns and returns synthesized assistant audio", async () => {
     const transport = await createHttpApiTransport({
       port: 0,

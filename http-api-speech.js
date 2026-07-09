@@ -48,6 +48,82 @@ function env(name, fallback) {
 }
 
 /**
+ * Convert inline Markdown links to their readable labels for speech synthesis.
+ * Bare URLs are intentionally preserved.
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripMarkdownLinkTargetsForSpeech(text) {
+  let output = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const linkStart = text[index] === "!" && text[index + 1] === "["
+      ? index + 1
+      : index;
+    if (text[linkStart] !== "[" || isEscapedMarkdownChar(text, linkStart)) {
+      output += text[index] ?? "";
+      continue;
+    }
+
+    const labelEnd = findMatchingMarkdownDelimiter(text, linkStart, "[", "]");
+    if (labelEnd === -1 || text[labelEnd + 1] !== "(") {
+      output += text[index] ?? "";
+      continue;
+    }
+
+    const targetEnd = findMatchingMarkdownDelimiter(text, labelEnd + 1, "(", ")");
+    if (targetEnd === -1) {
+      output += text[index] ?? "";
+      continue;
+    }
+
+    output += text.slice(linkStart + 1, labelEnd);
+    index = targetEnd;
+  }
+  return output;
+}
+
+/**
+ * @param {string} text
+ * @param {number} index
+ * @returns {boolean}
+ */
+function isEscapedMarkdownChar(text, index) {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
+}
+
+/**
+ * @param {string} text
+ * @param {number} start
+ * @param {string} open
+ * @param {string} close
+ * @returns {number}
+ */
+function findMatchingMarkdownDelimiter(text, start, open, close) {
+  let depth = 0;
+  for (let index = start; index < text.length; index += 1) {
+    if (isEscapedMarkdownChar(text, index)) {
+      continue;
+    }
+    const char = text[index];
+    if (char === open) {
+      depth += 1;
+      continue;
+    }
+    if (char === close) {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
  * @param {string} provider
  * @returns {string}
  */
@@ -361,7 +437,7 @@ function synthesizeViaFfmpegFlite(text, options) {
  * @returns {Promise<SpeechSynthesisResult>}
  */
 export async function synthesizeSpeechForHttpApi(input) {
-  const text = input.text.trim();
+  const text = stripMarkdownLinkTargetsForSpeech(input.text).trim();
   if (!text) {
     throw new Error("text is empty");
   }
