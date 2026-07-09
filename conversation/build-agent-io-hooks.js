@@ -146,7 +146,7 @@ export function buildAgentIoHooks(
     cwd,
     getVisibility: getOutputVisibility,
   });
-  /** @type {{ id: string, visibility: import("../chat-output-visibility.js").OutputVisibility, resultEmitted: boolean }[]} */
+  /** @type {{ id: string, visibility: import("../chat-output-visibility.js").OutputVisibility }[]} */
   const activeToolItems = [];
   /** @type {{ toolCall: LlmChatResponse["toolCalls"][0], visibility: import("../chat-output-visibility.js").OutputVisibility }[]} */
   const pendingRuntimeToolCalls = [];
@@ -317,13 +317,13 @@ export function buildAgentIoHooks(
    */
   function rememberActiveToolItem(id, visibility) {
     if (!activeToolItems.some((item) => item.id === id)) {
-      activeToolItems.push({ id, visibility, resultEmitted: false });
+      activeToolItems.push({ id, visibility });
     }
   }
 
   /**
    * @param {string} id
-   * @returns {{ id: string, visibility: import("../chat-output-visibility.js").OutputVisibility, resultEmitted: boolean } | undefined}
+   * @returns {{ id: string, visibility: import("../chat-output-visibility.js").OutputVisibility } | undefined}
    */
   function forgetActiveToolItem(id) {
     const index = activeToolItems.findIndex((item) => item.id === id);
@@ -337,11 +337,10 @@ export function buildAgentIoHooks(
    * @returns {Promise<import("../chat-output-visibility.js").OutputVisibility>}
    */
   async function resolveToolResultVisibility() {
-    const activeItem = activeToolItems.find((item) => !item.resultEmitted);
+    const activeItem = activeToolItems.shift();
     if (!activeItem) {
       return getOutputVisibility();
     }
-    activeItem.resultEmitted = true;
     return activeItem.visibility;
   }
 

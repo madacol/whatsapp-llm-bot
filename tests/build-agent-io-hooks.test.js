@@ -903,6 +903,27 @@ describe("buildAgentIoHooks", () => {
     ]);
   });
 
+  it("does not reuse emitted tool result visibility for later tool errors", async () => {
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    let visibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" };
+    const { hooks, sent } = createSubjectWithVisibilityProvider(() => visibility);
+    const toolCall = {
+      id: "live-tool-result-error-1",
+      name: "Read",
+      arguments: JSON.stringify({ file_path: "/repo/a.js" }),
+    };
+
+    await hooks.onToolCall?.(toolCall);
+    await hooks.onToolResult?.([{ type: "text", text: "visible result" }], "Read", {});
+    visibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "hidden" };
+    await hooks.onToolError?.("later unrelated error");
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "tool_call",
+      "agent_tool_result",
+    ]);
+  });
+
   it("passes unrecognized tool actions through runtime output events", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
     const toolCall = {

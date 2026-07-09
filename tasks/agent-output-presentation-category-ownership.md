@@ -78,6 +78,7 @@ Implication for this repo: side-channel visibility should not be captured once a
 
 - Agent-run output hooks now accept a visibility provider and production resolves `output_visibility` from the latest chat config before side-channel presentation decisions.
 - Reasoning and tool items keep the visibility sampled at item start through completion/result output.
+- Tool result visibility snapshots are consumed when a result is emitted, so later unrelated tool errors fall back to current visibility instead of stale item state.
 - File changes, subagent messages, middle assistant messages, plans, usage, and generic runtime file-change filtering sample current visibility at their emission boundary.
 - WhatsApp runtime rendering preserves already-started standalone tool/command messages if the chat switches to pinned tool status before completion.
 - This does not complete the broader presentation-intent classifier refactor; category decisions are still spread across the existing hook and renderer files.
