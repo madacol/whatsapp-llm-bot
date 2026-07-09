@@ -23,3 +23,19 @@ Move the default chat enabled/disabled policy out of generic conversation routin
 - Existing WhatsApp enable/disable behavior remains unchanged.
 - HTTP API client chats can invoke the configured agent without manual `!s enabled on`.
 - Regression tests cover both WhatsApp/default-disabled behavior and HTTP API/default-enabled behavior.
+
+## Completion Notes
+
+- Added `ChannelInput.chatCreationDefaults` as explicit transport metadata for creation-time chat defaults.
+- HTTP API turn intake now marks new HTTP API chats with `{ isEnabled: true }`; WhatsApp inputs do not supply creation defaults and keep the disabled store default.
+- Store `createChat` now accepts creation defaults and maps semantic `isEnabled` to persisted `is_enabled` only when a chat config is first created.
+- Removed the generic conversation runner's `api:` chat ID prefix check and forced `setChatEnabled` workaround.
+- Added regressions for HTTP API default-enabled metadata, no-default/WhatsApp-style default disabled routing, and preserving existing user/admin overrides.
+
+## Verification
+
+- `pnpm test tests/store.test.js tests/http-api-turn-intake.test.js`
+- `pnpm test tests/integration.test.js` (rerun with sandbox escalation because the test binds a local mock HTTP server)
+- `pnpm test tests/http-api-transport.test.js` (rerun with sandbox escalation because the test binds a local HTTP server)
+- `pnpm type-check`
+- `pnpm type-check:tests`

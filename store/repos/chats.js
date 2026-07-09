@@ -15,7 +15,7 @@ import {
 
 /**
  * @typedef {{
- *   ensureChatExists: (chatId: string) => Promise<void>;
+ *   ensureChatExists: (chatId: string, options?: ChatCreationOptions) => Promise<void>;
  * }} ChatStoreDeps
  */
 
@@ -54,10 +54,11 @@ export function createChatStore({ ensureChatExists }) {
 
     /**
      * @param {ChatRow["chat_id"]} chatId
+     * @param {ChatCreationOptions} [options]
      * @returns {Promise<void>}
      */
-    async createChat(chatId) {
-      await ensureChatExists(chatId);
+    async createChat(chatId, options) {
+      await ensureChatExists(chatId, options);
     },
 
     /**

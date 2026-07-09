@@ -653,6 +653,14 @@ type ChannelInputFacts = {
 /** @deprecated Use ChannelInputFacts for new app-owned input seams. */
 type TurnFacts = ChannelInputFacts;
 
+type ChatCreationDefaults = {
+  isEnabled?: boolean;
+};
+
+type ChatCreationOptions = {
+  defaults?: ChatCreationDefaults;
+};
+
 type ChatTransport = {
   start: (onInput: (input: ChannelInput) => Promise<void>) => Promise<void>;
   stop: () => Promise<void>;
@@ -707,6 +715,7 @@ type WorkspacePresentationPort = {
 type ChannelInput = {
   channelId?: string;
   chatId: string;
+  chatCreationDefaults?: ChatCreationDefaults;
   senderIds: string[];
   senderJids?: string[];
   senderName: string;

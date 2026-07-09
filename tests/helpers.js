@@ -232,6 +232,7 @@ export function createChannelInput(overrides = {}) {
   const context = {
     channelId: overrides.channelId ?? overrides.chatId ?? "test-chat",
     chatId: overrides.chatId ?? "test-chat",
+    ...(overrides.chatCreationDefaults ? { chatCreationDefaults: overrides.chatCreationDefaults } : {}),
     senderIds: overrides.senderIds ?? ["master-user"],
     senderJids: overrides.senderJids ?? ["master-user@s.whatsapp.net"],
     senderName: overrides.senderName ?? "Test User",

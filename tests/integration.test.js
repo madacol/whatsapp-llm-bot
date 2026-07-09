@@ -176,20 +176,44 @@ describe("ACP conversation routing", () => {
     assert.ok(responses.some((response) => response.text.includes("ACP integration response: hello ACP")));
   });
 
-  it("auto-enables authenticated HTTP API client chats before ACP routing", async () => {
-    const chatId = "api:auto-enable-client";
-    await seedAcpChat(chatId, { enabled: false });
+  it("keeps new chats disabled when transport creation defaults are absent", async () => {
+    const chatId = `whatsapp-default-disabled-${Date.now()}@s.whatsapp.net`;
 
     const { context, responses } = createChannelInput({
       chatId,
-      content: [{ type: "text", text: "hello from web" }],
+      content: [{ type: "text", text: "hello before setup" }],
     });
     await handleMessage(context);
 
     const chat = await readChatConfig(chatId);
-    assert.equal(chat?.is_enabled, true);
-    assert.equal(capturedTurns[0].input, "hello from web");
-    assert.ok(responses.some((response) => response.text.includes("ACP integration response: hello from web")));
+    assert.equal(chat?.is_enabled, false);
+    assert.equal(capturedTurns.length, 0);
+    assert.equal(responses.length, 0);
+  });
+
+  it("honors transport-owned chat creation defaults before ACP routing", async () => {
+    const chatId = `http-client-default-enabled-${Date.now()}`;
+    const previousDefaultHarness = process.env.DEFAULT_HARNESS;
+    process.env.DEFAULT_HARNESS = HARNESS_NAME;
+    try {
+      const { context, responses } = createChannelInput({
+        chatId,
+        chatCreationDefaults: { isEnabled: true },
+        content: [{ type: "text", text: "hello from web" }],
+      });
+      await handleMessage(context);
+
+      const chat = await readChatConfig(chatId);
+      assert.equal(chat?.is_enabled, true);
+      assert.equal(capturedTurns[0].input, "hello from web");
+      assert.ok(responses.some((response) => response.text.includes("ACP integration response: hello from web")));
+    } finally {
+      if (previousDefaultHarness === undefined) {
+        delete process.env.DEFAULT_HARNESS;
+      } else {
+        process.env.DEFAULT_HARNESS = previousDefaultHarness;
+      }
+    }
   });
 
   it("does not respond in group when not mentioned", async () => {

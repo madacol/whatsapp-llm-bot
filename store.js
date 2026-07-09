@@ -124,7 +124,7 @@ export async function getChatOrThrow(_db, chatId) {
  *   listChatIds: () => Promise<string[]>;
  *   closeDb: () => Promise<void>;
  *   getMessages: (chatId: MessageRow["chat_id"], since?: Date, limit?: number) => Promise<MessageRow[]>;
- *   createChat: (chatId: ChatRow["chat_id"]) => Promise<void>;
+ *   createChat: (chatId: ChatRow["chat_id"], options?: ChatCreationOptions) => Promise<void>;
  *   setChatEnabled: (chatId: string, enabled: boolean) => Promise<void>;
  *   copyChatCustomizations: (sourceChatId: string, targetChatId: string) => Promise<void>;
  *   createProject: (input: {
@@ -237,6 +237,21 @@ export async function initStore(injectedDb, options = {}) {
   /** @type {WeakSet<import("./sqlite-db.js").SqliteDb>} */
   const initializedChatDbs = new WeakSet();
 
+  /**
+   * @param {string} chatId
+   * @param {ChatCreationDefaults | undefined} defaults
+   * @returns {Record<string, unknown> | undefined}
+   */
+  function buildChatConfigSeed(chatId, defaults) {
+    if (defaults?.isEnabled === undefined) {
+      return undefined;
+    }
+    return {
+      chat_id: chatId,
+      is_enabled: defaults.isEnabled,
+    };
+  }
+
   await bootstrapStoreSchema(db);
   await runStoreMigrations(db);
 
@@ -255,13 +270,14 @@ export async function initStore(injectedDb, options = {}) {
 
   /**
    * @param {string} chatId
+   * @param {ChatCreationOptions} [options]
    * @returns {Promise<void>}
    */
-  async function ensureChatExists(chatId) {
+  async function ensureChatExists(chatId, options) {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
     const chatDb = await getInitializedChatDb(chatId);
     await chatDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
-    await ensureChatConfig(chatId);
+    await ensureChatConfig(chatId, buildChatConfigSeed(chatId, options?.defaults));
   }
 
   /**

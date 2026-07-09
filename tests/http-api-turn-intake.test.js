@@ -67,6 +67,7 @@ describe("HTTP API turn intake", () => {
     const receivedTurn = received.turn;
     assert.ok(receivedTurn);
     assert.equal(receivedTurn?.channelId, "api:client-1");
+    assert.deepEqual(receivedTurn?.chatCreationDefaults, { isEnabled: true });
     assert.equal(flow.getActiveTurnId("api:client-1"), null);
   });
 

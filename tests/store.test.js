@@ -69,6 +69,18 @@ describe("store with injected DB", () => {
       assert.deepEqual(chat.model_roles, {});
     });
 
+    it("applies chat creation defaults only when creating a new chat config", async () => {
+      const chatId = `store-creation-defaults-${Date.now()}`;
+      await store.createChat(chatId, { defaults: { isEnabled: true } });
+
+      assert.equal((await store.getChat(chatId))?.is_enabled, true);
+
+      await store.setChatEnabled(chatId, false);
+      await store.createChat(chatId, { defaults: { isEnabled: true } });
+
+      assert.equal((await store.getChat(chatId))?.is_enabled, false);
+    });
+
     it("stores chat settings and messages in the per-chat DB, not root", async () => {
       const rootDb = new SqliteDb(":memory:");
       const chatDbs = new Map();

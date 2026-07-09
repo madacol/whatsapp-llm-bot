@@ -1,5 +1,10 @@
 import { withChannelIdentity } from "./conversation/channel-identity.js";
 
+/** @type {Readonly<ChatCreationDefaults>} */
+const HTTP_API_CHAT_CREATION_DEFAULTS = Object.freeze({
+  isEnabled: true,
+});
+
 /**
  * @typedef {import("./http-api-transport-ledger.js").HttpApiTurnRecord} HttpApiTurnRecord
  * @typedef {import("./http-api-transport-ledger.js").HttpApiOutboundEvent} HttpApiOutboundEvent
@@ -58,6 +63,7 @@ function acceptedBody(record) {
 function buildChannelInput({ payload, record, turnFlow }) {
   return withChannelIdentity({
     chatId: payload.chatId,
+    chatCreationDefaults: HTTP_API_CHAT_CREATION_DEFAULTS,
     senderIds: payload.senderIds,
     senderName: payload.senderName,
     chatName: payload.chatId,
