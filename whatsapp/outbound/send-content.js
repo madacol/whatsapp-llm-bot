@@ -2149,6 +2149,27 @@ function shouldSuppressStandaloneOutboundEvent(event, outputVisibility) {
 }
 
 /**
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @returns {event is Extract<RuntimeEventOutboundEvent["event"], { type: "tool.started" | "tool.updated" | "tool.completed" | "tool.failed" }>}
+ */
+function isRuntimeToolLifecycleEvent(event) {
+  return event.type === "tool.started"
+    || event.type === "tool.updated"
+    || event.type === "tool.completed"
+    || event.type === "tool.failed";
+}
+
+/**
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @returns {event is Extract<RuntimeEventOutboundEvent["event"], { type: "command.started" | "command.completed" | "command.failed" }>}
+ */
+function isRuntimeCommandLifecycleEvent(event) {
+  return event.type === "command.started"
+    || event.type === "command.completed"
+    || event.type === "command.failed";
+}
+
+/**
  * @param {WhatsAppOutboundSocketPort} sock
  * @param {string} chatId
  * @param {RuntimeEventOutboundEvent} event
@@ -2158,13 +2179,20 @@ function shouldSuppressStandaloneOutboundEvent(event, outputVisibility) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  const runtimeEvent = event.event;
+  const isRuntimeToolEvent = isRuntimeToolLifecycleEvent(runtimeEvent);
+  const isRuntimeCommandEvent = isRuntimeCommandLifecycleEvent(runtimeEvent);
   const hasStandaloneRuntimeActionState =
-    (event.event.type === "tool.started" || event.event.type === "tool.updated" || event.event.type === "tool.completed" || event.event.type === "tool.failed")
-      ? hasStandaloneRuntimeToolState(chatId, event.event)
-      : (event.event.type === "command.started" || event.event.type === "command.completed" || event.event.type === "command.failed")
-        ? hasStandaloneRuntimeCommandState(chatId, event.event)
+    isRuntimeToolEvent
+      ? hasStandaloneRuntimeToolState(chatId, runtimeEvent)
+      : isRuntimeCommandEvent
+        ? hasStandaloneRuntimeCommandState(chatId, runtimeEvent)
         : false;
-  const turnStatusHandle = hasStandaloneRuntimeActionState
+  const shouldSuppressNewRuntimeAction =
+    !hasStandaloneRuntimeActionState
+    && (isRuntimeToolEvent || isRuntimeCommandEvent)
+    && sendOptions.outputVisibility?.tools === "hidden";
+  const turnStatusHandle = hasStandaloneRuntimeActionState || shouldSuppressNewRuntimeAction
     ? undefined
     : await updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions);
   if (event.event.type === "turn.started" || event.event.type === "turn.completed") {
@@ -2178,14 +2206,20 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
     return turnStatusHandle;
   }
 
-  if (event.event.type === "tool.started" || event.event.type === "tool.updated" || event.event.type === "tool.completed" || event.event.type === "tool.failed") {
+  if (isRuntimeToolEvent) {
+    if (shouldSuppressNewRuntimeAction) {
+      return turnStatusHandle;
+    }
     if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility) && !hasStandaloneRuntimeActionState) {
       return turnStatusHandle;
     }
     return sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
 
-  if (event.event.type === "command.started" || event.event.type === "command.completed" || event.event.type === "command.failed") {
+  if (isRuntimeCommandEvent) {
+    if (shouldSuppressNewRuntimeAction) {
+      return turnStatusHandle;
+    }
     if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility) && !hasStandaloneRuntimeActionState) {
       return turnStatusHandle;
     }

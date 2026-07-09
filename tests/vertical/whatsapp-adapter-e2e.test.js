@@ -382,9 +382,10 @@ describe("ACP file changes through WhatsApp transport", () => {
   /**
    * @param {string} prompt
    * @param {(workdir: string) => Promise<void>} [setup]
+   * @param {{ outputVisibility?: import("../../chat-output-visibility.js").OutputVisibilityOverrides }} [options]
    * @returns {Promise<{ rendered: string[], sentMessages: MockSentMessages }>}
    */
-  async function runAcpPrompt(prompt, setup) {
+  async function runAcpPrompt(prompt, setup, options = {}) {
     const senderId = `e2e-acp-files-${nextSender++}`;
     const chatId = `${senderId}@s.whatsapp.net`;
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-acp-files-"));
@@ -394,7 +395,11 @@ describe("ACP file changes through WhatsApp transport", () => {
       ...current,
       harness: harnessName,
       harness_cwd: workdir,
-      output_visibility: { fileChanges: "shown", tools: "indicatorInspectable" },
+      output_visibility: {
+        fileChanges: "shown",
+        tools: "indicatorInspectable",
+        ...(options.outputVisibility ?? {}),
+      },
     }));
 
     const captures = createMockBaileysSocket();
@@ -463,6 +468,36 @@ describe("ACP file changes through WhatsApp transport", () => {
       ...diffDelete.sentMessages,
     ].filter((entry) => Buffer.isBuffer(entry.msg.image) && typeof entry.msg.caption === "string");
     assert.ok(fileChangeImages.length >= 7, `Expected file changes to render as sendable image content, got ${JSON.stringify(fileChangeImages)}`);
+  });
+
+  it("suppresses explicit ACP file changes when file-change visibility is hidden", async () => {
+    const { rendered } = await runAcpPrompt("diff only add", undefined, {
+      outputVisibility: {
+        fileChanges: "hidden",
+        tools: "hidden",
+      },
+    });
+    const timeline = rendered.join("\n---\n");
+
+    assert.ok(timeline.includes("diff only add done"), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
+    assert.ok(!timeline.includes("diff-only-add.js"), `Expected hidden file change path to be absent, got ${JSON.stringify(rendered)}`);
+    assert.ok(!timeline.includes("*Add*"), `Expected hidden file change label to be absent, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("suppresses snapshot file changes when snapshot visibility is off", async () => {
+    const { rendered } = await runAcpPrompt("direct delete", async (workdir) => {
+      await fs.writeFile(path.join(workdir, "direct-delete.txt"), "delete me\n", "utf8");
+    }, {
+      outputVisibility: {
+        snapshots: "off",
+        tools: "hidden",
+      },
+    });
+    const timeline = rendered.join("\n---\n");
+
+    assert.ok(timeline.includes("direct delete done"), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
+    assert.ok(!timeline.includes("direct-delete.txt"), `Expected snapshot path to be absent, got ${JSON.stringify(rendered)}`);
+    assert.ok(!timeline.includes("*Snapshot*"), `Expected snapshot label to be absent, got ${JSON.stringify(rendered)}`);
   });
 });
 
@@ -599,7 +634,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
 
   /**
    * @param {string} prompt
-   * @param {{ pollChoice?: string, pollChoices?: string[] }} [options]
+   * @param {{ pollChoice?: string, pollChoices?: string[], outputVisibility?: import("../../chat-output-visibility.js").OutputVisibilityOverrides }} [options]
    * @returns {Promise<{ rendered: string[], sentMessages: MockSentMessages }>}
    */
   async function runAcpPrompt(prompt, options = {}) {
@@ -618,6 +653,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
         tools: "fullDetails",
         usage: "shown",
         subagents: "shown",
+        ...(options.outputVisibility ?? {}),
       },
     }));
 
@@ -717,6 +753,66 @@ describe("ACP runtime events through WhatsApp transport", () => {
     );
   }
 
+  /**
+   * @param {string[]} rendered
+   * @returns {string}
+   */
+  function renderTimeline(rendered) {
+    return rendered.join("\n---\n");
+  }
+
+  /**
+   * @param {string} timeline
+   * @param {string[]} snippets
+   */
+  function assertTimelineExcludes(timeline, snippets) {
+    for (const snippet of snippets) {
+      assert.ok(!timeline.includes(snippet), `Expected rendered output to exclude ${JSON.stringify(snippet)}, got ${JSON.stringify(timeline)}`);
+    }
+  }
+
+  it("renders each agent-run output visibility category when enabled", async () => {
+    const { rendered } = await runAcpPrompt("visibility probe");
+    const timeline = renderTimeline(rendered);
+
+    assert.ok(timeline.includes("Thinking...") || timeline.includes("Thought"), `Expected reasoning indicator output, got ${JSON.stringify(rendered)}`);
+    assert.ok(timeline.includes("Visibility plan step"), `Expected plan output, got ${JSON.stringify(rendered)}`);
+    assert.ok(timeline.includes("*Shell*") && timeline.includes("pnpm visibility-probe"), `Expected tool output, got ${JSON.stringify(rendered)}`);
+    assert.ok(timeline.includes("Visibility subagent result."), `Expected subagent output, got ${JSON.stringify(rendered)}`);
+    assert.ok(timeline.includes("visibility-edit.txt"), `Expected file-change output, got ${JSON.stringify(rendered)}`);
+    assert.ok(timeline.includes("Visibility final answer."), `Expected assistant output, got ${JSON.stringify(rendered)}`);
+    assert.ok(timeline.includes("Cost:"), `Expected usage output, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("suppresses hidden and off agent-run visibility categories without dropping the final answer", async () => {
+    const { rendered } = await runAcpPrompt("visibility probe", {
+      outputVisibility: {
+        reasoning: "hidden",
+        tools: "hidden",
+        plans: "hidden",
+        fileChanges: "hidden",
+        snapshots: "off",
+        subagents: "hidden",
+        usage: "hidden",
+        middleAssistantMessages: "off",
+      },
+    });
+    const timeline = renderTimeline(rendered);
+
+    assert.ok(timeline.includes("Visibility final answer."), `Expected final assistant answer, got ${JSON.stringify(rendered)}`);
+    assertTimelineExcludes(timeline, [
+      "Thinking...",
+      "Thought",
+      "Visibility reasoning detail.",
+      "Visibility plan step",
+      "*Shell*",
+      "pnpm visibility-probe",
+      "Visibility subagent result.",
+      "visibility-edit.txt",
+      "Cost:",
+    ]);
+  });
+
   it("renders assistant, subagent, plan, tool, file-change, usage, and pinned turn status events distinctly", async () => {
     const { rendered, sentMessages } = await runAcpPrompt("Run the mock");
 
@@ -731,7 +827,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
     assert.notEqual(statusIndex, -1, `Expected turn status message, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`);
     const pinnedStatus = sentMessages.find((entry) => entry.msg.pin);
     assert.deepEqual(pinnedStatus?.msg, {
-      pin: { id: `sent-msg-${statusIndex}`, remoteJid: "e2e-acp-runtime-0@s.whatsapp.net", fromMe: true },
+      pin: { id: `sent-msg-${statusIndex}`, remoteJid: sentMessages[statusIndex]?.chatId, fromMe: true },
       type: 1,
       time: 3600,
     });
@@ -754,8 +850,6 @@ describe("ACP runtime events through WhatsApp transport", () => {
     assert.ok(rendered.some((text) => text.includes("All statuses done.")), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
     assertPinnedTimelineIncludes(statusTexts, [
       "🔄 *E2E-ACP-RUNTIME*  turn started",
-      "💭 *LLM*  thinking",
-      "📋 *PLAN*  *Plan*",
       "🔀 *ACP*  model model-a -> model-b",
       "⚠️ *ACP*  Config fallback active",
       "⚠️ *ACP*  Runtime warning sample",
@@ -765,9 +859,11 @@ describe("ACP runtime events through WhatsApp transport", () => {
       "✅ *ACP*  input resolved",
       "🧵 *SUBAGENT*  Reviewer replied",
       "📝 *File*  `status.txt`",
-      "📊 *USAGE*  cost",
       "✅ *E2E-ACP-RUNTIME*  turn completed",
     ]);
+    assert.ok(rendered.some((text) => text.includes("Thinking...") || text.includes("Thought")), `Expected standalone reasoning output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Wire pinned status categories")), `Expected standalone plan output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Cost:")), `Expected standalone usage output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("*Shell*")), `Expected Shell row in normal WhatsApp output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("*Task*")), `Expected Task row in normal WhatsApp output, got ${JSON.stringify(rendered)}`);
     assert.ok(!timeline.includes("*Shell*"), `Expected Shell rows to stay out of pinned status, got ${JSON.stringify(statusTexts)}`);
@@ -788,9 +884,9 @@ describe("ACP runtime events through WhatsApp transport", () => {
     assert.ok(rendered.some((text) => text.includes("✅ *Search*")), `Expected visible Search row, got ${JSON.stringify(rendered)}`);
     assertPinnedTimelineIncludes(statusTexts, [
       "🔄 *E2E-ACP-RUNTIME*  turn started",
-      "📊 *USAGE*  cost",
       "✅ *E2E-ACP-RUNTIME*  turn completed",
     ]);
+    assert.ok(rendered.some((text) => text.includes("Cost:")), `Expected standalone usage output, got ${JSON.stringify(rendered)}`);
     assert.ok(!timeline.includes("*Shell*"), `Pinned status should not include Shell rows, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("*Search*"), `Pinned status should not include Search rows, got ${JSON.stringify(statusTexts)}`);
     assertPinnedStatusUnpinned(sentMessages);
@@ -888,6 +984,34 @@ describe("audio media-to-text provider input", () => {
     assert.ok(capturedInputs[0]?.includes("Media file available in this request:"), capturedInputs[0]);
     const transcriptionStatus = getSentMessages().find((entry) => entry.msg.text === "Transcribing audio...");
     assert.equal(transcriptionStatus?.options?.quoted, audioMessage);
+  });
+
+  it("hides audio transcription status when transcription visibility is hidden", async () => {
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      output_visibility: { transcription: "hidden" },
+    }));
+    capturedInputs.length = 0;
+    mockServer.addResponses("Hidden audio transcript.");
+
+    const captures = createMockBaileysSocket();
+    await adaptIncomingMessage(
+      createWAMessage({ audio: { mimetype: "audio/mp3" }, senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+      undefined,
+      async () => Buffer.from("hidden e2e audio bytes"),
+      { outboundStore: testStore },
+    );
+
+    const rendered = captures.getRenderedMessages();
+    assert.equal(capturedInputs.length, 1);
+    assert.ok(capturedInputs[0]?.includes("Hidden audio transcript."), capturedInputs[0]);
+    assert.ok(rendered.some((text) => text.includes("Audio provider response.")), `Expected provider response, got ${JSON.stringify(rendered)}`);
+    assert.ok(!rendered.some((text) => text.includes("Transcribing audio")), `Expected no transcription status, got ${JSON.stringify(rendered)}`);
+    assert.ok(!rendered.some((text) => text.includes("Transcribed")), `Expected no transcription completion, got ${JSON.stringify(rendered)}`);
   });
 });
 

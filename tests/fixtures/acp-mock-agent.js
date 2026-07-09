@@ -299,6 +299,7 @@ async function handleMessage(message) {
 }
 
 const promptScenarios = [
+  { match: "visibility probe", handle: handleVisibilityProbePrompt },
   { match: "all statuses", handle: handleAllStatusesPrompt },
   { match: "action focused pinned status", handle: handleActionFocusedPinnedStatusPrompt },
   { match: "runtime error status", handle: handleRuntimeErrorStatusPrompt },
@@ -325,6 +326,101 @@ const promptScenarios = [
   { match: "config", handle: handleConfigPrompt },
   { match: "session method", handle: handleSessionMethodPrompt },
 ];
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleVisibilityProbePrompt(message) {
+  const sid = sessionId ?? "mock-session-1";
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "Visibility reasoning detail." },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "plan",
+      entries: [{ content: "Visibility plan step", status: "in_progress" }],
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "visibility-shell-1",
+      title: "Shell",
+      rawInput: { command: "pnpm visibility-probe" },
+      status: "in_progress",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "visibility-shell-1",
+      status: "completed",
+      rawOutput: { exit_code: 0, formatted_output: "visibility command ok" },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Visibility subagent result." },
+      _meta: {
+        madabot: {
+          subagent: {
+            threadId: "visibility-subagent-1",
+            agentNickname: "Visibility Reviewer",
+          },
+        },
+      },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "visibility-edit-1",
+      title: "Edited visibility-edit.txt",
+      status: "completed",
+      content: [{ type: "diff", path: "visibility-edit.txt", oldText: "old", newText: "new" }],
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Visibility final answer." },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "usage_update",
+      used: 17,
+      size: 2048,
+      cost: { amount: 0.0017, currency: "USD" },
+    },
+  });
+  send({
+    id: message.id,
+    result: {
+      sessionId: sid,
+      stopReason: "end_turn",
+      usage: {
+        total_tokens: 17,
+        input_tokens: 10,
+        output_tokens: 5,
+        thought_tokens: 2,
+      },
+    },
+  });
+}
 
 /**
  * @param {Record<string, unknown>} message

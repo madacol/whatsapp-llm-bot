@@ -4,7 +4,7 @@ import { createAcpRuntimeModel } from "../harnesses/acp-events.js";
 import { createHarnessRuntimeEventDispatcher } from "../harnesses/harness-runtime-event-dispatcher.js";
 import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { sendEvent } from "../whatsapp/outbound/send-content.js";
-import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+import { DEFAULT_OUTPUT_VISIBILITY, resolveOutputVisibility } from "../chat-output-visibility.js";
 
 process.env.TESTING = "1";
 
@@ -94,7 +94,52 @@ async function observeAcpReadPayloadsThroughBaileys(payloads, sendOptions = {}) 
   return { sent, runtimeEvents };
 }
 
+/**
+ * @param {import("../chat-output-visibility.js").OutputVisibilityOverrides} visibility
+ * @param {(hooks: AgentIOHooks) => Promise<void>} act
+ * @returns {Promise<Array<{ chatId: string, msg: Record<string, unknown> }>>}
+ */
+async function observeAgentHooksThroughBaileys(visibility, act) {
+  const chatId = "agent-output-presentation@s.whatsapp.net";
+  const cwd = "/home/mada/whatsapp-llm-bot";
+  const outputVisibility = resolveOutputVisibility(visibility);
+  const { sock, sent } = createMockSock();
+  const hooks = buildAgentIoHooks(
+    {
+      send: async (event) => sendEvent(sock, chatId, event, undefined, undefined, { outputVisibility }),
+      reply: async (event) => sendEvent(sock, chatId, event, undefined, undefined, { outputVisibility }),
+      select: async () => "",
+      confirm: async () => true,
+    },
+    cwd,
+    outputVisibility,
+  );
+
+  await act(hooks);
+  return sent;
+}
+
 describe("ACP read presentation vertical slice", () => {
+  it("suppresses middle assistant messages at the WhatsApp boundary when disabled", async () => {
+    const visible = await observeAgentHooksThroughBaileys({}, async (hooks) => {
+      await hooks.onLlmResponse?.("Middle assistant marker.", {
+        source: "llm",
+        streamId: "middle-assistant-stream-1",
+        streamStatus: "final",
+      });
+    });
+    const hidden = await observeAgentHooksThroughBaileys({ middleAssistantMessages: "off" }, async (hooks) => {
+      await hooks.onLlmResponse?.("Middle assistant marker.", {
+        source: "llm",
+        streamId: "middle-assistant-stream-1",
+        streamStatus: "final",
+      });
+    });
+
+    assert.ok(visible.some((entry) => String(entry.msg.text).includes("Middle assistant marker.")), `Expected visible middle assistant output, got ${JSON.stringify(visible)}`);
+    assert.deepEqual(hidden, []);
+  });
+
   it("edits a live-shaped ACP read payload to completed Read text through Baileys", async () => {
     const chatId = "acp-read-presentation@s.whatsapp.net";
     const toolCallId = "call_live_read_shape";
