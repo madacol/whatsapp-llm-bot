@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation complete in the working tree; live/deploy verification pending. The remaining task is verification, not another code fix.
+Done.
 
 ## Subject
 
@@ -91,9 +91,13 @@ Relevant lines at research time:
   - decrypted private/LID `messages.update.pollUpdates` votes.
 - Both regressions use a mapper shaped like Baileys' `getPNForLID` method, where the method depends on `this.getPNsForLIDs`, and force that mapper to throw so poll settlement must not depend on chat-id normalization.
 
-## Next Action
+## Completion Verification
 
-Deploy the code containing `68bd5ea` or replay the affected ingress row, then confirm the row no longer retries with `getPNsForLIDs`. If a different live failure appears, record that as a new concrete task.
+- Live journal check on 2026-07-09 showed the original stuck ingress row `58912` is now `done` with `last_error = null` after retrying through the deployed fix.
+- Recent private/LID-addressed ingress rows are `done` with no current `last_error`.
+- Recent poll update rows, including the original private/LID row and later group poll rows, are `done`.
+- A current unrelated `routing` row was a group message upsert with no poll update payload and no private/LID chat id.
+- No remaining journal error matched `getPNsForLIDs`, `normalizePollChatId`, or poll settlement.
 
 ## Acceptance Criteria
 

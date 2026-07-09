@@ -2,6 +2,7 @@
 
 Completed task details are archived here instead of deleted.
 
+- Private/LID visibility settings poll settlement verified in the live ingress journal after the fix. [details](private-chat-visibility-settings-command.md)
 - HTTP API TTS now speaks Markdown links as readable labels while preserving displayed assistant Markdown. [details](http-api-tts-markdown-link-labels.md)
 - Guardian approval-review warnings no longer emit as assistant messages, and the web audio client now has Cancel Turn and Clear History controls backed by `!c` and `/clear`. [details](web-cancel-and-guardian-warning-suppression.md)
 - Web audio client now has vertical-style regression coverage proving streamed intermediate assistant messages render and their audio blocks play before the audio-turn POST completes. [details](web-assistant-progress-vertical-test.md)
