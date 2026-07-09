@@ -1,6 +1,6 @@
 import {
+  agentErrorEvent,
   agentToolResultEvent,
-  appMessageEvent,
   assistantOutputEvent,
   planEvent,
   runtimeEvent,
@@ -42,8 +42,8 @@ export function createAgentRunOutputPort(context, defaults = {}) {
     replyWithThinking: () => sink.reply(assistantOutputEvent([{ type: "text", text: "Thinking..." }])),
     replyWithSubagentMessage: (input) => sink.reply(subagentMessageEvent(input)),
     sendToolResult: (content, options) => sink.send(agentToolResultEvent(content, withDefaultCwd(options))),
-    sendError: (message) => sink.send(appMessageEvent("error", message)),
-    replyWithError: (message) => sink.reply(appMessageEvent("error", message)),
+    sendError: (message) => sink.send(agentErrorEvent(message)),
+    replyWithError: (message) => sink.reply(agentErrorEvent(message)),
     replyWithPlan: (presentation) => sink.reply(planEvent(presentation)),
     sendUsage: (cost, tokens) => sink.send(usageEvent(cost, tokens)),
   };

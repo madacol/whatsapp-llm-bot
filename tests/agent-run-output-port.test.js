@@ -44,6 +44,7 @@ describe("createAgentRunOutputPort", () => {
       command: { command: "pnpm test", status: "started" },
     });
     await agentOutput.replyWithAssistantOutput([{ type: "markdown", text: "Done" }]);
+    await agentOutput.replyWithError("Agent failed.");
     await agentOutput.sendUsage("0.000001", { prompt: 1, completion: 2, cached: 0 });
 
     assert.deepEqual(sent, [
@@ -68,6 +69,13 @@ describe("createAgentRunOutputPort", () => {
         },
       },
       {
+        via: "reply",
+        event: {
+          kind: "agent_error",
+          message: "Agent failed.",
+        },
+      },
+      {
         via: "send",
         event: {
           kind: "usage",
@@ -84,6 +92,23 @@ describe("createAgentRunOutputPort", () => {
 
     assert.equal("replyWithToolResult" in agentOutput, false);
     assert.equal("replyWithPlain" in agentOutput, false);
+  });
+
+  it("emits agent-owned error events instead of app messages", async () => {
+    const { context, sent } = createSubject();
+    const agentOutput = createAgentRunOutputPort(context);
+
+    await agentOutput.sendError("Tool loop failed.");
+
+    assert.deepEqual(sent, [
+      {
+        via: "send",
+        event: {
+          kind: "agent_error",
+          message: "Tool loop failed.",
+        },
+      },
+    ]);
   });
 
   it("emits semantic agent tool result events instead of generic content", async () => {

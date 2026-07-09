@@ -15,6 +15,7 @@ import {
 import {
   buildToolPresentationFromToolCallEvent,
   renderAgentToolResultEvent,
+  renderAgentErrorEvent,
   renderAppMessageEvent,
   renderAssistantOutputEvent,
   renderPlanEvent,
@@ -2027,6 +2028,8 @@ function renderOutboundEvent(event) {
       return renderAssistantOutputEvent(event);
     case "agent_tool_result":
       return renderAgentToolResultEvent(event);
+    case "agent_error":
+      return renderAgentErrorEvent(event);
     case "tool_call":
       return renderToolCallEvent(event);
     case "tool_activity":

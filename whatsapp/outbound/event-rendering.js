@@ -68,6 +68,17 @@ export function renderAgentToolResultEvent(event) {
 }
 
 /**
+ * @param {AgentErrorEvent} event
+ * @returns {{ source: MessageSource, content: SendContent }}
+ */
+export function renderAgentErrorEvent(event) {
+  return {
+    source: "error",
+    content: event.message,
+  };
+}
+
+/**
  * @param {ToolCallEvent} event
  * @returns {ToolPresentation | null}
  */

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildToolPresentationFromToolCallEvent,
+  renderAgentErrorEvent,
   renderAgentToolResultEvent,
   renderAppMessageEvent,
   renderAssistantOutputEvent,
@@ -45,6 +46,16 @@ describe("semantic outbound event rendering", () => {
       source: "tool-result",
       cwd: "/repo",
       content: "command output",
+    });
+  });
+
+  it("renders agent errors with the error source", () => {
+    assert.deepEqual(renderAgentErrorEvent({
+      kind: "agent_error",
+      message: "Agent runtime failed.",
+    }), {
+      source: "error",
+      content: "Agent runtime failed.",
     });
   });
 

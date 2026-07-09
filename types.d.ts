@@ -378,6 +378,11 @@ type AgentToolResultEvent = {
   cwd?: string | null;
 };
 
+type AgentErrorEvent = {
+  kind: "agent_error";
+  message: string;
+};
+
 type ToolCallEvent = {
   kind: "tool_call";
   toolCall: LlmChatResponse["toolCalls"][0];
@@ -447,6 +452,7 @@ type OutboundEvent =
   | AppMessageEvent
   | AssistantOutputEvent
   | AgentToolResultEvent
+  | AgentErrorEvent
   | ToolCallEvent
   | ToolActivityEvent
   | PlanEvent

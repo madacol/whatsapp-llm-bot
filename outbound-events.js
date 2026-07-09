@@ -45,6 +45,17 @@ export function agentToolResultEvent(content, options = {}) {
 }
 
 /**
+ * @param {string} message
+ * @returns {AgentErrorEvent}
+ */
+export function agentErrorEvent(message) {
+  return {
+    kind: "agent_error",
+    message,
+  };
+}
+
+/**
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
  * @param {{ cwd?: string | null, displaySummary?: string, context?: ToolCallEvent["context"] }} [options]
  * @returns {ToolCallEvent}
