@@ -142,7 +142,8 @@ function isOutboundEvent(value) {
     case "app_message":
       return isAppMessageRole(value.role)
         && isSendContent(value.content)
-        && (value.replyToTriggeringMessage === undefined || typeof value.replyToTriggeringMessage === "boolean");
+        && (value.replyToTriggeringMessage === undefined || typeof value.replyToTriggeringMessage === "boolean")
+        && (value.presentationIntent === undefined || value.presentationIntent === "transcription");
     case "assistant_output":
       return isSendContent(value.content)
         && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string")
@@ -154,6 +155,11 @@ function isOutboundEvent(value) {
             && (value.stream.status === "partial" || value.stream.status === "final")
           )
         );
+    case "transcription_status":
+      return (value.status === "started" || value.status === "completed" || value.status === "failed")
+        && typeof value.summary === "string"
+        && (value.detail === undefined || typeof value.detail === "string")
+        && (value.replyToTriggeringMessage === undefined || typeof value.replyToTriggeringMessage === "boolean");
     case "agent_tool_result":
       return isSendContent(value.content)
         && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string");

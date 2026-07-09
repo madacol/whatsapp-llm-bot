@@ -5,6 +5,7 @@ import { updateChatConfig } from "../chat-config.js";
 import { initStore } from "../store.js";
 import { createTestDb, seedChat } from "./helpers.js";
 import { createWhatsAppOutboundDurability } from "../whatsapp/outbound/durability.js";
+import { assistantOutputEvent } from "../outbound-events.js";
 
 describe("WhatsApp outbound durability", () => {
   it("owns live fallback, replay, output visibility, and queued handle resolution behind one seam", async () => {
@@ -91,5 +92,55 @@ describe("WhatsApp outbound durability", () => {
     assert.equal(deliveredEvents[0]?.chatId, "chat-1");
     assert.equal(typeof deliveredEvents[0]?.outputVisibility, "object");
     assert.equal(resolvedHandle, sentHandle);
+  });
+
+  it("emits cumulative assistant stream chunks immediately when middle assistant messages are pinned", async () => {
+    const db = await createTestDb();
+    const store = await initStore(db);
+    await seedChat(db, "chat-pinned-middle", { enabled: true });
+    await updateChatConfig("chat-pinned-middle", (current) => ({
+      ...current,
+      output_visibility: { middleAssistantMessages: "pinned" },
+    }));
+
+    /** @type {Array<OutboundEvent>} */
+    const delivered = [];
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ ({});
+    const durability = createWhatsAppOutboundDurability({
+      getSocket: () => socket,
+      store,
+      deliverEvent: async (_sock, _chatId, event) => {
+        delivered.push(structuredClone(event));
+        return undefined;
+      },
+    });
+
+    await durability.sendOrQueueEvent({
+      chatId: "chat-pinned-middle",
+      event: assistantOutputEvent([{ type: "markdown", text: "Hel" }], {
+        stream: { id: "assistant-1", status: "partial" },
+      }),
+    });
+    await durability.sendOrQueueEvent({
+      chatId: "chat-pinned-middle",
+      event: assistantOutputEvent([{ type: "markdown", text: "lo" }], {
+        stream: { id: "assistant-1", status: "partial" },
+      }),
+    });
+    await durability.sendOrQueueEvent({
+      chatId: "chat-pinned-middle",
+      event: assistantOutputEvent([{ type: "markdown", text: "Hello world" }], {
+        stream: { id: "assistant-1", status: "final" },
+      }),
+    });
+
+    assert.deepEqual(delivered.map((event) =>
+      event.kind === "assistant_output" && Array.isArray(event.content)
+        ? [event.stream?.status, event.content[0]?.type === "markdown" ? event.content[0].text : ""]
+        : null), [
+      ["partial", "Hel"],
+      ["partial", "Hello"],
+      ["final", "Hello world"],
+    ]);
   });
 });

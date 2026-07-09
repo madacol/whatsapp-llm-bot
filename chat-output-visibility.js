@@ -8,6 +8,7 @@
  * @typedef {"shown" | "pinnedCurrentStep" | "hidden"} PlanPresentationMode
  * @typedef {"shown" | "pinned" | "hidden"} UsagePresentationMode
  * @typedef {"on" | "off"} TogglePresentationMode
+ * @typedef {"on" | "pinned" | "off"} MiddleAssistantMessagesPresentationMode
  * @typedef {"reasoning" | "tools" | "plans" | "fileChanges" | "snapshots" | "subagents" | "usage" | "transcription" | "middleAssistantMessages"} OutputPresentationKey
  *
  * @typedef {{
@@ -19,7 +20,7 @@
  *   subagents?: BinaryPresentationMode;
  *   usage?: UsagePresentationMode;
  *   transcription?: TextPresentationMode;
- *   middleAssistantMessages?: TogglePresentationMode;
+ *   middleAssistantMessages?: MiddleAssistantMessagesPresentationMode;
  * }} OutputVisibilityOverrides
  *
  * @typedef {{
@@ -31,7 +32,7 @@
  *   subagents: BinaryPresentationMode;
  *   usage: UsagePresentationMode;
  *   transcription: TextPresentationMode;
- *   middleAssistantMessages: TogglePresentationMode;
+ *   middleAssistantMessages: MiddleAssistantMessagesPresentationMode;
  * }} OutputVisibility
  *
  * @typedef {{
@@ -124,7 +125,7 @@ export const OUTPUT_PRESENTATION_SETTINGS = Object.freeze([
     label: "middle assistant messages",
     description: "Assistant text emitted before the final answer.",
     defaultValue: "on",
-    options: ["on", "off"],
+    options: ["on", "pinned", "off"],
     aliases: ["middle-assistant-messages", "middle_assistant_messages", "assistant-updates", "assistantUpdates"],
   },
 ]);
@@ -178,8 +179,8 @@ export const OUTPUT_PRESENTATION_PRESETS = Object.freeze([
       snapshots: "off",
       subagents: "hidden",
       usage: "hidden",
-      transcription: "hidden",
-      middleAssistantMessages: "off",
+      transcription: "pinnedIndicator",
+      middleAssistantMessages: "pinned",
     },
     aliases: ["silent"],
   },
@@ -251,8 +252,14 @@ export function normalizeOutputPresentationOption(key, raw) {
     if (["hidden", "hide", "off", "none"].includes(normalized)) return "hidden";
     return null;
   }
-  if (key === "snapshots" || key === "middleAssistantMessages") {
+  if (key === "snapshots") {
     if (["on", "shown", "show", "enabled", "true"].includes(normalized)) return "on";
+    if (["off", "hidden", "hide", "disabled", "false", "none"].includes(normalized)) return "off";
+    return null;
+  }
+  if (key === "middleAssistantMessages") {
+    if (["on", "shown", "show", "enabled", "true", "message", "messages"].includes(normalized)) return "on";
+    if (["pinned", "status", "pinnedstatus", "indicatorinpinnedstatus", "pinnedindicator"].includes(normalized)) return "pinned";
     if (["off", "hidden", "hide", "disabled", "false", "none"].includes(normalized)) return "off";
     return null;
   }
@@ -309,7 +316,7 @@ function assignPresentationOverride(overrides, key, value) {
       overrides.transcription = /** @type {TextPresentationMode} */ (value);
       break;
     case "middleAssistantMessages":
-      overrides.middleAssistantMessages = /** @type {TogglePresentationMode} */ (value);
+      overrides.middleAssistantMessages = /** @type {MiddleAssistantMessagesPresentationMode} */ (value);
       break;
   }
 }

@@ -394,10 +394,15 @@ export function buildAgentIoHooks(
       }
     },
     onLlmResponse: async (text, metadata) => {
-      if (metadata?.streamId && (metadata.streamStatus ?? "partial") !== "final") {
+      const outputVisibility = await getOutputVisibility();
+      const streamStatus = metadata?.streamStatus ?? "partial";
+      if (
+        metadata?.streamId
+        && streamStatus !== "final"
+        && outputVisibility.middleAssistantMessages !== "pinned"
+      ) {
         return;
       }
-      const outputVisibility = await getOutputVisibility();
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
       if (metadata?.source === "subagent") {
@@ -422,10 +427,12 @@ export function buildAgentIoHooks(
         await agentOutput.replyWithAssistantOutput(content, {
           stream: {
             id: metadata.streamId,
-            status: metadata.streamStatus ?? "partial",
+            status: streamStatus,
           },
         });
-        recordDeliveredContent?.(content);
+        if (streamStatus === "final" && outputVisibility.middleAssistantMessages !== "pinned") {
+          recordDeliveredContent?.(content);
+        }
         return;
       }
       await agentOutput.replyWithAssistantOutput(content);

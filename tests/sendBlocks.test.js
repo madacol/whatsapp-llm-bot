@@ -12,7 +12,7 @@ process.env.MODEL = "mock-model";
 import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
-import { runtimeEvent } from "../outbound-events.js";
+import { appMessageEvent, runtimeEvent, transcriptionStatusEvent } from "../outbound-events.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
@@ -831,6 +831,108 @@ describe("sendEvent – runtime events", () => {
       },
       {
         text: "💭 *LLM*  thinking",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("routes audio transcription status through pinned status when transcription is pinned", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-pinned-transcription-chat";
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, transcription: "pinnedIndicator" };
+
+    const handle = await sendEvent(sock, chatId, appMessageEvent("plain", "Transcribing audio...", {
+      replyToTriggeringMessage: true,
+      presentationIntent: "transcription",
+    }), undefined, undefined, { outputVisibility });
+    await handle?.update({ kind: "text", text: "Transcribed" });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🎙️ *AUDIO*  Transcribing audio...", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 3600,
+      },
+      {
+        text: "Transcribed",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("shows streamed middle assistant messages in pinned status when configured", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-middle-assistant-status-chat";
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, middleAssistantMessages: "pinned" };
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    }, undefined, undefined, { outputVisibility });
+    await sendEvent(sock, chatId, {
+      kind: "assistant_output",
+      content: [{ type: "markdown", text: "Drafting answer" }],
+      stream: { id: "assistant-1", status: "partial" },
+    }, undefined, undefined, { outputVisibility });
+    await sendEvent(sock, chatId, {
+      kind: "assistant_output",
+      content: [{ type: "markdown", text: "Drafting answer with details" }],
+      stream: { id: "assistant-1", status: "final" },
+    }, undefined, undefined, { outputVisibility });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 3600,
+      },
+      {
+        text: "💬 *LLM*  Drafting answer",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "💬 *LLM*  Drafting answer with details",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("shows transcription status in pinned status when configured", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-transcription-status-chat";
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, transcription: "pinnedIndicator" };
+
+    await sendEvent(sock, chatId, transcriptionStatusEvent("started", {
+      summary: "Transcribing audio...",
+      replyToTriggeringMessage: true,
+    }), undefined, undefined, { outputVisibility });
+    await sendEvent(sock, chatId, transcriptionStatusEvent("completed", {
+      summary: "Transcribed",
+      detail: "hello",
+    }), undefined, undefined, { outputVisibility });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🎙️ *AUDIO*  Transcribing audio...", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 3600,
+      },
+      {
+        text: "✅ *AUDIO*  Transcribed",
         edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
         linkPreview: null,
       },

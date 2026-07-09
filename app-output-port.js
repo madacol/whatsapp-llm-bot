@@ -12,6 +12,10 @@ export function createAppOutputPort(context) {
     replyWithToolResult: (content) => sink.reply(appMessageEvent("tool_result", content)),
     replyWithError: (message) => sink.reply(appMessageEvent("error", message)),
     replyWithPlain: (content, options = {}) => sink.reply(appMessageEvent("plain", content, options)),
+    replyWithTranscriptionStatus: (content, options = {}) => sink.reply(appMessageEvent("plain", content, {
+      ...options,
+      presentationIntent: "transcription",
+    })),
     sendPlain: (content) => sink.send(appMessageEvent("plain", content)),
     sendMemory: (content) => sink.send(appMessageEvent("memory", content)),
     replyWithFileChange: (change) => sink.reply({ kind: "file_change", ...change }),

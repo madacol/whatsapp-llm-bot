@@ -486,7 +486,7 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("*Categories*"), `expected categories section, got: ${result}`);
       assert.ok(result.includes("- reasoning: full details, indicator + inspectable, indicator in pinned status, hidden"), `expected reasoning options, got: ${result}`);
       assert.ok(result.includes("- snapshots: on, off"), `expected snapshot options, got: ${result}`);
-      assert.ok(result.includes("- middle assistant messages: on, off"), `expected middle assistant options, got: ${result}`);
+      assert.ok(result.includes("- middle assistant messages: on, pinned status, off"), `expected middle assistant options, got: ${result}`);
     });
 
     it("sets a show category with a text command", async () => {
@@ -520,6 +520,29 @@ describe("per-chat model selection", () => {
         usage: "pinned",
         transcription: "pinnedIndicator",
         middleAssistantMessages: "off",
+      });
+    });
+
+    it("sets the minimal preset to pinned transcription and pinned middle assistant messages", async () => {
+      await seedConfigChat("cfg-show-preset-minimal-1");
+      const result = await runChatSettingsCommand(
+        { chatId: "cfg-show-preset-minimal-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "show", value: "minimal" },
+      );
+
+      assert.ok(result.includes("Show preset set to minimal"), `expected preset confirmation, got: ${result}`);
+
+      const chat = await readRequiredChatConfig("cfg-show-preset-minimal-1");
+      assert.deepEqual(chat.output_visibility, {
+        reasoning: "hidden",
+        tools: "hidden",
+        plans: "hidden",
+        fileChanges: "hidden",
+        snapshots: "off",
+        subagents: "hidden",
+        usage: "hidden",
+        transcription: "pinnedIndicator",
+        middleAssistantMessages: "pinned",
       });
     });
 

@@ -14,6 +14,7 @@ import { buildLiveInputText } from "./live-input-text.js";
 import { decideChannelInputRoute } from "./channel-input-routing.js";
 import { createAgentRuntime } from "./agent-runtime.js";
 import { createCommandOrchestration } from "./command-orchestration.js";
+import { transcriptionStatusEvent } from "../outbound-events.js";
 import { DEFAULT_OUTPUT_VISIBILITY, resolveOutputVisibility } from "../chat-output-visibility.js";
 import {
   createWaitSendBatchStore,
@@ -148,6 +149,8 @@ export function createAudioTranscriptionStatusObserver(context, visibility = DEF
   const appOutput = createAppOutputPort(context);
   /** @type {Promise<MessageHandle | undefined> | null} */
   let handlePromise = null;
+  /** @type {Promise<MessageHandle | undefined> | null} */
+  let pinnedStartPromise = null;
   /** @type {string[]} */
   const transcriptions = [];
 
@@ -156,11 +159,24 @@ export function createAudioTranscriptionStatusObserver(context, visibility = DEF
    */
   async function ensureHandle() {
     if (!handlePromise) {
-      handlePromise = appOutput.replyWithPlain("Transcribing audio...", {
+      handlePromise = appOutput.replyWithTranscriptionStatus("Transcribing audio...", {
         replyToTriggeringMessage: true,
       });
     }
     return handlePromise;
+  }
+
+  /**
+   * @returns {Promise<MessageHandle | undefined>}
+   */
+  async function ensurePinnedStart() {
+    if (!pinnedStartPromise) {
+      pinnedStartPromise = context.reply(transcriptionStatusEvent("started", {
+        summary: "Transcribing audio...",
+        replyToTriggeringMessage: true,
+      }));
+    }
+    return pinnedStartPromise;
   }
 
   if (outputVisibility.transcription === "hidden") {
@@ -168,6 +184,32 @@ export function createAudioTranscriptionStatusObserver(context, visibility = DEF
       onAudioTranscriptionStart: async () => {},
       onAudioTranscriptionComplete: async () => {},
       onAudioTranscriptionFailure: async () => {},
+    };
+  }
+
+  if (outputVisibility.transcription === "pinnedIndicator") {
+    return {
+      onAudioTranscriptionStart: async () => {
+        await ensurePinnedStart();
+      },
+      onAudioTranscriptionComplete: async ({ transcription }) => {
+        const isNewTranscription = !transcriptions.includes(transcription);
+        await ensurePinnedStart();
+        if (!isNewTranscription) {
+          return;
+        }
+        transcriptions.push(transcription);
+        await context.send(transcriptionStatusEvent("completed", {
+          summary: "Transcribed",
+          detail: formatAudioTranscriptionInspectText(transcriptions),
+        }));
+      },
+      onAudioTranscriptionFailure: async () => {
+        await ensurePinnedStart();
+        await context.send(transcriptionStatusEvent("failed", {
+          summary: "Audio transcription failed.",
+        }));
+      },
     };
   }
 

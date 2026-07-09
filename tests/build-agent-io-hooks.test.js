@@ -12,12 +12,13 @@ const VISIBLE_TOOL_OUTPUT = {
 
 /**
  * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
+ * @param {(content: SendContent) => void} [recordDeliveredContent]
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
  * }}
  */
-function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
+function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY, recordDeliveredContent = undefined) {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
   const hooks = buildAgentIoHooks(
@@ -35,6 +36,7 @@ function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
     },
     null,
     visibility,
+    recordDeliveredContent,
   );
   return { hooks, sent };
 }
@@ -409,6 +411,55 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "command.started");
     assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.completed");
     assert.equal(sent[2]?.event.kind, "assistant_output");
+  });
+
+  it("emits partial assistant stream chunks when middle assistant messages are pinned", async () => {
+    const { hooks, sent } = createSubject({
+      ...DEFAULT_OUTPUT_VISIBILITY,
+      middleAssistantMessages: "pinned",
+    });
+
+    await hooks.onLlmResponse?.("Drafting ", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "partial",
+    });
+    await hooks.onLlmResponse?.("Drafting answer", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "final",
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["assistant_output", "assistant_output"]);
+    assert.deepEqual(sent.map((entry) => entry.event.kind === "assistant_output" ? entry.event.stream : null), [
+      { id: "assistant-1", status: "partial" },
+      { id: "assistant-1", status: "final" },
+    ]);
+  });
+
+  it("does not mark pinned final stream chunks as delivered final answers", async () => {
+    /** @type {SendContent[]} */
+    const delivered = [];
+    const { hooks, sent } = createSubject({
+      ...DEFAULT_OUTPUT_VISIBILITY,
+      middleAssistantMessages: "pinned",
+    }, (content) => {
+      delivered.push(structuredClone(content));
+    });
+
+    await hooks.onLlmResponse?.("Drafting ", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "partial",
+    });
+    await hooks.onLlmResponse?.("Final answer", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "final",
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["assistant_output", "assistant_output"]);
+    assert.deepEqual(delivered, []);
   });
 
   it("sends one thinking placeholder and makes it inspectable", async () => {

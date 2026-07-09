@@ -18,6 +18,7 @@ import {
   renderAgentErrorEvent,
   renderAppMessageEvent,
   renderAssistantOutputEvent,
+  renderTranscriptionStatusEvent,
   renderPlanEvent,
   renderSubagentMessageEvent,
   renderToolActivityEvent,
@@ -1615,6 +1616,22 @@ function shouldUsePinnedUsageStatus(outputVisibility) {
 }
 
 /**
+ * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
+ * @returns {boolean}
+ */
+function shouldUsePinnedMiddleAssistantStatus(outputVisibility) {
+  return outputVisibility?.middleAssistantMessages === "pinned";
+}
+
+/**
+ * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
+ * @returns {boolean}
+ */
+function shouldUsePinnedTranscriptionStatus(outputVisibility) {
+  return outputVisibility?.transcription === "pinnedIndicator";
+}
+
+/**
  * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> }} state
  * @returns {{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" } | undefined}
  */
@@ -1872,38 +1889,82 @@ function formatPinnedRuntimeStatusPresentation(event, state, options) {
 
 /**
  * @param {OutboundEvent} event
+ * @returns {event is AppMessageEvent & { presentationIntent: "transcription" }}
+ */
+function isTranscriptionAppMessageEvent(event) {
+  return event.kind === "app_message" && event.presentationIntent === "transcription";
+}
+
+/**
+ * @param {OutboundEvent} event
+ * @returns {event is (AppMessageEvent & { presentationIntent: "transcription" }) | TranscriptionStatusEvent}
+ */
+function isTranscriptionPresentationEvent(event) {
+  return event.kind === "transcription_status" || isTranscriptionAppMessageEvent(event);
+}
+
+/**
+ * @param {OutboundEvent} event
  * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> } | undefined} state
- * @param {{ includeRuntimeActions: boolean, includeReasoning: boolean, includePlans: boolean, includeUsage: boolean }} options
+ * @param {{ includeRuntimeActions: boolean, includeReasoning: boolean, includePlans: boolean, includeUsage: boolean, includeMiddleAssistantMessages: boolean, includeTranscription: boolean }} options
  * @returns {{ key: string, icon: string, provider?: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
 function formatPinnedStatusPresentation(event, state, options) {
   if (event.kind === "runtime_event") {
     return formatPinnedRuntimeStatusPresentation(event, state, options);
   }
-  if (!state) {
+  if (isTranscriptionAppMessageEvent(event)) {
+    if (!options.includeTranscription) {
+      return null;
+    }
+    return {
+      key: "transcription",
+      icon: "🎙️",
+      provider: "AUDIO",
+      summary: typeof event.content === "string" ? event.content : "audio transcription",
+      createsStatus: !state,
+    };
+  }
+  if (event.kind === "transcription_status") {
+    if (!options.includeTranscription) {
+      return null;
+    }
+    return {
+      key: "transcription",
+      icon: event.status === "failed" ? "❌" : event.status === "completed" ? "✅" : "🎙️",
+      provider: "AUDIO",
+      summary: event.summary,
+      createsStatus: !state,
+      closesStatus: event.status === "failed",
+    };
+  }
+  if (!state && !(event.kind === "assistant_output" && event.stream && options.includeMiddleAssistantMessages)) {
     return null;
   }
   switch (event.kind) {
     case "assistant_output": {
-      if (!options.includeReasoning) {
+      const text = extractOutboundContentText(event.content).trim();
+      if (!text) {
         return null;
       }
-      if (!Array.isArray(event.content)) {
-        return null;
+      if (event.stream && options.includeMiddleAssistantMessages) {
+        return {
+          key: `assistant:${event.stream.id}`,
+          icon: "💬",
+          provider: "LLM",
+          summary: text,
+          createsStatus: !state,
+        };
       }
-      const text = event.content
-        .map((block) => block.type === "text" || block.type === "markdown" ? block.text : "")
-        .join("\n")
-        .trim();
-      if (text !== "Thinking...") {
-        return null;
+      if (options.includeReasoning && text === "Thinking...") {
+        return {
+          key: "thinking",
+          icon: "💭",
+          provider: "LLM",
+          summary: "thinking",
+        };
       }
-      return {
-        key: "thinking",
-        icon: "💭",
-        provider: "LLM",
-        summary: "thinking",
-      };
+      return null;
     }
     case "plan":
       if (!options.includePlans) {
@@ -1969,6 +2030,8 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
     includeReasoning: shouldUsePinnedReasoningStatus(sendOptions.outputVisibility),
     includePlans: shouldUsePinnedPlanStatus(sendOptions.outputVisibility),
     includeUsage: shouldUsePinnedUsageStatus(sendOptions.outputVisibility),
+    includeMiddleAssistantMessages: shouldUsePinnedMiddleAssistantStatus(sendOptions.outputVisibility),
+    includeTranscription: shouldUsePinnedTranscriptionStatus(sendOptions.outputVisibility),
   });
   if (!presentation) {
     return undefined;
@@ -2094,6 +2157,8 @@ function renderOutboundEvent(event) {
       return renderAppMessageEvent(event);
     case "assistant_output":
       return renderAssistantOutputEvent(event);
+    case "transcription_status":
+      return renderTranscriptionStatusEvent(event);
     case "agent_tool_result":
       return renderAgentToolResultEvent(event);
     case "agent_error":
@@ -2120,14 +2185,7 @@ function renderOutboundEvent(event) {
  * @returns {boolean}
  */
 function isThinkingAssistantOutputEvent(event) {
-  if (!Array.isArray(event.content)) {
-    return false;
-  }
-  const text = event.content
-    .map((block) => block.type === "text" || block.type === "markdown" ? block.text : "")
-    .join("\n")
-    .trim();
-  return text === "Thinking...";
+  return extractOutboundContentText(event.content).trim() === "Thinking...";
 }
 
 /**
@@ -2136,6 +2194,10 @@ function isThinkingAssistantOutputEvent(event) {
  * @returns {boolean}
  */
 function shouldSuppressStandaloneOutboundEvent(event, outputVisibility) {
+  if (isTranscriptionPresentationEvent(event)) {
+    return outputVisibility?.transcription === "hidden"
+      || shouldUsePinnedTranscriptionStatus(outputVisibility);
+  }
   if (event.kind === "plan") {
     return shouldUsePinnedPlanStatus(outputVisibility);
   }
@@ -2144,6 +2206,9 @@ function shouldSuppressStandaloneOutboundEvent(event, outputVisibility) {
   }
   if (event.kind === "assistant_output" && shouldUsePinnedReasoningStatus(outputVisibility)) {
     return isThinkingAssistantOutputEvent(event);
+  }
+  if (event.kind === "assistant_output" && event.stream && shouldUsePinnedMiddleAssistantStatus(outputVisibility)) {
+    return true;
   }
   return false;
 }

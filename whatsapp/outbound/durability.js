@@ -178,9 +178,16 @@ function extractStreamText(event) {
 /**
  * @param {AssistantOutputEvent} event
  * @param {string} text
+ * @param {{ keepStream?: boolean }} [options]
  * @returns {AssistantOutputEvent}
  */
-function withStreamText(event, text) {
+function withStreamText(event, text, options = {}) {
+  if (options.keepStream) {
+    return {
+      ...event,
+      content: [{ type: "markdown", text }],
+    };
+  }
   const { stream: _stream, ...rest } = event;
   return {
     ...rest,
@@ -271,9 +278,10 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
   /**
    * @param {string} chatId
    * @param {AssistantOutputEvent} event
+   * @param {{ emitPartial?: boolean }} [options]
    * @returns {AssistantOutputEvent | undefined}
    */
-  function bufferStreamEvent(chatId, event) {
+  function bufferStreamEvent(chatId, event, options = {}) {
     if (!event.stream) {
       return event;
     }
@@ -285,12 +293,14 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
       : `${state.text}${eventText}`;
     streamStates.set(key, state);
 
-    if (event.stream.status !== "final") {
+    if (event.stream.status !== "final" && !options.emitPartial) {
       return undefined;
     }
 
-    streamStates.delete(key);
-    return withStreamText(event, state.text);
+    if (event.stream.status === "final") {
+      streamStates.delete(key);
+    }
+    return withStreamText(event, state.text, { keepStream: options.emitPartial });
   }
 
   /**
@@ -311,8 +321,10 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
       throw new Error("WhatsApp outbound durability requires a socket accessor.");
     }
     let event = input.event;
+    const sendOptions = await buildWhatsAppSendOptions(input.chatId, input.store ?? deps.store);
     if (event.kind === "assistant_output" && event.stream) {
-      const bufferedEvent = bufferStreamEvent(input.chatId, event);
+      const shouldEmitPartialStream = sendOptions.outputVisibility?.middleAssistantMessages === "pinned";
+      const bufferedEvent = bufferStreamEvent(input.chatId, event, { emitPartial: shouldEmitPartialStream });
       if (!bufferedEvent) {
         return undefined;
       }
@@ -331,7 +343,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
         event,
         input.options,
         input.reactionRuntime ?? deps.reactionRuntime,
-        await buildWhatsAppSendOptions(input.chatId, input.store ?? deps.store),
+        sendOptions,
       );
     } catch (error) {
       if (!isRecoverableWhatsAppSendError(error)) {

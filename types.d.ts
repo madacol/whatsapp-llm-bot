@@ -360,6 +360,7 @@ type AppMessageEvent = {
   role: "plain" | "tool_result" | "error" | "memory";
   content: SendContent;
   replyToTriggeringMessage?: boolean;
+  presentationIntent?: "transcription";
 };
 
 type AssistantOutputEvent = {
@@ -370,6 +371,14 @@ type AssistantOutputEvent = {
     id: string;
     status: "partial" | "final";
   };
+};
+
+type TranscriptionStatusEvent = {
+  kind: "transcription_status";
+  status: "started" | "completed" | "failed";
+  summary: string;
+  detail?: string;
+  replyToTriggeringMessage?: boolean;
 };
 
 type AgentToolResultEvent = {
@@ -451,6 +460,7 @@ type UsageTokens = {
 type OutboundEvent =
   | AppMessageEvent
   | AssistantOutputEvent
+  | TranscriptionStatusEvent
   | AgentToolResultEvent
   | AgentErrorEvent
   | ToolCallEvent
@@ -470,6 +480,10 @@ type AppOutputPort = {
   replyWithToolResult: (content: SendContent) => Promise<MessageHandle | undefined>;
   replyWithError: (message: string) => Promise<MessageHandle | undefined>;
   replyWithPlain: (
+    content: SendContent,
+    options?: { replyToTriggeringMessage?: boolean; presentationIntent?: AppMessageEvent["presentationIntent"] },
+  ) => Promise<MessageHandle | undefined>;
+  replyWithTranscriptionStatus: (
     content: SendContent,
     options?: { replyToTriggeringMessage?: boolean },
   ) => Promise<MessageHandle | undefined>;

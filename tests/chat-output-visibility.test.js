@@ -47,5 +47,9 @@ describe("chat output visibility", () => {
       key: "middleAssistantMessages",
       option: "off",
     });
+    assert.deepEqual(parseOutputPresentationSetting("middle assistant messages pinned"), {
+      key: "middleAssistantMessages",
+      option: "pinned",
+    });
   });
 });

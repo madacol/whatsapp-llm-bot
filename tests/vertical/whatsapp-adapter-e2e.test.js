@@ -986,6 +986,37 @@ describe("audio media-to-text provider input", () => {
     assert.equal(transcriptionStatus?.options?.quoted, audioMessage);
   });
 
+  it("pins audio transcription status when transcription visibility is pinned", async () => {
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      output_visibility: { transcription: "pinnedIndicator" },
+    }));
+    capturedInputs.length = 0;
+    mockServer.addResponses("Pinned audio transcript.");
+
+    const captures = createMockBaileysSocket();
+    const audioMessage = createWAMessage({ audio: { mimetype: "audio/mp3" }, senderId });
+    await adaptIncomingMessage(
+      audioMessage,
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+      undefined,
+      async () => Buffer.from("pinned e2e audio bytes"),
+      { outboundStore: testStore },
+    );
+
+    const sentMessages = captures.getSentMessages();
+    const rendered = captures.getRenderedMessages();
+    assert.equal(capturedInputs.length, 1);
+    assert.ok(capturedInputs[0]?.includes("Pinned audio transcript."), capturedInputs[0]);
+    assert.ok(rendered.some((text) => text.includes("Audio provider response.")), `Expected provider response, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("🎙️ *AUDIO*  Transcribing audio...")), `Expected pinned transcription status, got ${JSON.stringify(rendered)}`);
+    assert.ok(sentMessages.some((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 1), `Expected transcription pin payload, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`);
+    assert.ok(!sentMessages.some((entry) => entry.msg.text === "Transcribing audio..." && entry.options?.quoted === audioMessage), `Expected no standalone quoted transcription status, got ${JSON.stringify(sentMessages)}`);
+  });
+
   it("hides audio transcription status when transcription visibility is hidden", async () => {
     await updateChatConfig(chatId, (current) => ({
       ...current,
