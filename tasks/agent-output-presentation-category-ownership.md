@@ -1,12 +1,12 @@
-# Agent Output Presentation Category Ownership
+# WhatsApp Presentation Intent Category Ownership
 
 ## Status
 
-Todo. Partially advanced by the side-channel settings implementation.
+Todo. Category-owned visibility settings and legacy migration are complete; the remaining work is a presentation-intent refactor.
 
 ## Goal
 
-Move side-channel presentation decisions behind category-owned classification instead of spreading raw event handling across dispatch, pinned status, standalone messages, inspect, and continuation code.
+Move WhatsApp side-channel presentation decisions behind category-owned intent classification instead of spreading raw event handling across dispatch, pinned status, standalone messages, inspect, and continuation code.
 
 ## Problem
 

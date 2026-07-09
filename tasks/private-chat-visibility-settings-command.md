@@ -1,12 +1,12 @@
-# Private/LID Visibility Settings Poll Settlement
+# Private/LID Visibility Settings Poll Settlement Verification
 
 ## Status
 
-Implementation complete in the working tree; live/deploy verification pending.
+Implementation complete in the working tree; live/deploy verification pending. The remaining task is verification, not another code fix.
 
 ## Subject
 
-Fix private-chat/LID-addressed WhatsApp poll votes for the visibility settings picker. The initial `!s show` command path appears sound; the observed failure is a poll-vote settlement failure after the picker is shown.
+Verify private-chat/LID-addressed WhatsApp poll votes for the visibility settings picker after the code fix is deployed or the affected ingress row is replayed. The initial `!s show` command path appears sound; the observed failure was a poll-vote settlement failure after the picker is shown.
 
 ## Evidence
 
@@ -90,6 +90,10 @@ Relevant lines at research time:
   - raw private/LID `messages.upsert.pollUpdateMessage` votes with encrypted/base64 vote fields;
   - decrypted private/LID `messages.update.pollUpdates` votes.
 - Both regressions use a mapper shaped like Baileys' `getPNForLID` method, where the method depends on `this.getPNsForLIDs`, and force that mapper to throw so poll settlement must not depend on chat-id normalization.
+
+## Next Action
+
+Deploy the code containing `68bd5ea` or replay the affected ingress row, then confirm the row no longer retries with `getPNsForLIDs`. If a different live failure appears, record that as a new concrete task.
 
 ## Acceptance Criteria
 
