@@ -15,8 +15,8 @@ The POC app owns only device-local work:
   assistant messages and audio can be shown/played before the final HTTP
   response completes;
 - assistant audio download and playback;
-- wake phrase detection through Android's platform speech recognizer fallback,
-  with a seam for a future offline KWS implementation.
+- continuous local wake detection through the same openWakeWord Jarvis ONNX
+  model family used by the web client.
 
 The backend owns STT/media-to-text, the assistant run, provider-backed TTS, and
 media download authorization.
@@ -30,7 +30,10 @@ it is available.
 ## Build status
 
 This source scaffold intentionally does not include a Gradle wrapper binary or
-downloaded Android SDK/model assets. Build it after SDK setup:
+downloaded Android SDK assets. The debug build reuses the vendored
+openWakeWord ONNX models from `clients/web/vendor/openwakeword/` and packages
+only `arm64-v8a` native ONNX Runtime libraries for a modern physical phone.
+Build it after SDK setup:
 
 ```bash
 cd clients/android
@@ -57,11 +60,16 @@ GRADLE_USER_HOME=/tmp/android-lite/gradle-user-home \
 
 The app UI asks for:
 
-- API base URL, for example `http://192.168.1.20:3200`;
+- API base URL;
 - API bearer token;
 - transport id, usually `voice`;
 - chat id, for example `api:android-1`.
 - sender id and sender name.
+
+For private deployment builds, set `ANDROID_API_BASE_URL` in the repo `.env`
+or pass `-PandroidApiBaseUrl=...` when building. `.env` is ignored and must
+remain the place for the real deployment URL; do not commit private hostnames.
+If no build-time URL is configured, the app falls back to `http://127.0.0.1:3200`.
 
 If the API base URL contains query parameters, such as a tokenized media URL,
 the Android client preserves them when resolving assistant audio media URLs.
@@ -85,17 +93,14 @@ or another supported container.
 
 ## Wake word
 
-The current APK uses Android's built-in `SpeechRecognizer` as a dependency-free
-wake phrase fallback. It listens for the configured wake phrase, starts audio
-recording when the phrase appears in partial or final recognition results, and
-auto-sends after the configured max capture seconds.
+The APK uses continuous `AudioRecord` capture with Microsoft ONNX Runtime
+Android and the existing openWakeWord Jarvis models:
 
-This is a practical POC fallback, not the final offline KWS path. Accuracy,
-privacy, offline availability, and battery behavior depend on the recognizer
-service installed on the device. The `silence seconds` field is persisted for
-future VAD endpointing but is not used by this fallback.
+- `melspectrogram.onnx`
+- `embedding_model.onnx`
+- `hey_jarvis_v0.1.onnx`
 
-Use `sherpa-onnx` keyword spotting for the intended offline Android wake-word
-implementation. The upstream Android tree includes `SherpaOnnxKws`, an Android
-keyword spotting demo, Java/Kotlin APIs, assets, and native libraries. This repo
-does not vendor those large assets yet because local disk is constrained.
+The wake phrase field currently supports Jarvis only. Detection starts the
+existing recording path and auto-sends after the configured max capture seconds.
+The `silence seconds` field is persisted for future VAD endpointing but is not
+used yet.

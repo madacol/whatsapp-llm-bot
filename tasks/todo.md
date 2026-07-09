@@ -10,4 +10,4 @@
 
 ## Blocked
 
-- Android offline wake-word integration and real-device APK validation. [details](android-audio-client.md)
+- Android real-device APK validation and private-host history rewrite decision. [details](android-audio-client.md)

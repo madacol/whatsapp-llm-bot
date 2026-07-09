@@ -81,10 +81,10 @@ Completed. The manual record/send/playback slice is deployed and verified end to
 
 ## Deployment
 
-- Private/tailnet URL: `https://private-host-redacted/`
-- Preconfigured deployed URL: `https://private-host-redacted/?api=https%3A%2F%private-host-redacted`
-- API proxy URL: `https://private-host-redacted/`
-- Canonical redirect: `https://private-host-redacted/` redirects to the tailnet URL.
+- Private/tailnet URL: `https://<private-web-audio-client-host>/`
+- Preconfigured deployed URL: `https://<private-web-audio-client-host>/?api=https%3A%2F%2F<private-web-audio-api-host>`
+- API proxy URL: `https://<private-web-audio-api-host>/`
+- Canonical redirect: `https://<private-web-audio-client-canonical-host>/` redirects to the tailnet URL.
 - Static root: `./clients/web`
 - Current private test API does not require a bearer token.
 - The deployed HTTPS page needs a browser-reachable HTTPS API base URL for normal use; plain HTTP backend URLs may be blocked as mixed content outside local-development exceptions.
@@ -96,20 +96,20 @@ Completed. The manual record/send/playback slice is deployed and verified end to
 - `pnpm type-check:tests` after the Web Speech Jarvis-detection hardening pass.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed after rerun with local port binding allowed; sandboxed run failed with `listen EPERM: operation not permitted 127.0.0.1`.
 - `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json`
-- `curl -I --max-time 15 https://private-host-redacted/` returned HTTP 200.
-- Deployed `https://private-host-redacted/app.js` contains the new Web Speech hardening markers: `effectiveWakeLanguage`, `recognition-start`, `Heard:`, `JARVIS_WAKE_VARIANTS`, and `SpeechRecognitionPhrase`.
+- `curl -I --max-time 15 https://<private-web-audio-client-host>/` returned HTTP 200.
+- Deployed `https://<private-web-audio-client-host>/app.js` contains the new Web Speech hardening markers: `effectiveWakeLanguage`, `recognition-start`, `Heard:`, `JARVIS_WAKE_VARIANTS`, and `SpeechRecognitionPhrase`.
 - `pnpm type-check` after switching the web client deployment to the Node no-cache static server.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after the no-cache service switch.
 - `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed `web-audio-client` as `workspace-site-web-audio-client.service`.
 - `systemctl --user status workspace-site-web-audio-client.service --no-pager` showed the service active at `http://127.0.0.1:3103`.
-- `curl -i --max-time 15 https://private-host-redacted/` returned HTTP 200 with `cache-control: no-store`.
-- `curl -I --max-time 15 'https://private-host-redacted/app.js?v=20260701-wake-v2'` returned HTTP 200 with `cache-control: no-store`.
+- `curl -i --max-time 15 https://<private-web-audio-client-host>/` returned HTTP 200 with `cache-control: no-store`.
+- `curl -I --max-time 15 'https://<private-web-audio-client-host>/app.js?v=20260701-wake-v2'` returned HTTP 200 with `cache-control: no-store`.
 - Deployed HTML contains the visible marker `Detector build: Web Speech v2, diagnostics enabled.` and the script URL `./app.js?v=20260701-wake-v2`.
 - Generated `/tmp/hey-jarvis-smoke.wav` from OpenAI TTS phrase `hey jarvis` for browser fake-microphone smoke testing.
 - `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-smoke.wav --timeout-ms 20000 --stub-recognition` passed against the deployed page: diagnostics contained a Web Speech `result` transcript `hey jarvis` with `matched: true`, and the page reached `Wake phrase detected. Capturing command.`
 - `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-smoke.wav --timeout-ms 20000` against deployed v4 failed with `not-allowed`; after v5 direct-start fix, native headless Chromium failed with `audio-capture`.
 - `env DISPLAY=:99 node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-smoke.wav --timeout-ms 25000 --headed` under direct Xvfb also failed native Web Speech with `audio-capture`.
-- `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v5|app.js\\?v=20260701-wake-v5"` verified the deployed v5 marker and cache-busted script URL.
+- `curl -fsSL --max-time 15 https://<private-web-audio-client-host>/ | rg "Web Speech v5|app.js\\?v=20260701-wake-v5"` verified the deployed v5 marker and cache-busted script URL.
 - `pnpm type-check` after Web Speech v5 and smoke harness changes.
 - `pnpm type-check:tests` after Web Speech v5 and smoke harness changes.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after Web Speech v5 and smoke harness changes.
@@ -117,7 +117,7 @@ Completed. The manual record/send/playback slice is deployed and verified end to
 - `pnpm type-check:tests` after Web Speech v6 silence endpoint fix.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after Web Speech v6 silence endpoint fix.
 - `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed Web Speech v6.
-- `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v6|app.js\\?v=20260701-wake-v6"` verified the deployed v6 marker and cache-busted script URL.
+- `curl -fsSL --max-time 15 https://<private-web-audio-client-host>/ | rg "Web Speech v6|app.js\\?v=20260701-wake-v6"` verified the deployed v6 marker and cache-busted script URL.
 - Generated `/tmp/hey-jarvis-then-silence.wav` from `hey jarvis` plus 5s of silence.
 - `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 30000 --stub-recognition --wait-complete` passed against deployed v6: transcript `hey jarvis` matched, status reached `Silence detected; submitting.`, uploaded a 25.1 KiB `audio/webm;codecs=opus` blob, and received stub response text `wake smoke recognized`.
 - `pnpm type-check:tests`
@@ -127,56 +127,56 @@ Completed. The manual record/send/playback slice is deployed and verified end to
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed.
 - `pnpm exec node --test tests/http-api-transport.test.js tests/web-audio-client-server.test.js` passed with local port binding allowed.
 - `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json`
-- `curl -I --max-time 15 https://private-host-redacted` returned HTTP 200 with `content-type: text/html; charset=utf-8`.
-- `curl -I --max-time 15 https://private-host-redacted` returned HTTP 308 redirecting to `https://private-host-redacted/`.
-- `curl -I --max-time 15 'https://private-host-redacted/?api=https%3A%2F%private-host-redacted'` returned HTTP 200.
-- `curl --max-time 15 -i https://private-host-redacted/health` returned HTTP 200 with `{"ok":true}` and CORS headers.
-- No-token deployed API check: `GET https://private-host-redacted/api/transports/voice/events?chatId=api%3Aweb-e2e-final` returned HTTP 200.
-- Temporary WAV route E2E used generated non-private OGG/Opus speech via `ffmpeg` and posted to `POST https://private-host-redacted/api/transports/voice/audio-turns?wait=true` with request id `e2e-web-audio-final-synth-20260701-001`; response was HTTP 200 with `status:"completed"`, text `Received. Transcript: “Web audio final test phrase Orange Nine.”`, and a WAV audio object.
+- `curl -I --max-time 15 https://<private-web-audio-client-host>` returned HTTP 200 with `content-type: text/html; charset=utf-8`.
+- `curl -I --max-time 15 https://<private-web-audio-client-canonical-host>` returned HTTP 308 redirecting to `https://<private-web-audio-client-host>/`.
+- `curl -I --max-time 15 'https://<private-web-audio-client-host>/?api=https%3A%2F%2F<private-web-audio-api-host>'` returned HTTP 200.
+- `curl --max-time 15 -i https://<private-web-audio-api-host>/health` returned HTTP 200 with `{"ok":true}` and CORS headers.
+- No-token deployed API check: `GET https://<private-web-audio-api-host>/api/transports/voice/events?chatId=api%3Aweb-e2e-final` returned HTTP 200.
+- Temporary WAV route E2E used generated non-private OGG/Opus speech via `ffmpeg` and posted to `POST https://<private-web-audio-api-host>/api/transports/voice/audio-turns?wait=true` with request id `e2e-web-audio-final-synth-20260701-001`; response was HTTP 200 with `status:"completed"`, text `Received. Transcript: “Web audio final test phrase Orange Nine.”`, and a WAV audio object.
 - Direct OpenAI TTS verification synthesized `Received. Transcript: Web audio TTS verification phrase green candle eight bridges.` as `audio/mpeg` and transcribed the returned MP3 with `gpt-4o-mini-transcribe`; normalized expected text and normalized audio transcript matched exactly with word coverage `1.000`.
-- Final deployed OpenAI TTS E2E used generated non-private MP3 speech and posted to `POST https://private-host-redacted/api/transports/voice/audio-turns?wait=true` with request id `e2e-audio-match-1782932487696`; response was HTTP 200 with `status:"completed"`, assistant text, and MP3 audio path `eee9b0661d25182929b7f5e30e504812ae664086c95fa02d7aa0aae3744a5f29.mp3`.
-- The returned deployed MP3 was fetched through `https://private-host-redacted/api/media/eee9b0661d25182929b7f5e30e504812ae664086c95fa02d7aa0aae3744a5f29.mp3` with HTTP 200 and `content-type: audio/mpeg`; OpenAI transcription normalized exactly to the API response text with word coverage `1.000`.
-- Deployed word-detection static check: `https://private-host-redacted/` includes `Word detection`, `Wake Capture`, `Max seconds`, and `Silence seconds`; deployed `app.js` includes the `SpeechRecognition` wake-detection path plus `WAKE_PREROLL_MS`, `startWakeRecorder`, `VAD_NO_SPEECH_TIMEOUT_MS`, `VAD_POST_ROLL_MS`, `Silence detected`, `No speech detected`, `Max utterance`, and `finishWakeCapture`.
+- Final deployed OpenAI TTS E2E used generated non-private MP3 speech and posted to `POST https://<private-web-audio-api-host>/api/transports/voice/audio-turns?wait=true` with request id `e2e-audio-match-1782932487696`; response was HTTP 200 with `status:"completed"`, assistant text, and MP3 audio path `eee9b0661d25182929b7f5e30e504812ae664086c95fa02d7aa0aae3744a5f29.mp3`.
+- The returned deployed MP3 was fetched through `https://<private-web-audio-api-host>/api/media/eee9b0661d25182929b7f5e30e504812ae664086c95fa02d7aa0aae3744a5f29.mp3` with HTTP 200 and `content-type: audio/mpeg`; OpenAI transcription normalized exactly to the API response text with word coverage `1.000`.
+- Deployed word-detection static check: `https://<private-web-audio-client-host>/` includes `Word detection`, `Wake Capture`, `Max seconds`, and `Silence seconds`; deployed `app.js` includes the `SpeechRecognition` wake-detection path plus `WAKE_PREROLL_MS`, `startWakeRecorder`, `VAD_NO_SPEECH_TIMEOUT_MS`, `VAD_POST_ROLL_MS`, `Silence detected`, `No speech detected`, `Max utterance`, and `finishWakeCapture`.
 - `pnpm type-check` after Web Speech v7 adaptive ambient endpointing and shared microphone stream changes.
 - `pnpm type-check:tests` after Web Speech v7 adaptive ambient endpointing and shared microphone stream changes.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after Web Speech v7 changes; sandboxed run failed without detailed output in this environment.
 - `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed Web Speech v7.
-- `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v7|app.js\\?v=20260702-wake-v7|adaptive ambient"` verified the deployed v7 marker and cache-busted script URL.
-- `curl -fsSL --max-time 15 'https://private-host-redacted/app.js?v=20260702-wake-v7' | rg "WAKE_DETECTOR_BUILD|shared-audio-track|vadThresholds|Ambient RMS"` verified the deployed shared-track and adaptive VAD code markers.
+- `curl -fsSL --max-time 15 https://<private-web-audio-client-host>/ | rg "Web Speech v7|app.js\\?v=20260702-wake-v7|adaptive ambient"` verified the deployed v7 marker and cache-busted script URL.
+- `curl -fsSL --max-time 15 'https://<private-web-audio-client-host>/app.js?v=20260702-wake-v7' | rg "WAKE_DETECTOR_BUILD|shared-audio-track|vadThresholds|Ambient RMS"` verified the deployed shared-track and adaptive VAD code markers.
 - `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 30000 --stub-recognition --wait-complete` passed against deployed v7: status reached `Silence detected; submitting.`, uploaded a 23.2 KiB `audio/webm;codecs=opus` blob, and received stub response text `wake smoke recognized`.
 - `pnpm type-check` after Web Speech v8 regression fix.
 - `pnpm type-check:tests` after Web Speech v8 regression fix.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after Web Speech v8 regression fix.
 - `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed Web Speech v8.
-- `curl -fsSL --max-time 15 https://private-host-redacted/ | rg "Web Speech v8|app.js\\?v=20260702-wake-v8|native wake"` verified the deployed v8 marker and cache-busted script URL.
-- `curl -fsSL --max-time 15 'https://private-host-redacted/app.js?v=20260702-wake-v8' | rg "WAKE_DETECTOR_BUILD|VAD_POST_WAKE_CALIBRATION_MS|Calibrating ambient|recognition.start\\(\\)"` verified the deployed native Web Speech start path and post-wake calibration markers.
+- `curl -fsSL --max-time 15 https://<private-web-audio-client-host>/ | rg "Web Speech v8|app.js\\?v=20260702-wake-v8|native wake"` verified the deployed v8 marker and cache-busted script URL.
+- `curl -fsSL --max-time 15 'https://<private-web-audio-client-host>/app.js?v=20260702-wake-v8' | rg "WAKE_DETECTOR_BUILD|VAD_POST_WAKE_CALIBRATION_MS|Calibrating ambient|recognition.start\\(\\)"` verified the deployed native Web Speech start path and post-wake calibration markers.
 - `node scripts/web-wake-smoke.js --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 30000 --stub-recognition --wait-complete` passed against deployed v8: status reached `Silence detected; submitting.`, uploaded a 25.1 KiB `audio/webm;codecs=opus` blob, and received stub response text `wake smoke recognized`. This remains a post-wake app-path smoke only; it does not prove native Android Chrome wake recognition.
 - `pnpm type-check` after local-only Porcupine MVP changes.
 - `pnpm type-check:tests` after local-only Porcupine MVP changes.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after local-only Porcupine MVP changes.
 - `node scripts/web-wake-smoke.js --url http://127.0.0.1:4173/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 45000 --stub-porcupine --wait-complete` passed locally: stubbed Porcupine detected Jarvis, command capture stopped on silence, uploaded a 25.3 KiB `audio/webm;codecs=opus` blob to the stubbed API, and rendered response text `wake smoke recognized`.
 - `node scripts/web-wake-smoke.js --url http://127.0.0.1:4173/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 45000 --stub-porcupine --expect-restart` passed locally: after the completed stubbed turn, the page returned to `Listening locally for "jarvis".`
-- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed the local-only Porcupine MVP to `private-host-redacted`.
-- `curl -fsSL --max-time 15 https://private-host-redacted/` returned deployed HTML with `Picovoice AccessKey`, `Local Porcupine v10`, and no `Web Speech`, `wake-engine`, or `wake-language` controls.
-- `curl -I --max-time 15 https://private-host-redacted/vendor/porcupine/porcupine_params.pv` returned HTTP 200 with `content-length: 984948`.
-- `curl -I --max-time 15 https://private-host-redacted/vendor/picovoice/porcupine-web.iife.js` returned HTTP 200 with `content-type: text/javascript; charset=utf-8`.
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed the local-only Porcupine MVP to `<private-web-audio-client-host>`.
+- `curl -fsSL --max-time 15 https://<private-web-audio-client-host>/` returned deployed HTML with `Picovoice AccessKey`, `Local Porcupine v10`, and no `Web Speech`, `wake-engine`, or `wake-language` controls.
+- `curl -I --max-time 15 https://<private-web-audio-client-host>/vendor/porcupine/porcupine_params.pv` returned HTTP 200 with `content-length: 984948`.
+- `curl -I --max-time 15 https://<private-web-audio-client-host>/vendor/picovoice/porcupine-web.iife.js` returned HTTP 200 with `content-type: text/javascript; charset=utf-8`.
 - 2026-07-04 correction: the Porcupine/Picovoice deployment was superseded because the AccessKey requirement violates the user's no-cloud/no-provider-key constraint.
 - `pnpm type-check` after replacing Picovoice with local openWakeWord-compatible ONNX wake detection.
 - `pnpm type-check:tests` after replacing Picovoice with local openWakeWord-compatible ONNX wake detection.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after adding the vendored ONNX Runtime and openWakeWord assets.
 - `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --wait-complete` passed locally with real browser ONNX inference: openWakeWord detected `hey_jarvis`, command capture stopped, the upload path ran, and the stubbed assistant response text `wake smoke recognized` rendered.
 - `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --expect-restart` passed locally: after a completed turn, the page returned to `Listening locally for "jarvis".`
-- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed the local openWakeWord browser wake path to `private-host-redacted`.
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed the local openWakeWord browser wake path to `<private-web-audio-client-host>`.
 - Deployed HTML marker check found `Wake threshold`, `Detector build: Local openWakeWord v11, single mic stream.`, and `./vendor/onnxruntime/ort.wasm.min.js`.
 - Deployed JavaScript marker check found `OpenWakeWordJarvisDetector` and `configureOrtRuntime`; the same HTML/JS marker checks found no `Picovoice`, `Porcupine`, `AccessKey`, `Web Speech`, or `SpeechRecognition` strings.
-- `curl -I --max-time 15 https://private-host-redacted/vendor/openwakeword/hey_jarvis_v0.1.onnx` returned HTTP 200 with `content-length: 1271370`.
-- `curl -I --max-time 15 https://private-host-redacted/vendor/onnxruntime/ort-wasm-simd-threaded.wasm` returned HTTP 200 with `content-type: application/wasm` and `content-length: 12297086`.
+- `curl -I --max-time 15 https://<private-web-audio-client-host>/vendor/openwakeword/hey_jarvis_v0.1.onnx` returned HTTP 200 with `content-length: 1271370`.
+- `curl -I --max-time 15 https://<private-web-audio-client-host>/vendor/onnxruntime/ort-wasm-simd-threaded.wasm` returned HTTP 200 with `content-type: application/wasm` and `content-length: 12297086`.
 - `pnpm type-check` after v12 immediate wake rearm changes.
 - `pnpm type-check:tests` after v12 immediate wake rearm changes.
 - `pnpm exec node --test tests/web-audio-client-server.test.js` passed with local port binding allowed after v12 marker/test updates and guard assertions for no `Picovoice`, `Porcupine`, `AccessKey`, `Web Speech`, or `SpeechRecognition` strings in the served HTML/JS.
 - `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --response-delay-ms 30000 --expect-immediate-restart` passed locally: the fake backend response was still delayed, assistant text was still `No response yet.`, and diagnostics already showed a second local wake `start` event.
 - `node scripts/web-wake-smoke.js --url http://127.0.0.1:4174/ --audio /tmp/hey-jarvis-then-silence.wav --timeout-ms 60000 --wait-complete` passed locally after v12: local ONNX wake detection, command capture, upload, and response render still completed.
-- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed v12 to `private-host-redacted`.
+- `node /home/mada/tools/caddy-sites-manager/site-manager.js deploy /home/mada/whatsapp-llm-bot/website.json` deployed v12 to `<private-web-audio-client-host>`.
 - Deployed v12 marker check found `Detector build: Local openWakeWord v12, single mic stream.`, `./app.js?v=20260704-wake-v12`, and `restartWakeListeningAfterCapture` / `submitWakeAudioInBackground` in the served JavaScript.
 - Deployed v12 marker check found no `Picovoice`, `Porcupine`, `AccessKey`, `Web Speech`, `SpeechRecognition`, or `scheduleWakeRestart` strings in the served HTML/JS.
 - `pnpm type-check` after v13 detector reset/post-capture suppression changes.

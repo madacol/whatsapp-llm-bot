@@ -345,9 +345,6 @@ function normalizeStoredBaseUrl(baseUrl) {
   if (!isLocalPage() && isLoopbackUrl(baseUrl)) {
     return sameOriginApiBaseUrl();
   }
-  if (isLegacyDeployedApiUrl(baseUrl)) {
-    return sameOriginApiBaseUrl();
-  }
   return baseUrl;
 }
 
@@ -359,20 +356,6 @@ function isLoopbackUrl(value) {
   try {
     const url = new URL(value);
     return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * @param {string} value
- * @returns {boolean}
- */
-function isLegacyDeployedApiUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.hostname === "private-host-redacted"
-      || url.hostname === "private-host-redacted";
   } catch {
     return false;
   }

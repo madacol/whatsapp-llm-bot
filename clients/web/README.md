@@ -61,10 +61,11 @@ HTTPS page to a plain HTTP backend, except for local development cases such as
 ## Deployment
 
 Registered in the repo-root `website.json` as `web-audio-client` and deployed as
-a private/tailnet plus token service:
+a private/tailnet plus token service. Keep concrete deployment hostnames in
+local operational notes or environment configuration, not in this public repo.
 
 ```text
-https://private-host-redacted/
+https://<private-web-audio-client-host>/
 ```
 
 The deployed client does not need a separate API subdomain. The same service

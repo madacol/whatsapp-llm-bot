@@ -10,5 +10,5 @@ description: Publish architecture review HTML reports for this repository.
 3. Add a top entry in `architecture-review-site/index.html` linking to the new report; keep existing links.
 4. Reply with the index URL and direct report URL:
 
-- Index: `https://private-host-redacted`
-- Report: `https://private-host-redacted/reviews/<filename>.html`
+- Index: `https://<private-architecture-review-host>`
+- Report: `https://<private-architecture-review-host>/reviews/<filename>.html`

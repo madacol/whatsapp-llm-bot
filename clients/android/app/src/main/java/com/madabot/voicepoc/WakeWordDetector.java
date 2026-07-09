@@ -7,6 +7,6 @@ interface WakeWordDetector {
         void onWakeError(Exception error);
     }
 
-    void start(String wakePhrase, Listener listener);
+    void start(String wakePhrase, double threshold, Listener listener);
     void stop();
 }

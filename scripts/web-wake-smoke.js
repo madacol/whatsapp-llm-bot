@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const DEFAULT_URL = "https://private-host-redacted/";
+const DEFAULT_URL = process.env.WEB_AUDIO_CLIENT_URL || "http://127.0.0.1:3103/";
 const DEFAULT_AUDIO = "/tmp/hey-jarvis-smoke.wav";
 
 async function main() {

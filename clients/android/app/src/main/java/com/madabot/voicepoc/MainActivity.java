@@ -16,6 +16,8 @@ import android.widget.TextView;
 
 public final class MainActivity extends Activity implements VoiceTurnController.Listener {
     private static final int REQUEST_RECORD_AUDIO = 200;
+    private static final int DEFAULT_API_PORT = 3200;
+    private static final String LOCAL_DEFAULT_API_BASE_URL = "http://127.0.0.1:3200";
 
     private VoiceTurnController controller;
     private WakeWordDetector wakeWordDetector;
@@ -46,7 +48,7 @@ public final class MainActivity extends Activity implements VoiceTurnController.
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         controller = new VoiceTurnController(this, this);
-        wakeWordDetector = new PlatformSpeechWakeWordDetector(this);
+        wakeWordDetector = new OpenWakeWordWakeWordDetector(this);
         setContentView(buildContentView());
         requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, REQUEST_RECORD_AUDIO);
     }
@@ -58,7 +60,7 @@ public final class MainActivity extends Activity implements VoiceTurnController.
         int pad = (int) (16 * getResources().getDisplayMetrics().density);
         root.setPadding(pad, pad, pad, pad);
 
-        baseUrl = field("API base URL", preferences.getString("baseUrl", "http://192.168.1.20:3200"));
+        baseUrl = field("API base URL", defaultBaseUrl(preferences));
         token = field("API token", preferences.getString("token", ""));
         transportId = field("Transport ID", preferences.getString("transportId", "voice"));
         chatId = field("Chat ID", preferences.getString("chatId", "api:android-1"));
@@ -95,7 +97,7 @@ public final class MainActivity extends Activity implements VoiceTurnController.
                 return;
             }
             saveConfig();
-            wakeWordDetector.start(wakePhrase.getText().toString(), new WakeWordDetector.Listener() {
+            wakeWordDetector.start(wakePhrase.getText().toString(), wakeThreshold(), new WakeWordDetector.Listener() {
             @Override
             public void onWakeWord(String keyword) {
                 runOnUiThread(() -> {
@@ -174,6 +176,28 @@ public final class MainActivity extends Activity implements VoiceTurnController.
         return field;
     }
 
+    private String defaultBaseUrl(SharedPreferences preferences) {
+        String configuredDefault = BuildConfig.DEFAULT_API_BASE_URL.trim();
+        String fallback = configuredDefault.isEmpty() ? LOCAL_DEFAULT_API_BASE_URL : configuredDefault;
+        String stored = preferences.getString("baseUrl", "");
+        if (stored == null || stored.trim().isEmpty()) {
+            return fallback;
+        }
+        String normalizedStored = stored.trim();
+        if (!fallback.equals(LOCAL_DEFAULT_API_BASE_URL) && isPreviousDevelopmentBaseUrl(normalizedStored)) {
+            return fallback;
+        }
+        return normalizedStored;
+    }
+
+    private static boolean isPreviousDevelopmentBaseUrl(String value) {
+        if (LOCAL_DEFAULT_API_BASE_URL.equals(value)) {
+            return true;
+        }
+        return value.startsWith("http://192.168.")
+            && (value.endsWith(":" + DEFAULT_API_PORT) || value.endsWith(":" + DEFAULT_API_PORT + "/"));
+    }
+
     private TextView label(String text) {
         TextView view = new TextView(this);
         view.setText(text);
@@ -242,6 +266,15 @@ public final class MainActivity extends Activity implements VoiceTurnController.
             return (long) (boundedSeconds * 1000);
         } catch (NumberFormatException ignored) {
             return 120_000;
+        }
+    }
+
+    private double wakeThreshold() {
+        try {
+            double threshold = Double.parseDouble(wakeThreshold.getText().toString().trim());
+            return Math.max(0.05, Math.min(0.99, threshold));
+        } catch (NumberFormatException ignored) {
+            return 0.5;
         }
     }
 
