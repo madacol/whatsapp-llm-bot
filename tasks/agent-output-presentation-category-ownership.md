@@ -64,6 +64,24 @@ Each category owns:
 - Category settings now exist and several category decisions live in `build-agent-io-hooks.js`, `codex-hook-display.js`, `send-content.js`, and transcription setup.
 - This is not yet the proposed intent layer. The remaining refactor is to centralize classification and policy instead of continuing to spread category checks across those files.
 
+## Live Visibility Requirement
+
+User correction on 2026-07-09:
+
+> You can now change these in real time, so these aren't locked to your prompt.
+
+Media: `/home/mada/whatsapp-llm-bot/.media/20b742f1ee7d0253e9c86518e2abd1813d89da78a15127245d94ed6bf9bca69f.ogg`
+
+Implication for this repo: side-channel visibility should not be captured once at agent-run start. A settings change during a running turn or batch should affect subsequent generated presentation items. For categories with an explicit start boundary, such as tool calls and reasoning items, the visibility sampled at item start owns that item through completion; the user should see the setting change on the next item, not retroactively on the already-started one.
+
+## Live Visibility Implementation Notes
+
+- Agent-run output hooks now accept a visibility provider and production resolves `output_visibility` from the latest chat config before side-channel presentation decisions.
+- Reasoning and tool items keep the visibility sampled at item start through completion/result output.
+- File changes, subagent messages, middle assistant messages, plans, usage, and generic runtime file-change filtering sample current visibility at their emission boundary.
+- WhatsApp runtime rendering preserves already-started standalone tool/command messages if the chat switches to pinned tool status before completion.
+- This does not complete the broader presentation-intent classifier refactor; category decisions are still spread across the existing hook and renderer files.
+
 ## Open Questions
 
 - Where should classification live?

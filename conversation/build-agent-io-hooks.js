@@ -9,6 +9,11 @@ export const MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES = 25;
 export const SNAPSHOT_FILE_CHANGE_BATCH_FLUSH_DELAY_MS = 25;
 
 /**
+ * @typedef {import("../chat-output-visibility.js").OutputVisibility | import("../chat-output-visibility.js").OutputVisibilityOverrides} OutputVisibilityValue
+ * @typedef {OutputVisibilityValue | (() => OutputVisibilityValue | Promise<OutputVisibilityValue>)} OutputVisibilityInput
+ */
+
+/**
  * @param {string} filePath
  * @param {string | null | undefined} cwd
  * @returns {string}
@@ -108,7 +113,7 @@ function runtimeToolFromToolCall(toolCall) {
  * Build the AgentIOHooks wiring from a message context.
  * @param {Pick<ExecuteActionContext, "send" | "reply" | "select" | "confirm">} context
  * @param {string | null} cwd
- * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
+ * @param {OutputVisibilityInput} [visibility]
  * @param {(content: SendContent) => void} [recordDeliveredContent]
  * @returns {AgentIOHooks}
  */
@@ -118,7 +123,14 @@ export function buildAgentIoHooks(
   visibility = DEFAULT_OUTPUT_VISIBILITY,
   recordDeliveredContent,
 ) {
-  const outputVisibility = resolveOutputVisibility(visibility);
+  /**
+   * @returns {Promise<import("../chat-output-visibility.js").OutputVisibility>}
+   */
+  async function getOutputVisibility() {
+    const raw = typeof visibility === "function" ? await visibility() : visibility;
+    return resolveOutputVisibility(raw);
+  }
+
   const agentOutput = createAgentRunOutputPort(context, { cwd });
   /**
    * @template T
@@ -132,9 +144,11 @@ export function buildAgentIoHooks(
   const codexDisplayHooks = createCodexDisplayHooks({
     context,
     cwd,
-    visibility: outputVisibility,
+    getVisibility: getOutputVisibility,
   });
-  /** @type {LlmChatResponse["toolCalls"][0][]} */
+  /** @type {{ id: string, visibility: import("../chat-output-visibility.js").OutputVisibility, resultEmitted: boolean }[]} */
+  const activeToolItems = [];
+  /** @type {{ toolCall: LlmChatResponse["toolCalls"][0], visibility: import("../chat-output-visibility.js").OutputVisibility }[]} */
   const pendingRuntimeToolCalls = [];
   /** @type {Extract<Parameters<Required<AgentIOHooks>["onRuntimeEvent"]>[0], { type: "file-change.completed" }>[]} */
   const pendingSnapshotFileChanges = [];
@@ -144,8 +158,19 @@ export function buildAgentIoHooks(
   let reasoningInspectAttached = false;
   let reasoningFinalized = false;
   let pinnedReasoningShown = false;
+  /** @type {import("../chat-output-visibility.js").OutputVisibility | null} */
+  let activeReasoningVisibility = null;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let snapshotFlushTimer = null;
+
+  function resetReasoningItemState() {
+    reasoningHandle = null;
+    pendingEncryptedReasoning = false;
+    reasoningInspectAttached = false;
+    reasoningFinalized = false;
+    pinnedReasoningShown = false;
+    activeReasoningVisibility = null;
+  }
 
   /**
    * @param {Parameters<Required<AgentIOHooks>["onRuntimeEvent"]>[0]} event
@@ -286,24 +311,66 @@ export function buildAgentIoHooks(
     }]));
   }
 
+  /**
+   * @param {string} id
+   * @param {import("../chat-output-visibility.js").OutputVisibility} visibility
+   */
+  function rememberActiveToolItem(id, visibility) {
+    if (!activeToolItems.some((item) => item.id === id)) {
+      activeToolItems.push({ id, visibility, resultEmitted: false });
+    }
+  }
+
+  /**
+   * @param {string} id
+   * @returns {{ id: string, visibility: import("../chat-output-visibility.js").OutputVisibility, resultEmitted: boolean } | undefined}
+   */
+  function forgetActiveToolItem(id) {
+    const index = activeToolItems.findIndex((item) => item.id === id);
+    if (index === -1) {
+      return undefined;
+    }
+    return activeToolItems.splice(index, 1)[0];
+  }
+
+  /**
+   * @returns {Promise<import("../chat-output-visibility.js").OutputVisibility>}
+   */
+  async function resolveToolResultVisibility() {
+    const activeItem = activeToolItems.find((item) => !item.resultEmitted);
+    if (!activeItem) {
+      return getOutputVisibility();
+    }
+    activeItem.resultEmitted = true;
+    return activeItem.visibility;
+  }
+
   return {
     onReasoning: async (event) => {
+      if (reasoningFinalized && event.status !== "completed") {
+        resetReasoningItemState();
+      }
+      const outputVisibility = activeReasoningVisibility ?? await getOutputVisibility();
+      activeReasoningVisibility = outputVisibility;
       if (outputVisibility.reasoning === "hidden") {
+        if (event.status === "completed") {
+          reasoningFinalized = true;
+        }
         return;
       }
       if (outputVisibility.reasoning === "pinnedIndicator") {
         await emitPinnedReasoningIndicator(event);
+        if (event.status === "completed") {
+          reasoningFinalized = true;
+        }
         return;
       }
       if (outputVisibility.reasoning === "fullDetails") {
         await emitCompletedReasoningDetails(event);
+        if (event.status === "completed") {
+          reasoningFinalized = true;
+        }
         return;
-      }
-      if (reasoningFinalized && event.status !== "completed") {
-        reasoningHandle = null;
-        pendingEncryptedReasoning = false;
-        reasoningInspectAttached = false;
-        reasoningFinalized = false;
       }
       if (!reasoningHandle) {
         if (event.status === "completed" && !shouldCreateReasoningHandle(event)) {
@@ -331,6 +398,7 @@ export function buildAgentIoHooks(
       if (metadata?.streamId && (metadata.streamStatus ?? "partial") !== "final") {
         return;
       }
+      const outputVisibility = await getOutputVisibility();
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
       if (metadata?.source === "subagent") {
@@ -383,6 +451,8 @@ export function buildAgentIoHooks(
       if (isNoopEditingFilesToolCall(toolCall)) {
         return undefined;
       }
+      const outputVisibility = await getOutputVisibility();
+      rememberActiveToolItem(toolCall.id, outputVisibility);
       if (outputVisibility.tools === "hidden") {
         return undefined;
       }
@@ -390,8 +460,8 @@ export function buildAgentIoHooks(
         if (outputVisibility.fileChanges === "shown" && shouldDisplayToolCallAsChange(toolCall, formatToolCall, cwd, toolContext)) {
           return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
         }
-        if (!pendingRuntimeToolCalls.some((pending) => pending.id === toolCall.id)) {
-          pendingRuntimeToolCalls.push(toolCall);
+        if (!pendingRuntimeToolCalls.some((pending) => pending.toolCall.id === toolCall.id)) {
+          pendingRuntimeToolCalls.push({ toolCall, visibility: outputVisibility });
           await agentOutput.sendRuntimeEvent({
             type: "tool.started",
             provider: "codex",
@@ -403,22 +473,24 @@ export function buildAgentIoHooks(
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
     onToolComplete: async (toolCall) => {
-      if (outputVisibility.tools === "hidden") {
+      const index = pendingRuntimeToolCalls.findIndex((pending) => pending.toolCall.id === toolCall.id);
+      if (index === -1) {
+        forgetActiveToolItem(toolCall.id);
         return;
       }
-      if (outputVisibility.tools !== "fullDetails") {
-        const index = pendingRuntimeToolCalls.findIndex((pending) => pending.id === toolCall.id);
-        if (index !== -1) {
-          pendingRuntimeToolCalls.splice(index, 1);
-          await agentOutput.sendRuntimeEvent({
-            type: "tool.completed",
-            provider: "codex",
-            tool: runtimeToolFromToolCall(toolCall),
-          });
-        }
+      const [pending] = pendingRuntimeToolCalls.splice(index, 1);
+      forgetActiveToolItem(toolCall.id);
+      if (!pending || pending.visibility.tools === "hidden" || pending.visibility.tools === "fullDetails") {
+        return;
       }
+      await agentOutput.sendRuntimeEvent({
+        type: "tool.completed",
+        provider: "codex",
+        tool: runtimeToolFromToolCall(toolCall),
+      });
     },
     onToolResult: async (blocks) => {
+      const outputVisibility = await resolveToolResultVisibility();
       if (outputVisibility.tools !== "fullDetails") {
         return;
       }
@@ -426,23 +498,24 @@ export function buildAgentIoHooks(
       recordDeliveredContent?.(blocks);
     },
     onToolError: async (message) => {
-      if (outputVisibility.tools === "hidden") {
+      const pending = pendingRuntimeToolCalls.pop();
+      const activeItem = pending ? forgetActiveToolItem(pending.toolCall.id) : activeToolItems.pop();
+      if (pending && pending.visibility.tools !== "hidden" && pending.visibility.tools !== "fullDetails") {
+        await agentOutput.sendRuntimeEvent({
+          type: "tool.failed",
+          provider: "codex",
+          tool: runtimeToolFromToolCall(pending.toolCall),
+        });
         return;
       }
-      if (outputVisibility.tools !== "fullDetails") {
-        const toolCall = pendingRuntimeToolCalls.pop();
-        if (toolCall) {
-          await agentOutput.sendRuntimeEvent({
-            type: "tool.failed",
-            provider: "codex",
-            tool: runtimeToolFromToolCall(toolCall),
-          });
-          return;
-        }
+      const outputVisibility = activeItem?.visibility ?? await getOutputVisibility();
+      if (outputVisibility.tools === "hidden") {
+        return;
       }
       await emitWhileWorking(() => agentOutput.sendError(message));
     },
     onPlan: async (presentation) => {
+      const outputVisibility = await getOutputVisibility();
       if (outputVisibility.plans === "hidden") {
         return;
       }
@@ -456,12 +529,14 @@ export function buildAgentIoHooks(
       `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
     ),
     onUsage: async (cost, tokens) => {
+      const outputVisibility = await getOutputVisibility();
       if (outputVisibility.usage === "hidden") {
         return;
       }
       await agentOutput.sendUsage(cost, tokens);
     },
     onRuntimeEvent: async (event) => {
+      const outputVisibility = await getOutputVisibility();
       if (event.type === "file-change.completed") {
         if (event.change.source === "snapshot") {
           if (outputVisibility.snapshots === "off") {

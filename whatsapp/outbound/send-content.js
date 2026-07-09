@@ -75,6 +75,24 @@ const runtimeCommandsByChat = new Map();
 const runtimeToolsByChat = new Map();
 
 /**
+ * @param {string} chatId
+ * @param {{ tool: { id: string } }} event
+ * @returns {boolean}
+ */
+function hasStandaloneRuntimeToolState(chatId, event) {
+  return runtimeToolsByChat.get(chatId)?.has(event.tool.id) ?? false;
+}
+
+/**
+ * @param {string} chatId
+ * @param {{ command: { command: string } }} event
+ * @returns {boolean}
+ */
+function hasStandaloneRuntimeCommandState(chatId, event) {
+  return runtimeCommandsByChat.get(chatId)?.has(event.command.command) ?? false;
+}
+
+/**
  * @returns {number}
  */
 function getWhatsAppEditDebounceMs() {
@@ -2140,7 +2158,15 @@ function shouldSuppressStandaloneOutboundEvent(event, outputVisibility) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
-  const turnStatusHandle = await updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions);
+  const hasStandaloneRuntimeActionState =
+    (event.event.type === "tool.started" || event.event.type === "tool.updated" || event.event.type === "tool.completed" || event.event.type === "tool.failed")
+      ? hasStandaloneRuntimeToolState(chatId, event.event)
+      : (event.event.type === "command.started" || event.event.type === "command.completed" || event.event.type === "command.failed")
+        ? hasStandaloneRuntimeCommandState(chatId, event.event)
+        : false;
+  const turnStatusHandle = hasStandaloneRuntimeActionState
+    ? undefined
+    : await updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions);
   if (event.event.type === "turn.started" || event.event.type === "turn.completed") {
     if (event.event.type === "turn.completed") {
       runtimeStatusByChat.delete(chatId);
@@ -2153,14 +2179,14 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
   }
 
   if (event.event.type === "tool.started" || event.event.type === "tool.updated" || event.event.type === "tool.completed" || event.event.type === "tool.failed") {
-    if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility)) {
+    if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility) && !hasStandaloneRuntimeActionState) {
       return turnStatusHandle;
     }
     return sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
 
   if (event.event.type === "command.started" || event.event.type === "command.completed" || event.event.type === "command.failed") {
-    if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility)) {
+    if (shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility) && !hasStandaloneRuntimeActionState) {
       return turnStatusHandle;
     }
     return sendRuntimeCommandEvent(sock, chatId, event, options, reactionRuntime, sendOptions);

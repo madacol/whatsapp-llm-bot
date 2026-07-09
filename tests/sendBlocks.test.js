@@ -245,6 +245,47 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("keeps an already-started standalone tool message when tools switch to pinned mid-item", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-tool-live-visibility-chat";
+    const baseTool = {
+      id: "tool-live-visibility-1",
+      name: "Grep",
+      arguments: { path: "src", pattern: "needle" },
+    };
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.started",
+        provider: "codex",
+        tool: baseTool,
+      },
+    }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.completed",
+        provider: "codex",
+        tool: {
+          ...baseTool,
+          output: "done",
+        },
+      },
+    }, undefined, undefined, { outputVisibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "pinnedIndicator" } });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Search*  `needle` in *src*", linkPreview: null },
+      {
+        text: "✅ *Search*  `needle` in *src*",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
   it("keeps the started write-tool path when completion only changes the status icon", async () => {
     const { sock, sent } = createMockSock();
     const startedTool = {
@@ -479,6 +520,44 @@ describe("sendEvent – runtime events", () => {
       {
         text: "✅ *Shell*  `pnpm type-check`",
         edit: { id: "msg-1", remoteJid: "runtime-command-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("keeps an already-started standalone command message when tools switch to pinned mid-command", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-command-live-visibility-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.started",
+        provider: "acp",
+        command: {
+          command: "pnpm type-check",
+          status: "started",
+        },
+      },
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.completed",
+        provider: "acp",
+        command: {
+          command: "pnpm type-check",
+          status: "completed",
+          output: "ok",
+        },
+      },
+    }, undefined, undefined, { outputVisibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "pinnedIndicator" } });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Shell*  `pnpm type-check`", linkPreview: null },
+      {
+        text: "✅ *Shell*  `pnpm type-check`",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
         linkPreview: null,
       },
     ]);

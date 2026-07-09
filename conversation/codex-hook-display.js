@@ -5,11 +5,11 @@ import { createAgentRunOutputPort } from "../agent-run-output-port.js";
  * @param {{
  *   context: Pick<ExecuteActionContext, "send" | "reply">,
  *   cwd: string | null,
- *   visibility: import("../chat-output-visibility.js").OutputVisibility,
+ *   getVisibility: () => import("../chat-output-visibility.js").OutputVisibility | Promise<import("../chat-output-visibility.js").OutputVisibility>,
  * }} input
  * @returns {Pick<Required<AgentIOHooks>, "onFileChange">}
  */
-export function createCodexDisplayHooks({ context, cwd, visibility }) {
+export function createCodexDisplayHooks({ context, cwd, getVisibility }) {
   const agentOutput = createAgentRunOutputPort(context, { cwd });
   return {
     onFileChange,
@@ -30,6 +30,7 @@ export function createCodexDisplayHooks({ context, cwd, visibility }) {
    * @returns {Promise<void>}
    */
   async function onFileChange({ path, summary, diff, kind, source, itemId, stage, oldText, newText }) {
+    const visibility = await getVisibility();
     if (source === "snapshot" ? visibility.snapshots === "off" : visibility.fileChanges === "hidden") {
       return;
     }

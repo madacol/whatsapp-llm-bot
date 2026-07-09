@@ -40,6 +40,35 @@ function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
 }
 
 /**
+ * @param {() => import("../chat-output-visibility.js").OutputVisibility | Promise<import("../chat-output-visibility.js").OutputVisibility>} getVisibility
+ * @returns {{
+ *   hooks: AgentIOHooks,
+ *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
+ * }}
+ */
+function createSubjectWithVisibilityProvider(getVisibility) {
+  /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+  const sent = [];
+  const hooks = buildAgentIoHooks(
+    {
+      send: async (event) => {
+        sent.push({ event, kind: "send" });
+        return undefined;
+      },
+      reply: async (event) => {
+        sent.push({ event, kind: "reply" });
+        return undefined;
+      },
+      select: async () => "",
+      confirm: async () => true,
+    },
+    null,
+    getVisibility,
+  );
+  return { hooks, sent };
+}
+
+/**
  * @param {string | null} cwd
  * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
  * @returns {{
@@ -110,6 +139,51 @@ function createReasoningSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
     },
     null,
     visibility,
+  );
+  return { hooks, sent, reasoningUpdates, reasoningInspects };
+}
+
+/**
+ * @param {() => import("../chat-output-visibility.js").OutputVisibility | Promise<import("../chat-output-visibility.js").OutputVisibility>} getVisibility
+ * @returns {{
+ *   hooks: AgentIOHooks,
+ *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
+ *   reasoningUpdates: MessageHandleUpdate[],
+ *   reasoningInspects: MessageInspectState[],
+ * }}
+ */
+function createReasoningSubjectWithVisibilityProvider(getVisibility) {
+  /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+  const sent = [];
+  /** @type {MessageHandleUpdate[]} */
+  const reasoningUpdates = [];
+  /** @type {MessageInspectState[]} */
+  const reasoningInspects = [];
+  const hooks = buildAgentIoHooks(
+    {
+      send: async (event) => {
+        sent.push({ event, kind: "send" });
+        return undefined;
+      },
+      reply: async (event) => {
+        sent.push({ event, kind: "reply" });
+        return {
+          transportHandleId: "reasoning-msg-1",
+          update: async (update) => {
+            reasoningUpdates.push(structuredClone(update));
+          },
+          setInspect: (inspect) => {
+            if (inspect) {
+              reasoningInspects.push(structuredClone(inspect));
+            }
+          },
+        };
+      },
+      select: async () => "",
+      confirm: async () => true,
+    },
+    null,
+    getVisibility,
   );
   return { hooks, sent, reasoningUpdates, reasoningInspects };
 }
@@ -588,6 +662,45 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(subject.reasoningInspects, []);
   });
 
+  it("keeps active reasoning item visibility through completion while later items sample live settings", async () => {
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    let visibility = { ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "indicatorInspectable" };
+    const subject = createReasoningSubjectWithVisibilityProvider(() => visibility);
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      itemId: "reason-live-1",
+      summaryParts: [],
+      contentParts: ["Visible item started."],
+      text: "Visible item started.",
+    });
+    visibility = { ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "hidden" };
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      itemId: "reason-live-1",
+      summaryParts: [],
+      contentParts: ["Visible item completed."],
+      text: "Visible item completed.",
+    });
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      itemId: "reason-live-2",
+      summaryParts: [],
+      contentParts: ["Hidden item started."],
+      text: "Hidden item started.",
+    });
+
+    assert.equal(subject.sent.length, 1);
+    assert.equal(subject.sent[0]?.event.kind, "assistant_output");
+    assert.equal(subject.reasoningUpdates.length, 1);
+    assert.equal(subject.reasoningInspects.length, 1);
+    assert.equal(subject.reasoningInspects[0]?.kind, "reasoning");
+    if (subject.reasoningInspects[0]?.kind !== "reasoning") {
+      assert.fail("Expected reasoning inspect state");
+    }
+    assert.equal(subject.reasoningInspects[0].text, "Visible item completed.");
+  });
+
   it("emits reasoning as a pinned runtime indicator when configured", async () => {
     const subject = createReasoningSubject({ ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "pinnedIndicator" });
 
@@ -728,6 +841,66 @@ describe("buildAgentIoHooks", () => {
         },
       },
     });
+  });
+
+  it("samples live visibility for new tool items without changing active tool completion", async () => {
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    let visibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" };
+    const { hooks, sent } = createSubjectWithVisibilityProvider(() => visibility);
+    const firstTool = {
+      id: "live-tool-1",
+      name: "Read",
+      arguments: JSON.stringify({ file_path: "/repo/a.js" }),
+    };
+    const secondTool = {
+      id: "live-tool-2",
+      name: "Read",
+      arguments: JSON.stringify({ file_path: "/repo/b.js" }),
+    };
+
+    await hooks.onToolCall?.(firstTool);
+    visibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "hidden" };
+    await hooks.onToolComplete?.(firstTool);
+    await hooks.onToolCall?.(secondTool);
+    await hooks.onToolComplete?.(secondTool);
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.deepEqual(sent.map((entry) => entry.event.kind === "runtime_event" ? entry.event.event.type : ""), [
+      "tool.started",
+      "tool.completed",
+    ]);
+  });
+
+  it("keeps active tool result visibility through completion while later tool results sample live settings", async () => {
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    let visibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" };
+    const { hooks, sent } = createSubjectWithVisibilityProvider(() => visibility);
+    const compactTool = {
+      id: "live-tool-result-1",
+      name: "Read",
+      arguments: JSON.stringify({ file_path: "/repo/a.js" }),
+    };
+    const fullDetailTool = {
+      id: "live-tool-result-2",
+      name: "Read",
+      arguments: JSON.stringify({ file_path: "/repo/b.js" }),
+    };
+
+    await hooks.onToolCall?.(compactTool);
+    visibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" };
+    await hooks.onToolResult?.([{ type: "text", text: "compact-start result" }], "Read", {});
+    await hooks.onToolComplete?.(compactTool);
+    await hooks.onToolCall?.(fullDetailTool);
+    visibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "hidden" };
+    await hooks.onToolResult?.([{ type: "text", text: "full-detail-start result" }], "Read", {});
+    await hooks.onToolComplete?.(fullDetailTool);
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "runtime_event",
+      "runtime_event",
+      "tool_call",
+      "agent_tool_result",
+    ]);
   });
 
   it("passes unrecognized tool actions through runtime output events", async () => {
@@ -906,6 +1079,23 @@ describe("buildAgentIoHooks", () => {
     await hooks.onFileChange?.({ path: "/tmp/file.js", summary: "Updated file" });
 
     assert.equal(sent.length, 0);
+  });
+
+  it("samples live visibility for file changes emitted after a settings change", async () => {
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    let visibility = { ...DEFAULT_OUTPUT_VISIBILITY, fileChanges: "shown" };
+    const { hooks, sent } = createSubjectWithVisibilityProvider(() => visibility);
+
+    await hooks.onFileChange?.({ path: "/tmp/visible.js", summary: "Visible change" });
+    visibility = { ...DEFAULT_OUTPUT_VISIBILITY, fileChanges: "hidden" };
+    await hooks.onFileChange?.({ path: "/tmp/hidden.js", summary: "Hidden change" });
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event"]);
+    if (sent[0]?.event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
+    }
+    assert.equal(sent[0].event.event.type, "file-change.completed");
+    assert.equal(sent[0].event.event.change.path, "/tmp/visible.js");
   });
 
   it("suppresses snapshot file changes when snapshots are off", async () => {

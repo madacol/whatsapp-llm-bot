@@ -3,7 +3,6 @@ import { getHarnessInstanceConfig } from "../harness-config.js";
 import { createAgentRunOutputPort } from "../agent-run-output-port.js";
 import { appendUniqueContentBlocks, getDeliveredContentSignature } from "../content-signature.js";
 import { errorToString } from "../utils.js";
-import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import {
   createHarnessRuntimeEventDispatcher,
   resolveHarnessInstance,
@@ -260,6 +259,7 @@ function materializeRuntimeSelection(selection) {
  */
 export function createAgentRuntime({ store, llmClient, log }) {
   const {
+    getChat,
     getMessages,
   } = store;
   const sessionPersistence = createAgentSessionPersistence(store);
@@ -491,7 +491,10 @@ export function createAgentRuntime({ store, llmClient, log }) {
     const hooks = buildAgentIoHooks(
       context,
       runConfig.workdir ?? null,
-      resolveOutputVisibility(chatInfo?.output_visibility),
+      async () => {
+        const currentChat = await getChat(chatId);
+        return currentChat?.output_visibility ?? chatInfo?.output_visibility ?? {};
+      },
       (deliveredContent) => {
         addDeliveredContentSignatures(deliveredContentSignatures, deliveredContent);
       },
