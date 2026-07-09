@@ -70,15 +70,74 @@ function normalizeSlashes(value) {
 }
 
 /**
- * @param {string} pattern
- * @returns {RegExp}
+ * @typedef {{
+ *   negated: boolean;
+ *   directoryOnly: boolean;
+ *   exactRegExp: RegExp;
+ *   descendantRegExp: RegExp;
+ * }} SnapshotIgnorePattern
  */
-function globToRegExp(pattern) {
-  const normalized = normalizeSlashes(pattern.trim()).replace(/^\/+/, "");
+
+/**
+ * @param {string} pattern
+ * @returns {SnapshotIgnorePattern | null}
+ */
+function parseSnapshotIgnorePattern(pattern) {
+  let normalized = normalizeSlashes(pattern.trim());
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.startsWith("\\#") || normalized.startsWith("\\!")) {
+    normalized = normalized.slice(1);
+  }
+  const negated = normalized.startsWith("!");
+  if (negated) {
+    normalized = normalized.slice(1).trim();
+  }
+  if (!normalized) {
+    return null;
+  }
+  const directoryOnly = normalized.endsWith("/");
+  normalized = normalized.replace(/\/+$/, "");
+  const anchored = normalized.startsWith("/") || normalized.includes("/");
+  normalized = normalized.replace(/^\/+/, "");
+  if (!normalized) {
+    return null;
+  }
+
+  const leadingAnyDirectory = normalized.startsWith("**/");
+  if (leadingAnyDirectory) {
+    normalized = normalized.slice(3);
+  }
+  const prefix = leadingAnyDirectory || !anchored ? "(?:^|.*/)" : "^";
+  const source = prefix + gitignoreGlobSource(normalized);
+  return {
+    negated,
+    directoryOnly,
+    exactRegExp: new RegExp(`${source}$`),
+    descendantRegExp: new RegExp(`${source}/.*$`),
+  };
+}
+
+/**
+ * @param {string} pattern
+ * @returns {string}
+ */
+function gitignoreGlobSource(pattern) {
   let source = "";
-  for (let index = 0; index < normalized.length; index += 1) {
-    const char = normalized[index];
-    const next = normalized[index + 1];
+  for (let index = 0; index < pattern.length; index += 1) {
+    if (pattern.startsWith("**/", index)) {
+      source += "(?:.*/)?";
+      index += 2;
+      continue;
+    }
+    if (pattern.startsWith("/**", index) && index + 3 === pattern.length) {
+      source += "/.*";
+      index += 2;
+      continue;
+    }
+    const char = pattern[index];
+    const next = pattern[index + 1];
     if (char === "*" && next === "*") {
       source += ".*";
       index += 1;
@@ -94,7 +153,22 @@ function globToRegExp(pattern) {
     }
     source += char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
   }
-  return new RegExp(`^${source}(?:/.*)?$`);
+  return source;
+}
+
+/**
+ * @param {SnapshotIgnorePattern} pattern
+ * @param {string} normalizedRelativePath
+ * @param {boolean} isDirectory
+ * @returns {boolean}
+ */
+function snapshotIgnorePatternMatches(pattern, normalizedRelativePath, isDirectory) {
+  if (pattern.directoryOnly) {
+    return pattern.descendantRegExp.test(normalizedRelativePath)
+      || (isDirectory && pattern.exactRegExp.test(normalizedRelativePath));
+  }
+  return pattern.exactRegExp.test(normalizedRelativePath)
+    || pattern.descendantRegExp.test(normalizedRelativePath);
 }
 
 /**
@@ -153,23 +227,34 @@ function loadSnapshotIgnorePatternsForWorkdir(workdir) {
  * @param {string} root
  * @param {string} filePath
  * @param {string[]} patterns
+ * @param {boolean} [isDirectory]
  * @returns {boolean}
  */
-function isPathIgnoredByPatterns(root, filePath, patterns) {
+function isPathIgnoredByPatterns(root, filePath, patterns, isDirectory = false) {
   const relativePath = path.relative(root, filePath);
   if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
     return false;
   }
   const normalizedRelativePath = normalizeSlashes(relativePath);
-  return patterns.some((pattern) => {
-    const normalizedPattern = normalizeSlashes(pattern.trim()).replace(/^\/+/, "");
-    if (normalizedPattern.endsWith("/**")) {
-      const directoryPattern = normalizedPattern.slice(0, -3);
-      if (globToRegExp(directoryPattern).test(normalizedRelativePath)) {
-        return true;
-      }
+  let ignored = false;
+  for (const rawPattern of patterns) {
+    const pattern = parseSnapshotIgnorePattern(rawPattern);
+    if (!pattern || !snapshotIgnorePatternMatches(pattern, normalizedRelativePath, isDirectory)) {
+      continue;
     }
-    return globToRegExp(normalizedPattern).test(normalizedRelativePath);
+    ignored = !pattern.negated;
+  }
+  return ignored;
+}
+
+/**
+ * @param {string[]} patterns
+ * @returns {boolean}
+ */
+function hasNegatedPattern(patterns) {
+  return patterns.some((pattern) => {
+    const normalized = normalizeSlashes(pattern.trim());
+    return normalized.startsWith("!") && normalized.length > 1;
   });
 }
 
@@ -410,6 +495,7 @@ export async function emitAcpSnapshotFileChanges(input) {
  * @returns {Promise<void>}
  */
 async function collectSnapshotFiles(root, currentPath, snapshot, ignoredPaths) {
+  const keepIgnoredDirectoriesTraversable = hasNegatedPattern(ignoredPaths);
   let entries;
   try {
     entries = await fs.readdir(currentPath, { withFileTypes: true });
@@ -418,7 +504,10 @@ async function collectSnapshotFiles(root, currentPath, snapshot, ignoredPaths) {
   }
   for (const entry of entries) {
     const filePath = path.join(currentPath, entry.name);
-    if (isPathIgnoredByPatterns(root, filePath, ignoredPaths)) {
+    if (
+      isPathIgnoredByPatterns(root, filePath, ignoredPaths, entry.isDirectory())
+      && !(entry.isDirectory() && keepIgnoredDirectoriesTraversable)
+    ) {
       continue;
     }
     if (entry.isDirectory()) {

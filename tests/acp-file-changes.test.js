@@ -312,4 +312,47 @@ describe("ACP file changes", () => {
       false,
     );
   });
+
+  it("treats snapshot-ignore entries as gitignore-style patterns", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-gitignore-style-snapshot-ignore-"));
+    await fs.writeFile(path.join(workdir, "snapshot-ignore.txt"), [
+      "cache/",
+      "*.apk",
+      "**/root-match.txt",
+      "/root-only.txt",
+      "ignored/",
+      "!ignored/keep.js",
+      "",
+    ].join("\n"), "utf8");
+    await fs.mkdir(path.join(workdir, "cache"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "cache/output.txt"), "ignored\n", "utf8");
+    await fs.mkdir(path.join(workdir, "nested/cache"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "nested/cache/output.txt"), "ignored\n", "utf8");
+    await fs.mkdir(path.join(workdir, "artifacts"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "artifacts/app-debug.apk"), "ignored\n", "utf8");
+    await fs.writeFile(path.join(workdir, "root-match.txt"), "ignored\n", "utf8");
+    await fs.mkdir(path.join(workdir, "nested"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "nested/root-match.txt"), "ignored\n", "utf8");
+    await fs.writeFile(path.join(workdir, "root-only.txt"), "ignored\n", "utf8");
+    await fs.writeFile(path.join(workdir, "nested/root-only.txt"), "kept\n", "utf8");
+    await fs.mkdir(path.join(workdir, "ignored"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "ignored/drop.js"), "ignored\n", "utf8");
+    await fs.writeFile(path.join(workdir, "ignored/keep.js"), "kept\n", "utf8");
+    await fs.mkdir(path.join(workdir, "src"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "src/app.js"), "kept\n", "utf8");
+
+    const snapshot = await snapshotAcpWorkdir(workdir);
+
+    assert.ok(snapshot);
+    assert.equal(snapshot.has(path.join(workdir, "cache/output.txt")), false);
+    assert.equal(snapshot.has(path.join(workdir, "nested/cache/output.txt")), false);
+    assert.equal(snapshot.has(path.join(workdir, "artifacts/app-debug.apk")), false);
+    assert.equal(snapshot.has(path.join(workdir, "root-match.txt")), false);
+    assert.equal(snapshot.has(path.join(workdir, "nested/root-match.txt")), false);
+    assert.equal(snapshot.has(path.join(workdir, "root-only.txt")), false);
+    assert.equal(snapshot.has(path.join(workdir, "nested/root-only.txt")), true);
+    assert.equal(snapshot.has(path.join(workdir, "ignored/drop.js")), false);
+    assert.equal(snapshot.has(path.join(workdir, "ignored/keep.js")), true);
+    assert.equal(snapshot.has(path.join(workdir, "src/app.js")), true);
+  });
 });
