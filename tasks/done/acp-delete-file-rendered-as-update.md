@@ -1,6 +1,6 @@
 # ACP Delete File Rendered As Update
 
-Status: Todo
+Status: Done
 
 ## Subject
 
@@ -58,3 +58,16 @@ Relevant surfaces:
 - The resulting outbound file-change event preserves deletion semantics.
 - WhatsApp presentation labels the file as `Delete`, not `Update`.
 - The test would fail against the observed bad behavior before the fix.
+
+## Completion Notes
+
+- Normalized ACP file-change kind payloads shaped like `{ type: "delete" }` into canonical `delete` before diff inference.
+- Extended raw apply_patch parsing to emit delete file-change blocks for `*** Delete File:` hunks.
+- Added raw ACP payload-to-WhatsApp regressions for the captured delete-file shape and raw apply_patch delete hunks.
+- The delete path now preserves `change.kind === "delete"` and renders with the WhatsApp `Delete` label instead of falling back to `Update`.
+
+## Verification
+
+- `pnpm test tests/llm-pipeline.test.js tests/acp-payload-to-whatsapp.test.js tests/sendBlocks.test.js`
+- `pnpm type-check`
+- `pnpm type-check:tests`

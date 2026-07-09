@@ -587,13 +587,27 @@ function extractOutboundContentText(content) {
 
 /**
  * @param {OutboundEvent} event
+ * @returns {string}
+ */
+function extractGuardianReviewText(event) {
+  if (event.kind === "assistant_output") {
+    return extractOutboundContentText(event.content).trim();
+  }
+  if (
+    event.kind === "runtime_event"
+    && event.event.type === "runtime.warning"
+  ) {
+    return (event.event.message ?? event.event.summary ?? event.event.details ?? "").trim();
+  }
+  return "";
+}
+
+/**
+ * @param {OutboundEvent} event
  * @returns {"👍" | "👎" | null}
  */
 function getGuardianReviewPrefixEmoji(event) {
-  if (event.kind !== "assistant_output") {
-    return null;
-  }
-  const text = extractOutboundContentText(event.content).trim();
+  const text = extractGuardianReviewText(event);
   if (/^Guardian warning: Automatic approval review approved\b/.test(text)) {
     return "👍";
   }

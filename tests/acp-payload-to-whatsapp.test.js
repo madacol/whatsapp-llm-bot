@@ -1127,6 +1127,93 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.caption, "🔧 *Update*  `src/app.js`", JSON.stringify(sent));
   });
 
+  it("renders captured ACP delete-file changes as Delete, not Update", async () => {
+    const deletedPath = "/home/mada/.codex/skills/snapshot-ignore/SKILL.md";
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "delete-file-1",
+          kind: "edit",
+          title: "Editing files",
+          status: "completed",
+          rawInput: {
+            patch: [
+              "*** Begin Patch",
+              "*** Update File: /home/mada/.codex/AGENTS.md",
+              "@@",
+              "+- When asked to ignore paths from snapshots, add them to `snapshot-ignore.txt` as simple relative globs.",
+              "*** Delete File: /home/mada/.codex/skills/snapshot-ignore/SKILL.md",
+              "*** End Patch",
+            ].join("\n"),
+          },
+          content: [{
+            type: "diff",
+            path: deletedPath,
+            kind: { type: "delete" },
+            diff: [
+              "---",
+              "name: snapshot-ignore",
+              "description: Use when the user asks to ignore paths from snapshots.",
+              "---",
+              "",
+              "# Snapshot Ignore",
+              "",
+              "Add the requested paths to `snapshot-ignore.txt` as simple relative globs, e.g. `node_modules/**`.",
+            ].join("\n"),
+          }],
+        },
+      },
+    ], {
+      chatId: "acp-payload-delete-file@s.whatsapp.net",
+      cwd: "/home/mada/.codex",
+    });
+
+    const fileChangeEvents = trace.runtimeEvents.filter((event) => event.type === "file-change.completed");
+    assert.equal(fileChangeEvents.length, 1);
+    assert.equal(fileChangeEvents[0]?.type === "file-change.completed" ? fileChangeEvents[0].change.kind : undefined, "delete");
+
+    const renderedLabels = sent
+      .map((entry) => String(entry.msg.caption ?? entry.msg.text ?? ""))
+      .join("\n");
+    assert.match(renderedLabels, /\*Delete\*  `skills\/snapshot-ignore\/SKILL\.md`/);
+    assert.doesNotMatch(renderedLabels, /\*Update\*  `skills\/snapshot-ignore\/SKILL\.md`/);
+  });
+
+  it("extracts raw apply_patch Delete File hunks as delete file changes", async () => {
+    const deletedPath = "/home/mada/.codex/skills/snapshot-ignore/SKILL.md";
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "raw-delete-file-1",
+          kind: "edit",
+          title: "Editing files",
+          status: "completed",
+          rawInput: [
+            "*** Begin Patch",
+            "*** Delete File: /home/mada/.codex/skills/snapshot-ignore/SKILL.md",
+            "*** End Patch",
+          ].join("\n"),
+        },
+      },
+    ], {
+      chatId: "acp-payload-raw-delete-file@s.whatsapp.net",
+      cwd: "/home/mada/.codex",
+    });
+
+    const fileChangeEvents = trace.runtimeEvents.filter((event) => event.type === "file-change.completed");
+    assert.equal(fileChangeEvents.length, 1);
+    assert.equal(fileChangeEvents[0]?.type === "file-change.completed" ? fileChangeEvents[0].change.path : undefined, deletedPath);
+    assert.equal(fileChangeEvents[0]?.type === "file-change.completed" ? fileChangeEvents[0].change.kind : undefined, "delete");
+    assert.ok(
+      sent.some((entry) => String(entry.msg.caption ?? entry.msg.text ?? "").includes("*Delete*  `skills/snapshot-ignore/SKILL.md`")),
+      JSON.stringify(sent),
+    );
+  });
+
   it("renders ACP tool progress as normal concise messages around non-tool updates", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
@@ -1738,9 +1825,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
       "tool.started",
-      "item.started",
-      "content.delta",
-      "item.completed",
+      "runtime.warning",
     ]);
     assert.equal(sent[0]?.msg.text, "🔧 *Shell*  `pnpm type-check`");
     assert.equal(sent[1]?.msg.text, "👍 🔧 *Shell*  `pnpm type-check`");

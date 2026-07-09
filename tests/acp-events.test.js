@@ -279,6 +279,28 @@ describe("ACP event normalization", () => {
     }]);
   });
 
+  it("normalizes Guardian approval review text as a runtime warning instead of assistant output", () => {
+    const events = normalizeAcpSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "Guardian warning: Automatic approval review approved (risk: low, authorization: unknown): Auto-review returned a low-risk allow decision.\n\n",
+        },
+      },
+    });
+
+    assert.deepEqual(events.map((event) => event.type), ["runtime.warning"]);
+    const [event] = events;
+    assert.equal(event?.type === "runtime.warning" ? event.summary : "", "Automatic approval review approved");
+    assert.equal(event?.type === "runtime.warning" ? event.class : "", "permission_error");
+    assert.equal(
+      event?.type === "runtime.warning" ? event.message?.startsWith("Guardian warning: Automatic approval review approved") : false,
+      true,
+    );
+  });
+
   it("normalizes Madabot ACP subagent messages and ACP diff content", () => {
     assert.deepEqual(normalizeAcpSessionUpdate({
       sessionId: "s1",

@@ -365,9 +365,10 @@ function makeFileChangeEvent(block, toolCall, diagnosticRaw) {
     ? block.diff
     : typeof block.diffText === "string" ? block.diffText : undefined;
   const diffKind = inferFileChangeKindFromUnifiedDiff(diff);
+  const blockKind = normalizeFileChangeKind(block.kind);
   /** @type {"add" | "delete" | "update"} */
-  const kind = isFileChangeKind(block.kind)
-    ? block.kind
+  const kind = blockKind
+    ? blockKind
     : oldText === undefined && newText === undefined
       ? diffKind ?? "update"
       : oldText === undefined
@@ -390,6 +391,20 @@ function makeFileChangeEvent(block, toolCall, diagnosticRaw) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {"add" | "delete" | "update" | undefined}
+ */
+function normalizeFileChangeKind(value) {
+  if (isFileChangeKind(value)) {
+    return value;
+  }
+  if (isRecord(value) && isFileChangeKind(value.type)) {
+    return value.type;
+  }
+  return undefined;
+}
+
+/**
  * @param {unknown} content
  * @returns {Record<string, unknown>[]}
  */
@@ -402,14 +417,16 @@ function extractDiffBlocks(content) {
 
 /**
  * @param {string} filePath
- * @param {"add" | "update"} kind
+ * @param {"add" | "delete" | "update"} kind
  * @param {string[]} bodyLines
  * @returns {string}
  */
 function buildPatchDiffText(filePath, kind, bodyLines) {
   const header = kind === "add"
     ? ["--- /dev/null", `+++ b/${filePath}`]
-    : [`--- a/${filePath}`, `+++ b/${filePath}`];
+    : kind === "delete"
+      ? [`--- a/${filePath}`, "+++ /dev/null"]
+      : [`--- a/${filePath}`, `+++ b/${filePath}`];
   const hasHunkHeader = bodyLines.some((line) => line.startsWith("@@"));
   const hunk = hasHunkHeader
     ? bodyLines
@@ -426,7 +443,7 @@ function extractApplyPatchDiffBlocks(rawInput) {
   if (!patchText) {
     return [];
   }
-  /** @type {Array<{ path: string, kind: "add" | "update", lines: string[] }>} */
+  /** @type {Array<{ path: string, kind: "add" | "delete" | "update", lines: string[] }>} */
   const parsed = [];
   /** @type {{ path: string, kind: "add" | "update", lines: string[] } | null} */
   let current = null;
@@ -448,6 +465,11 @@ function extractApplyPatchDiffBlocks(rawInput) {
     if (line.startsWith("*** Add File: ")) {
       finishCurrent();
       current = { path: line.slice("*** Add File: ".length).trim(), kind: "add", lines: [] };
+      continue;
+    }
+    if (line.startsWith("*** Delete File: ")) {
+      finishCurrent();
+      parsed.push({ path: line.slice("*** Delete File: ".length).trim(), kind: "delete", lines: [] });
       continue;
     }
     if (line.startsWith("*** ")) {
@@ -473,7 +495,7 @@ function extractApplyPatchDiffBlocks(rawInput) {
     type: "diff",
     path: entry.path,
     kind: entry.kind,
-    diff: buildPatchDiffText(entry.path, entry.kind, entry.lines),
+    ...(entry.lines.length > 0 ? { diff: buildPatchDiffText(entry.path, entry.kind, entry.lines) } : {}),
   }));
 }
 
@@ -704,6 +726,9 @@ export function createAcpRuntimeModel() {
     if (!assistantSegment) return [];
     const completed = assistantSegment;
     assistantSegment = null;
+    if (isGuardianReviewText(completed.text)) {
+      return [makeGuardianReviewEvent(completed.text, completed.diagnosticRaw)];
+    }
     return [{
       type: "item.completed",
       provider: "acp",
@@ -722,6 +747,25 @@ export function createAcpRuntimeModel() {
    */
   function isGuardianReviewText(text) {
     return /^Guardian warning: Automatic approval review (approved|denied)\b/.test(text.trim());
+  }
+
+  /**
+   * @param {string} text
+   * @param {import("./harness-runtime-events.js").HarnessRuntimeRawEvent} diagnosticRaw
+   * @returns {import("./harness-runtime-events.js").HarnessRuntimeEventInput}
+   */
+  function makeGuardianReviewEvent(text, diagnosticRaw) {
+    const trimmed = text.trim();
+    const decision = /^Guardian warning: Automatic approval review (approved|denied)\b/.exec(trimmed)?.[1] ?? "completed";
+    return {
+      type: "runtime.warning",
+      provider: "acp",
+      summary: `Automatic approval review ${decision}`,
+      message: trimmed,
+      details: trimmed,
+      class: "permission_error",
+      diagnosticRaw,
+    };
   }
 
   /**
@@ -761,6 +805,12 @@ export function createAcpRuntimeModel() {
             metadata: subagentMetadata,
             diagnosticRaw: eventRaw,
           },
+        ];
+      }
+      if (isGuardianReviewText(text)) {
+        return [
+          ...flushAssistantSegment(),
+          makeGuardianReviewEvent(text, eventRaw),
         ];
       }
       /** @type {import("./harness-runtime-events.js").HarnessRuntimeEventInput[]} */
