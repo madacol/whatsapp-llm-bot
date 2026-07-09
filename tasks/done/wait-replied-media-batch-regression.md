@@ -1,6 +1,6 @@
 # Wait Replied Media Batch Regression
 
-Status: Todo
+Status: Complete
 
 ## Subject
 
@@ -17,17 +17,17 @@ User report, 2026-07-02:
 
 Attached evidence:
 
-- First screenshot: [1636c1d69a0d5ac02590140d85894652b2d8cfb84306b08544781535f2048745.jpg](../.media/1636c1d69a0d5ac02590140d85894652b2d8cfb84306b08544781535f2048745.jpg)
-- Clarifying screenshot: [9f15dbcfbdb15a3f0cb0c7bcf621a790e7334d4733da9b5f08da9c5680eb78e2.jpg](../.media/9f15dbcfbdb15a3f0cb0c7bcf621a790e7334d4733da9b5f08da9c5680eb78e2.jpg)
-- Voice note: [eddf74da15f1b448bc466f53fbeaf70256666b4af4d5fd42ac62849f108f0e85.ogg](../.media/eddf74da15f1b448bc466f53fbeaf70256666b4af4d5fd42ac62849f108f0e85.ogg)
+- First screenshot: [1636c1d69a0d5ac02590140d85894652b2d8cfb84306b08544781535f2048745.jpg](../../.media/1636c1d69a0d5ac02590140d85894652b2d8cfb84306b08544781535f2048745.jpg)
+- Clarifying screenshot: [9f15dbcfbdb15a3f0cb0c7bcf621a790e7334d4733da9b5f08da9c5680eb78e2.jpg](../../.media/9f15dbcfbdb15a3f0cb0c7bcf621a790e7334d4733da9b5f08da9c5680eb78e2.jpg)
+- Voice note: [eddf74da15f1b448bc466f53fbeaf70256666b4af4d5fd42ac62849f108f0e85.ogg](../../.media/eddf74da15f1b448bc466f53fbeaf70256666b4af4d5fd42ac62849f108f0e85.ogg)
 
-Related completed work: [wait-send-batching-command.md](done/wait-send-batching-command.md).
+Related completed work: [wait-send-batching-command.md](wait-send-batching-command.md).
 
 ## Current Understanding
 
 The completed `/wait` task intentionally kept `/wait`, `/send`, and `/cancel` control messages out of the pending batch. This report appears to refine that rule: the command text should remain control-only, but a replied/quoted media payload that the command points at should be treated as the first batch item.
 
-The exact inbound representation of replied media is not yet confirmed. Before implementation, inspect the real WhatsApp payload or the normalized channel input for the replied `/wait` message and identify where the quoted image reference/media content is available.
+Implementation confirmed the relevant normalized shape: WhatsApp replied media is already extracted into a top-level `quote` content block whose nested content includes the downloaded quoted image. The fix can therefore operate on normalized `ChannelInput` content instead of inspecting Baileys payloads in the batching layer.
 
 ## Owner Layer
 
@@ -53,6 +53,21 @@ Likely owner is the WhatsApp inbound normalization and conversation batching pat
 - The `/wait` command text is not included in the submitted user turn.
 - Tests cover a plain empty `/wait`, `/wait` replying to an image, and `/send` after a replied-media seeded batch.
 
+## Completion
+
+Completed on 2026-07-05.
+
+The `/wait` control path now strips only the command text block and seeds the batch with any remaining normalized content from that turn. For a WhatsApp reply, quoted media is already represented as a `quote` block by inbound normalization, so the batching fix stays transport-agnostic and does not inspect Baileys payload shapes directly.
+
+Added a vertical regression that sends `/wait` as a reply to a quoted image, verifies the acknowledgement reports `1 message queued`, then verifies `/send` invokes one agent turn with the quoted image preserved and the `/wait` command text omitted.
+
+Verification:
+
+- `pnpm exec node scripts/test-runner.js --test-name-pattern "seeds a new batch" tests/vertical/wait-send-batching.test.js`
+- `pnpm exec node scripts/test-runner.js tests/vertical/wait-send-batching.test.js`
+- `pnpm type-check`
+- `pnpm type-check:tests`
+
 ## Next Action
 
-Inspect a real inbound replied-media `/wait` payload or existing diagnostics, then add a failing regression before changing batching behavior.
+None.

@@ -1,6 +1,6 @@
 # Generic Agent Event Presentation
 
-Status: Todo
+Status: Done
 
 ## Subject
 
@@ -39,3 +39,16 @@ Inspect before implementation:
 - Non-tool execution/activity events that should be user-visible render through a generic event fallback.
 - Known specialized tool presentations continue to render as they do today.
 - A regression test covers the concrete missing event shape from the screenshot scenario, or records why only a synthetic generic-event fixture is available.
+
+## Completion Notes
+
+- Kept existing unknown runtime-tool generic fallback coverage intact.
+- ACP `item.*` runtime events are no longer blanket-suppressed; assistant and reasoning bookkeeping remains hidden, while file/tool/unknown items render through the generic runtime status fallback.
+- Generic item summaries now include a concise first-line detail when the provider supplies item text.
+- The screenshot evidence did not include the exact raw runtime payload in the repo, so coverage uses a synthetic ACP `item.started` fixture matching the missing screenshot-capture activity class.
+
+## Verification
+
+- `pnpm test tests/llm-pipeline.test.js tests/acp-payload-to-whatsapp.test.js tests/sendBlocks.test.js`
+- `pnpm type-check`
+- `pnpm type-check:tests`

@@ -1,6 +1,6 @@
 # `!zzz` Ignore Message Command
 
-Status: Todo
+Status: Done
 
 ## Subject
 
@@ -33,3 +33,15 @@ Relevant surfaces:
 - A `!zzz` message is not added as a user message for agent context.
 - A `!zzz` message does not start, enqueue, cancel, or otherwise affect an agent run.
 - Mixed text/media messages starting with `!zzz` are ignored as one inbound message.
+
+## Completion Notes
+
+- Added `!zzz` handling at the bang-command router before workspace commands and app-owned command side effects.
+- The command returns without replying, adding a message, invoking the agent, or touching active run state.
+- Added a pipeline regression with mixed text/image content proving the message is not persisted and no ACP turn starts.
+
+## Verification
+
+- `pnpm test tests/llm-pipeline.test.js tests/acp-payload-to-whatsapp.test.js tests/sendBlocks.test.js`
+- `pnpm type-check`
+- `pnpm type-check:tests`
