@@ -38,11 +38,11 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 
 ## Current Status
 
-Blocked. First implementation slice is a complete-clip POC: Android records a full utterance after wake-word detection, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
+Blocked for real-device validation and wake-word integration. First implementation slice is a complete-clip POC: Android records a full utterance after wake-word detection, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
 
-Android SDK setup/build is blocked until disk space is increased. The target is at least 4 GB free, preferably 6 GB.
+The previous local disk-space blocker is resolved enough for debug builds: on 2026-07-09 the project built successfully with a temporary minimal command-line toolchain under `/tmp`, using about 1.4 GB for Gradle, Gradle cache, Android command-line tools, SDK platform/build-tools, and build outputs.
 
-There is no recorded evidence that this task is blocked specifically by connecting the Android phone to the Pi. If the backend is running on the Pi, the Android device eventually needs network reachability to the bot API, but the durable blocker recorded here is local Android build/tooling capacity plus later physical-device APK testing.
+No Android device is currently visible through `adb devices`, so install/logcat validation is still blocked on connecting or exposing a physical device. If the backend is running on the Pi, the Android device eventually needs network reachability to the bot API.
 
 ## Progress
 
@@ -51,16 +51,25 @@ There is no recorded evidence that this task is blocked specifically by connecti
 - Added provider-backed HTTP API speech synthesis using the same OpenAI/OpenRouter direction as `clients/voice-pi/tts_openrouter.py`.
 - Added a small Android source scaffold under `clients/android/` with manual record/send/playback against the audio-turn API.
 - Added an explicit Android wake-word seam. The sherpa-onnx concrete detector still needs the Android KWS native libraries/assets and real-device testing.
+- Built `clients/android/app/build/outputs/apk/debug/app-debug.apk` successfully using a minimal temporary toolchain:
+  - Android command-line tools: `/tmp/android-sdk-min/cmdline-tools/latest`
+  - SDK packages: `platform-tools` 37.0.0, `platforms;android-35`, `build-tools;35.0.0`, plus AGP-installed `build-tools;34.0.0`
+  - Gradle: `/tmp/android-lite/gradle-8.10.2`
+  - Gradle user home: `/tmp/android-lite/gradle-user-home`
+  - Measured footprint after build: `/tmp/android-lite` 779 MB, `/tmp/android-sdk-min` 627 MB, `clients/android/app/build` 1.3 MB.
 
 ## Verification
 
 - `pnpm type-check`
 - `pnpm exec node --test tests/http-api-transport.test.js`
 - `pnpm test:fast` passed 911 tests.
+- `ANDROID_HOME=/tmp/android-sdk-min GRADLE_USER_HOME=/tmp/android-lite/gradle-user-home /tmp/android-lite/gradle-8.10.2/bin/gradle --no-daemon --max-workers=1 assembleDebug`
+- `/tmp/android-sdk-min/build-tools/35.0.0/apksigner verify --verbose clients/android/app/build/outputs/apk/debug/app-debug.apk`
+- `/tmp/android-sdk-min/build-tools/35.0.0/aapt dump badging clients/android/app/build/outputs/apk/debug/app-debug.apk`
+- `/tmp/android-sdk-min/platform-tools/adb devices` starts successfully with elevated local daemon permission, but no device is attached.
 
 ## Remaining
 
-- Install Android SDK/Gradle tooling on a machine with enough free disk.
 - Vendor or fetch sherpa-onnx Android KWS assets/native libraries and replace the current placeholder detector.
 - Build/install the APK on a physical Android device and verify microphone permission, audio upload, assistant audio playback, and wake-word behavior with `adb logcat`.
 

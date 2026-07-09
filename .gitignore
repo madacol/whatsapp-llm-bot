@@ -17,3 +17,7 @@ logs/
 .agents/.runtime/
 .diagnostics/
 .state/
+clients/android/.gradle/
+clients/android/build/
+clients/android/app/build/
+clients/android/local.properties

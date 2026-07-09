@@ -13,6 +13,10 @@
 **/venv/**
 auth_info_baileys/**
 build/**
+clients/android/.gradle/**
+clients/android/build/**
+clients/android/app/build/**
+clients/android/local.properties
 coverage/**
 dist/**
 logs/**
