@@ -148,6 +148,7 @@ function renderLiveInputPrompt(blocks, options = {}) {
  *   mediaToTextModels?: { image?: string, audio?: string, video?: string, general?: string },
  *   db: ChatDb,
  *   includeMediaReferences?: boolean,
+ *   contextMessages?: ChatMessage[],
  * } & LiveInputAudioTranscriptionObserver} input
  * @returns {Promise<string>}
  */
@@ -156,7 +157,7 @@ export async function buildLiveInputText(input) {
     llmClient: input.llmClient,
     mediaToTextModels: input.mediaToTextModels,
     db: input.db,
-    contextMessages: [],
+    contextMessages: input.contextMessages ?? [],
     currentText: extractTopLevelText(input.content),
     onAudioTranscriptionStart: input.onAudioTranscriptionStart,
     onAudioTranscriptionComplete: input.onAudioTranscriptionComplete,

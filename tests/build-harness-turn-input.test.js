@@ -4,6 +4,9 @@ import {
   buildExternalSystemPrompt,
   buildHarnessTurnInput,
 } from "../conversation/build-harness-turn-input.js";
+import { setSqliteDb } from "../db.js";
+import { getChatSqlitePath } from "../chat-paths.js";
+import { createTestDb } from "./helpers.js";
 
 describe("buildExternalSystemPrompt", () => {
   it("does not add the app default prompt to provider harnesses by default", () => {
@@ -94,6 +97,121 @@ describe("buildHarnessTurnInput", () => {
     assert.equal("llmConfig" in turn, false);
     assert.equal("hooks" in turn, false);
     assert.equal("mediaRegistry" in turn, false);
+  });
+
+  it("passes the last 20 previous user and assistant messages to audio transcription", async () => {
+    const chatId = "provider-audio-context-chat";
+    const db = await createTestDb();
+    setSqliteDb(getChatSqlitePath(chatId), db);
+    /** @type {unknown[]} */
+    const requests = [];
+    const llmClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
+      chat: {
+        completions: {
+          /** @param {unknown} request */
+          create: async (request) => {
+            requests.push(request);
+            return {
+              choices: [{ message: { content: "Deploy finished after the smoke test." } }],
+            };
+          },
+        },
+      },
+    }));
+    /** @type {import("../store.js").MessageRow[]} */
+    const historyRows = Array.from({ length: 22 }, (_, index) => {
+      const messageNumber = index + 1;
+      const role = messageNumber % 2 === 0
+        ? /** @type {const} */ ("assistant")
+        : /** @type {const} */ ("user");
+      return {
+        message_id: messageNumber,
+        chat_id: chatId,
+        sender_id: role,
+        message_data: {
+          role,
+          content: [{ type: "text", text: `history ${messageNumber}` }],
+        },
+        timestamp: new Date(`2026-05-19T00:${String(messageNumber).padStart(2, "0")}:00.000Z`),
+        display_key: null,
+      };
+    });
+    /** @type {UserMessage} */
+    const currentMessage = {
+      role: /** @type {const} */ ("user"),
+      content: [
+        { type: "text", text: "Please transcribe this deployment note" },
+        {
+          type: /** @type {const} */ ("audio"),
+          encoding: /** @type {const} */ ("base64"),
+          mime_type: "audio/mp3",
+          data: Buffer.from("deployment audio bytes").toString("base64"),
+        },
+      ],
+    };
+    /** @type {import("../store.js").MessageRow} */
+    const currentRow = {
+      message_id: 23,
+      chat_id: chatId,
+      sender_id: "user",
+      message_data: currentMessage,
+      timestamp: new Date("2026-05-19T00:23:00.000Z"),
+      display_key: null,
+    };
+
+    const turn = await buildHarnessTurnInput({
+      chatId,
+      chatInfo: /** @type {import("../store.js").ChatRow} */ ({
+        media_to_text_models: { audio: "audio/model" },
+      }),
+      context: {
+        chatId,
+        senderIds: ["user-1"],
+        content: currentMessage.content,
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async () => undefined,
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      },
+      message: currentMessage,
+      persona: null,
+      llmClient,
+      getMessages: async () => [
+        currentRow,
+        ...[...historyRows].reverse(),
+      ],
+      harnessName: "codex",
+      runConfig: { workdir: "/repo", model: "gpt-5.4" },
+    });
+
+    assert.equal(turn.input, "Please transcribe this deployment note\nAudio transcript:\nDeploy finished after the smoke test.");
+    assert.equal(requests.length, 1);
+    const request = requests[0];
+    if (!request || typeof request !== "object" || !("messages" in request) || !Array.isArray(request.messages)) {
+      assert.fail(`Expected captured request with messages, got ${JSON.stringify(request)}`);
+    }
+    const requestMessages = /** @type {Array<{ role: string, content: unknown }>} */ (request.messages);
+    const contextTexts = requestMessages.slice(0, 20).map((message) => {
+      if (!Array.isArray(message.content)) {
+        return "";
+      }
+      return message.content
+        .map((part) => part && typeof part === "object" && "text" in part ? String(part.text) : "")
+        .join("\n");
+    });
+    assert.deepEqual(
+      contextTexts,
+      Array.from({ length: 20 }, (_, index) => `history ${index + 3}`),
+    );
+    assert.equal(requestMessages[0]?.role, "user");
+    assert.equal(requestMessages[1]?.role, "assistant");
+    assert.equal(requestMessages[19]?.role, "assistant");
+    assert.ok(
+      JSON.stringify(requestMessages.at(-1)).includes("User's message: Please transcribe this deployment note"),
+      JSON.stringify(requestMessages.at(-1)),
+    );
   });
 
   it("omits media reference text for ACP-backed harnesses", async () => {

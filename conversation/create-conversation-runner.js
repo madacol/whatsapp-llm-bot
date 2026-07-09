@@ -1,8 +1,12 @@
 import { createAppOutputPort } from "../app-output-port.js";
-import { shouldRespond } from "../message-formatting.js";
+import { prepareMessages, shouldRespond } from "../message-formatting.js";
 import { createMessageActionContext } from "../execute-action-context.js";
 import { createLogger } from "../logger.js";
 import { getChatDb } from "../db.js";
+import {
+  DEFAULT_MEDIA_INPUT_CONTEXT_MESSAGE_LIMIT,
+  buildMediaInputContextMessages,
+} from "../media-input-enrichment.js";
 import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
@@ -270,6 +274,7 @@ export function createConversationRunner({
     addMessage,
     createChat,
     getChat,
+    getMessages,
   } = store;
 
   const agentRuntime = createAgentRuntime({ store, llmClient, log });
@@ -297,10 +302,11 @@ export function createConversationRunner({
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   content: IncomingContentBlock[],
    *   audioTranscriptionObserver?: ReturnType<typeof createAudioTranscriptionStatusObserver>,
+   *   contextMessages?: ChatMessage[],
    * }} input
    * @returns {Promise<string>}
    */
-  async function buildPendingRunInputText({ chatId, chatInfo, content, audioTranscriptionObserver }) {
+  async function buildPendingRunInputText({ chatId, chatInfo, content, audioTranscriptionObserver, contextMessages }) {
     if (!hasNonTextContent(content)) {
       return getTopLevelText(content);
     }
@@ -310,6 +316,7 @@ export function createConversationRunner({
       llmClient,
       mediaToTextModels: chatInfo?.media_to_text_models ?? {},
       db: getChatDb(chatId),
+      contextMessages: contextMessages ?? await buildStoredMediaInputContextMessages(chatId),
       onAudioTranscriptionStart: audioTranscriptionObserver?.onAudioTranscriptionStart,
       onAudioTranscriptionComplete: audioTranscriptionObserver?.onAudioTranscriptionComplete,
       onAudioTranscriptionFailure: audioTranscriptionObserver?.onAudioTranscriptionFailure,
@@ -321,6 +328,18 @@ export function createConversationRunner({
       textLength: text.length,
     });
     return text;
+  }
+
+  /**
+   * @param {string} chatId
+   * @returns {Promise<ChatMessage[]>}
+   */
+  async function buildStoredMediaInputContextMessages(chatId) {
+    const chatMessages = await getMessages(chatId, undefined, DEFAULT_MEDIA_INPUT_CONTEXT_MESSAGE_LIMIT);
+    const { messages } = prepareMessages(chatMessages);
+    return buildMediaInputContextMessages(messages, messages.length, {
+      limit: DEFAULT_MEDIA_INPUT_CONTEXT_MESSAGE_LIMIT,
+    });
   }
 
   /**
@@ -412,6 +431,9 @@ export function createConversationRunner({
     const appOutput = createAppOutputPort(context);
     const { chatId, senderIds, content } = turn;
     const message = buildUserMessage(turn);
+    const pendingMediaContextMessages = agentRuntime.hasPendingRun(chatId) && hasNonTextContent(content)
+      ? await buildStoredMediaInputContextMessages(chatId)
+      : undefined;
     await addMessage(chatId, message, senderIds);
 
     logInfoWhen(hasNonTextContent(content) || agentRuntime.hasPendingRun(chatId), "LLM will respond", {
@@ -431,6 +453,7 @@ export function createConversationRunner({
         chatInfo,
         content,
         audioTranscriptionObserver: resolvedAudioTranscriptionObserver,
+        contextMessages: pendingMediaContextMessages,
       })
       : getTopLevelText(content));
     const lifecycleDecision = await agentRuntime.beginRun({

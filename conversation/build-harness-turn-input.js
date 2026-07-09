@@ -2,6 +2,10 @@ import { resolveChatModel } from "../model-roles.js";
 import { prepareRunMessages } from "./prepare-run-messages.js";
 import { buildLiveInputText } from "./live-input-text.js";
 import { getChatDb } from "../db.js";
+import {
+  DEFAULT_MEDIA_INPUT_CONTEXT_MESSAGE_LIMIT,
+  buildMediaInputContextMessages,
+} from "../media-input-enrichment.js";
 
 /**
  * Build the external system instructions supplied by persona/chat settings and
@@ -74,16 +78,16 @@ async function prepareHarnessConversationInput({
 
 /**
  * @param {Message[]} messages
- * @returns {IncomingContentBlock[]}
+ * @returns {{ message: UserMessage, index: number } | null}
  */
-function getLatestUserContent(messages) {
+function getLatestUserMessage(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role === "user") {
-      return message.content;
+      return { message, index };
     }
   }
-  return [];
+  return null;
 }
 
 /**
@@ -141,11 +145,17 @@ export async function buildHarnessTurnInput({
     harnessName,
     bufferedTexts,
   });
+  const latestUser = getLatestUserMessage(messages);
   const inputText = prebuiltInputText ?? await buildLiveInputText({
-    content: getLatestUserContent(messages),
+    content: latestUser?.message.content ?? [],
     llmClient,
     mediaToTextModels: chatInfo?.media_to_text_models ?? {},
     db: getChatDb(chatId),
+    contextMessages: latestUser
+      ? buildMediaInputContextMessages(messages, latestUser.index, {
+        limit: DEFAULT_MEDIA_INPUT_CONTEXT_MESSAGE_LIMIT,
+      })
+      : [],
     includeMediaReferences: !usesSemanticAcpContent(harnessName),
     onAudioTranscriptionStart: audioTranscriptionObserver?.onAudioTranscriptionStart,
     onAudioTranscriptionComplete: audioTranscriptionObserver?.onAudioTranscriptionComplete,

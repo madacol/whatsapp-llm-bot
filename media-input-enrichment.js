@@ -5,6 +5,7 @@ import { createLogger } from "./logger.js";
 import { errorToString } from "./utils.js";
 
 const log = createLogger("media-input-enrichment");
+export const DEFAULT_MEDIA_INPUT_CONTEXT_MESSAGE_LIMIT = 20;
 
 /**
  * @typedef {{
@@ -54,17 +55,24 @@ export function extractTopLevelText(blocks) {
  * Build light text-only context for media-to-text requests.
  * @param {Message[]} messages
  * @param {number} upToIndex
+ * @param {{ limit?: number }} [options]
  * @returns {ChatMessage[]}
  */
-export function buildMediaInputContextMessages(messages, upToIndex) {
+export function buildMediaInputContextMessages(messages, upToIndex, options = {}) {
   /** @type {ChatMessage[]} */
   const contextMessages = [];
+  const limit = Number.isInteger(options.limit) && Number(options.limit) > 0
+    ? Number(options.limit)
+    : null;
   let startIndex = 0;
   for (let i = 0; i < upToIndex; i++) {
     const message = messages[i];
     if (contentHasContextResetCommand(message.content)) {
       startIndex = i + 1;
     }
+  }
+  if (limit !== null) {
+    startIndex = Math.max(startIndex, upToIndex - limit);
   }
 
   for (let i = startIndex; i < upToIndex; i++) {

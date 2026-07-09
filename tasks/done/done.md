@@ -2,6 +2,7 @@
 
 Completed task details are archived here instead of deleted.
 
+- Audio transcription now includes the last 20 previous user/assistant messages as media-to-text context. [details](audio-transcription-recent-context.md)
 - Private/LID visibility settings poll settlement verified in the live ingress journal after the fix. [details](private-chat-visibility-settings-command.md)
 - HTTP API TTS now speaks Markdown links as readable labels while preserving displayed assistant Markdown. [details](http-api-tts-markdown-link-labels.md)
 - Guardian approval-review warnings no longer emit as assistant messages, and the web audio client now has Cancel Turn and Clear History controls backed by `!c` and `/clear`. [details](web-cancel-and-guardian-warning-suppression.md)
