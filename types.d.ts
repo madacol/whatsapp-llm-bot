@@ -360,7 +360,8 @@ type AppMessageEvent = {
   role: "plain" | "tool_result" | "error" | "memory";
   content: SendContent;
   replyToTriggeringMessage?: boolean;
-  presentationIntent?: "transcription";
+  presentationCategory?: import("./chat-output-visibility.js").OutputPresentationKey;
+  presentationStatus?: "started" | "completed" | "failed";
 };
 
 type AssistantOutputEvent = {
@@ -371,14 +372,6 @@ type AssistantOutputEvent = {
     id: string;
     status: "partial" | "final";
   };
-};
-
-type TranscriptionStatusEvent = {
-  kind: "transcription_status";
-  status: "started" | "completed" | "failed";
-  summary: string;
-  detail?: string;
-  replyToTriggeringMessage?: boolean;
 };
 
 type AgentToolResultEvent = {
@@ -460,7 +453,6 @@ type UsageTokens = {
 type OutboundEvent =
   | AppMessageEvent
   | AssistantOutputEvent
-  | TranscriptionStatusEvent
   | AgentToolResultEvent
   | AgentErrorEvent
   | ToolCallEvent
@@ -481,13 +473,19 @@ type AppOutputPort = {
   replyWithError: (message: string) => Promise<MessageHandle | undefined>;
   replyWithPlain: (
     content: SendContent,
-    options?: { replyToTriggeringMessage?: boolean; presentationIntent?: AppMessageEvent["presentationIntent"] },
+    options?: {
+      replyToTriggeringMessage?: boolean;
+      presentationCategory?: AppMessageEvent["presentationCategory"];
+      presentationStatus?: AppMessageEvent["presentationStatus"];
+    },
   ) => Promise<MessageHandle | undefined>;
-  replyWithTranscriptionStatus: (
+  sendPlain: (
     content: SendContent,
-    options?: { replyToTriggeringMessage?: boolean },
+    options?: {
+      presentationCategory?: AppMessageEvent["presentationCategory"];
+      presentationStatus?: AppMessageEvent["presentationStatus"];
+    },
   ) => Promise<MessageHandle | undefined>;
-  sendPlain: (content: SendContent) => Promise<MessageHandle | undefined>;
   sendMemory: (content: SendContent) => Promise<MessageHandle | undefined>;
   replyWithFileChange: (change: Omit<FileChangeEvent, "kind">) => Promise<MessageHandle | undefined>;
 };

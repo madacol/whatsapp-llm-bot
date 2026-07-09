@@ -34,9 +34,13 @@ The user also requested a new `middleAssistantMessages` pinned-status option, an
 ## Completion Notes
 
 - Added `middleAssistantMessages: "pinned"` to the show contract and made the minimal preset use pinned middle assistant messages plus pinned transcription.
-- Added a semantic `transcription_status` outbound event for pinned transcription updates while retaining compact inspectable transcription app messages for non-pinned modes.
+- Routed transcription through categorized app messages for every visible mode, so the WhatsApp renderer decides whether the same text output is compact, full-detail, hidden, or pinned.
 - Routed pinned transcription and streamed middle assistant output through the WhatsApp pinned-status renderer and suppressed their standalone messages in those modes.
 - Kept normal visible middle assistant streams buffered until final, while pinned middle assistant streams now emit cumulative partial updates.
+
+## Cleanup Notes
+
+- Replaced the temporary dedicated pinned transcription event shape with general app-message presentation metadata: `presentationCategory: "transcription"` plus lifecycle `presentationStatus`.
 
 ## Verification
 

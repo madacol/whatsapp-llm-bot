@@ -2,6 +2,7 @@
 
 Completed task details are archived here instead of deleted.
 
+- Pinned transcription presentation now uses categorized app messages instead of a dedicated transcription event. [details](transcription-presentation-model-cleanup.md)
 - Pinned transcription and pinned middle assistant visibility implemented, with minimal preset now using both pinned modes. [details](transcription-pinned-visibility.md)
 - Output visibility categories now have vertical WhatsApp show/suppress coverage, and `tools: hidden` suppresses new runtime tool/command messages at the renderer boundary. [details](output-visibility-vertical-coverage.md)
 - Audio transcription now includes the last 20 previous user/assistant messages as media-to-text context. [details](audio-transcription-recent-context.md)

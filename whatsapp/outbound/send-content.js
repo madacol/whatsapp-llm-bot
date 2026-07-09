@@ -18,7 +18,6 @@ import {
   renderAgentErrorEvent,
   renderAppMessageEvent,
   renderAssistantOutputEvent,
-  renderTranscriptionStatusEvent,
   renderPlanEvent,
   renderSubagentMessageEvent,
   renderToolActivityEvent,
@@ -1889,18 +1888,10 @@ function formatPinnedRuntimeStatusPresentation(event, state, options) {
 
 /**
  * @param {OutboundEvent} event
- * @returns {event is AppMessageEvent & { presentationIntent: "transcription" }}
- */
-function isTranscriptionAppMessageEvent(event) {
-  return event.kind === "app_message" && event.presentationIntent === "transcription";
-}
-
-/**
- * @param {OutboundEvent} event
- * @returns {event is (AppMessageEvent & { presentationIntent: "transcription" }) | TranscriptionStatusEvent}
+ * @returns {event is AppMessageEvent & { presentationCategory: "transcription" }}
  */
 function isTranscriptionPresentationEvent(event) {
-  return event.kind === "transcription_status" || isTranscriptionAppMessageEvent(event);
+  return event.kind === "app_message" && event.presentationCategory === "transcription";
 }
 
 /**
@@ -1913,29 +1904,19 @@ function formatPinnedStatusPresentation(event, state, options) {
   if (event.kind === "runtime_event") {
     return formatPinnedRuntimeStatusPresentation(event, state, options);
   }
-  if (isTranscriptionAppMessageEvent(event)) {
+  if (isTranscriptionPresentationEvent(event)) {
     if (!options.includeTranscription) {
       return null;
     }
+    const summary = extractOutboundContentText(event.content).trim();
+    const status = event.presentationStatus ?? "started";
     return {
       key: "transcription",
-      icon: "🎙️",
+      icon: status === "failed" ? "❌" : status === "completed" ? "✅" : "🎙️",
       provider: "AUDIO",
-      summary: typeof event.content === "string" ? event.content : "audio transcription",
+      summary: summary || "audio transcription",
       createsStatus: !state,
-    };
-  }
-  if (event.kind === "transcription_status") {
-    if (!options.includeTranscription) {
-      return null;
-    }
-    return {
-      key: "transcription",
-      icon: event.status === "failed" ? "❌" : event.status === "completed" ? "✅" : "🎙️",
-      provider: "AUDIO",
-      summary: event.summary,
-      createsStatus: !state,
-      closesStatus: event.status === "failed",
+      closesStatus: status === "failed",
     };
   }
   if (!state && !(event.kind === "assistant_output" && event.stream && options.includeMiddleAssistantMessages)) {
@@ -2157,8 +2138,6 @@ function renderOutboundEvent(event) {
       return renderAppMessageEvent(event);
     case "assistant_output":
       return renderAssistantOutputEvent(event);
-    case "transcription_status":
-      return renderTranscriptionStatusEvent(event);
     case "agent_tool_result":
       return renderAgentToolResultEvent(event);
     case "agent_error":

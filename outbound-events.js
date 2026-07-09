@@ -5,7 +5,11 @@
 /**
  * @param {AppMessageEvent["role"]} role
  * @param {SendContent} content
- * @param {{ replyToTriggeringMessage?: boolean, presentationIntent?: AppMessageEvent["presentationIntent"] }} [options]
+ * @param {{
+ *   replyToTriggeringMessage?: boolean,
+ *   presentationCategory?: AppMessageEvent["presentationCategory"],
+ *   presentationStatus?: AppMessageEvent["presentationStatus"],
+ * }} [options]
  * @returns {AppMessageEvent}
  */
 export function appMessageEvent(role, content, options = {}) {
@@ -14,7 +18,8 @@ export function appMessageEvent(role, content, options = {}) {
     role,
     content,
     ...(options.replyToTriggeringMessage !== undefined && { replyToTriggeringMessage: options.replyToTriggeringMessage }),
-    ...(options.presentationIntent !== undefined && { presentationIntent: options.presentationIntent }),
+    ...(options.presentationCategory !== undefined && { presentationCategory: options.presentationCategory }),
+    ...(options.presentationStatus !== undefined && { presentationStatus: options.presentationStatus }),
   };
 }
 
@@ -29,21 +34,6 @@ export function assistantOutputEvent(content, options = {}) {
     content,
     ...(options.cwd !== undefined && { cwd: options.cwd }),
     ...(options.stream !== undefined && { stream: options.stream }),
-  };
-}
-
-/**
- * @param {"started" | "completed" | "failed"} status
- * @param {{ summary: string, detail?: string, replyToTriggeringMessage?: boolean }} input
- * @returns {TranscriptionStatusEvent}
- */
-export function transcriptionStatusEvent(status, input) {
-  return {
-    kind: "transcription_status",
-    status,
-    summary: input.summary,
-    ...(input.detail !== undefined && { detail: input.detail }),
-    ...(input.replyToTriggeringMessage !== undefined && { replyToTriggeringMessage: input.replyToTriggeringMessage }),
   };
 }
 

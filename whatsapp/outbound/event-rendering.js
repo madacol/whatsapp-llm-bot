@@ -56,17 +56,6 @@ export function renderAssistantOutputEvent(event) {
 }
 
 /**
- * @param {TranscriptionStatusEvent} event
- * @returns {RenderedOutboundEvent}
- */
-export function renderTranscriptionStatusEvent(event) {
-  return {
-    source: event.status === "failed" ? "error" : "plain",
-    content: event.detail ? `${event.summary}\n\n${event.detail}` : event.summary,
-  };
-}
-
-/**
  * @param {AgentToolResultEvent} event
  * @returns {{ source: MessageSource, content: SendContent, cwd?: string | null }}
  */

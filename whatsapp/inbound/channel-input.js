@@ -479,10 +479,7 @@ export function createChannelInputIo({
    * @returns {{ quoted?: BaileysMessage } | undefined}
    */
   function resolveReplyOptions(event) {
-    if (
-      (event.kind === "app_message" && event.replyToTriggeringMessage)
-      || (event.kind === "transcription_status" && event.replyToTriggeringMessage)
-    ) {
+    if (event.kind === "app_message" && event.replyToTriggeringMessage) {
       return { quoted: message };
     }
     return undefined;

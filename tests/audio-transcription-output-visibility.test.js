@@ -94,7 +94,8 @@ describe("audio transcription output visibility", () => {
       role: "plain",
       content: "Transcribing audio...",
       replyToTriggeringMessage: true,
-      presentationIntent: "transcription",
+      presentationCategory: "transcription",
+      presentationStatus: "started",
     }]);
     assert.deepEqual(subject.updates, [{ kind: "text", text: "Transcribed" }]);
     assert.deepEqual(subject.inspects, [{ kind: "text", text: "hello" }]);
@@ -118,7 +119,7 @@ describe("audio transcription output visibility", () => {
     assert.deepEqual(subject.inspects, []);
   });
 
-  it("emits pinned transcription status events when configured", async () => {
+  it("emits categorized app messages for pinned transcription status", async () => {
     const subject = createSubject();
     const observer = createAudioTranscriptionStatusObserver(subject.context, {
       ...DEFAULT_OUTPUT_VISIBILITY,
@@ -136,16 +137,19 @@ describe("audio transcription output visibility", () => {
     });
 
     assert.deepEqual(subject.replies, [{
-      kind: "transcription_status",
-      status: "started",
-      summary: "Transcribing audio...",
+      kind: "app_message",
+      role: "plain",
+      content: "Transcribing audio...",
       replyToTriggeringMessage: true,
+      presentationCategory: "transcription",
+      presentationStatus: "started",
     }]);
     assert.deepEqual(subject.sent, [{
-      kind: "transcription_status",
-      status: "completed",
-      summary: "Transcribed",
-      detail: "hello",
+      kind: "app_message",
+      role: "plain",
+      content: "Transcribed",
+      presentationCategory: "transcription",
+      presentationStatus: "completed",
     }]);
     assert.deepEqual(subject.updates, []);
     assert.deepEqual(subject.inspects, []);
