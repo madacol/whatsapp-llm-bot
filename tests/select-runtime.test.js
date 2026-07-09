@@ -64,6 +64,25 @@ function getPollPayload(message) {
   };
 }
 
+function createThrowingLidMapping() {
+  return {
+    /**
+     * @param {string} lid
+     * @returns {Promise<string | null>}
+     */
+    async getPNForLID(lid) {
+      return (await this.getPNsForLIDs([lid]))?.[0]?.pn ?? null;
+    },
+    /**
+     * @param {string[]} _lids
+     * @returns {Promise<Array<{ pn: string }> | null>}
+     */
+    async getPNsForLIDs(_lids) {
+      throw new Error("lid mapping unavailable");
+    },
+  };
+}
+
 describe("createSelectRuntime", () => {
   it("uses the latest live socket when a select prompt is sent after reconnect", async () => {
     const registry = createSelectRuntime();
@@ -572,6 +591,159 @@ describe("createSelectRuntime", () => {
     });
     assert.equal(registry.handlePollVote(pollVoteEvent), true);
     assert.deepEqual(await selectionPromise, { kind: "selected", ids: ["pinned_tool_status"] });
+  });
+
+  it("settles raw private LID poll votes when LID chat normalization throws", async () => {
+    const registry = createSelectRuntime();
+    const {
+      botPhoneJid,
+      botLidJid,
+      pollEncKey,
+      encIv,
+    } = RAW_LID_POLL_FIXTURE;
+    const chatId = "555555555555555@lid";
+    const pollMsgId = "POLL-PRIVATE-LID-1";
+    const selectedOption = "compact";
+    /** @type {WhatsAppPollSocketPort} */
+    const sock = {
+      user: { id: botPhoneJid, lid: botLidJid.replace("@lid", ":32@lid") },
+      signalRepository: {
+        lidMapping: createThrowingLidMapping(),
+      },
+      /** @param {string} targetChatId @param {any} message */
+      async sendMessage(targetChatId, message) {
+        if ("react" in message || "delete" in message) {
+          return undefined;
+        }
+        const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
+        return /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
+          key: { id: pollMsgId, remoteJid: targetChatId, fromMe: true },
+          message: {
+            messageContextInfo: {
+              messageSecret: pollEncKey.toString("base64"),
+            },
+            pollCreationMessageV3: {
+              name: "Choose a preset",
+              options: values
+                .filter((value) => typeof value === "string")
+                .map((value) => ({ optionName: value })),
+              selectableOptionsCount: 1,
+            },
+          },
+        }));
+      },
+    };
+    const select = registry.createSelect(sock, chatId);
+
+    const selectionPromise = select("Choose a preset", [
+      { id: "compact", label: selectedOption },
+    ], { deleteOnSelect: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const encryptedVote = createEncryptedPollVote({
+      pollMsgId,
+      pollCreatorJid: botLidJid,
+      voterJid: chatId,
+      pollEncKey,
+      encIv,
+      selectedOption,
+    });
+    const pollVoteEvent = await registry.resolvePollVoteMessage(
+      /** @type {import("@whiskeysockets/baileys").WAMessage} */ (/** @type {unknown} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: "VOTE-PRIVATE-LID-1",
+          addressingMode: "lid",
+        },
+        messageTimestamp: 1783594000,
+        message: {
+          pollUpdateMessage: {
+            pollCreationMessageKey: {
+              remoteJid: chatId,
+              fromMe: true,
+              id: pollMsgId,
+              participant: botLidJid,
+            },
+            vote: {
+              encPayload: encryptedVote.encPayload.toString("base64"),
+              encIv: encryptedVote.encIv.toString("base64"),
+            },
+            senderTimestampMs: "1783594000000",
+          },
+        },
+      })),
+      sock,
+    );
+
+    assert.deepEqual(pollVoteEvent, {
+      chatId,
+      pollMsgId,
+      selectedOptions: [selectedOption],
+    });
+    assert.equal(registry.handlePollVote(pollVoteEvent), true);
+    assert.equal(await selectionPromise, "compact");
+  });
+
+  it("settles decrypted private LID poll updates when LID chat normalization throws", async () => {
+    const registry = createSelectRuntime();
+    const chatId = "666666666666666@lid";
+    const pollMsgId = "POLL-PRIVATE-LID-UPDATE-1";
+    /** @type {WhatsAppPollSocketPort} */
+    const sock = {
+      user: { id: "111111111111:1@s.whatsapp.net", lid: "222222222222222:32@lid" },
+      signalRepository: {
+        lidMapping: createThrowingLidMapping(),
+      },
+      /** @param {string} targetChatId @param {any} message */
+      async sendMessage(targetChatId, message) {
+        if ("react" in message || "delete" in message) {
+          return undefined;
+        }
+        const values = /** @type {{ poll?: { values?: unknown[] } }} */ (message).poll?.values ?? [];
+        return /** @type {BaileysMessage} */ ({
+          key: { id: pollMsgId, remoteJid: targetChatId, fromMe: true },
+          message: {
+            pollCreationMessageV3: {
+              options: values
+                .filter((value) => typeof value === "string")
+                .map((value) => ({ optionName: value })),
+            },
+          },
+        });
+      },
+    };
+    const select = registry.createSelect(sock, chatId);
+
+    const selectionPromise = select("Choose a preset", [
+      { id: "minimal", label: "minimal" },
+    ], { deleteOnSelect: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const pollVoteEvent = await registry.resolvePollUpdate({
+      key: { id: pollMsgId, remoteJid: chatId, fromMe: true },
+      update: {
+        pollUpdates: [{
+          pollUpdateMessageKey: {
+            id: "vote-private-lid-update-1",
+            remoteJid: chatId,
+          },
+          vote: {
+            selectedOptions: [createHash("sha256").update("minimal").digest()],
+          },
+        }],
+      },
+    }, sock);
+
+    assert.deepEqual(pollVoteEvent, {
+      chatId,
+      pollMsgId,
+      selectedOptions: ["minimal"],
+    });
+    assert.equal(registry.handlePollVote(pollVoteEvent), true);
+    assert.equal(await selectionPromise, "minimal");
   });
 
   it("clear() resolves pending selects without sending cancellation reactions", async () => {

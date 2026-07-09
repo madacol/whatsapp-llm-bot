@@ -2,7 +2,7 @@
 
 ## Status
 
-Todo. Research complete; implementation pending.
+Implementation complete in the working tree; live/deploy verification pending.
 
 ## Subject
 
@@ -82,6 +82,15 @@ Relevant lines at research time:
 - `whatsapp/runtime/select-runtime.js:599` pending selection settlement uses `pollMsgId`
 - `whatsapp/create-whatsapp-transport.js:1066` raw poll update dispatch into select runtime
 
+## Implementation Notes
+
+- `normalizePollChatId` now calls `lidMapping.getPNForLID(chatId)` with the Baileys LID mapping object as the method receiver instead of extracting the method and losing `this`.
+- LID mapping errors are caught; the select runtime keeps the original LID chat id and continues returning the poll vote event.
+- Added select-runtime regressions for:
+  - raw private/LID `messages.upsert.pollUpdateMessage` votes with encrypted/base64 vote fields;
+  - decrypted private/LID `messages.update.pollUpdates` votes.
+- Both regressions use a mapper shaped like Baileys' `getPNForLID` method, where the method depends on `this.getPNsForLIDs`, and force that mapper to throw so poll settlement must not depend on chat-id normalization.
+
 ## Acceptance Criteria
 
 - A private/LID-addressed visibility settings poll vote settles even when Baileys LID-to-PN mapping is unavailable or throws.
@@ -95,3 +104,7 @@ Relevant lines at research time:
   - `quarantines row-specific replay failures without blocking later FIFO rows`
   - `runs connection-open hooks after queued outbound flushes complete`
 - Existing coverage proves the settings service and prior group/LID poll regressions are green, but it does not cover private/LID chat-id normalization failure.
+- Implementation verification:
+  - `pnpm test tests/select-runtime.test.js`
+  - `pnpm type-check`
+  - `pnpm type-check:tests`

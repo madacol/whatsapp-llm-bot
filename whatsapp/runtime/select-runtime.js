@@ -315,13 +315,18 @@ async function normalizePollChatId(sock, chatId) {
     return chatId;
   }
 
-  const getPNForLID = sock.signalRepository?.lidMapping?.getPNForLID;
-  if (!getPNForLID) {
+  const lidMapping = sock.signalRepository?.lidMapping;
+  if (!lidMapping || typeof lidMapping.getPNForLID !== "function") {
     return chatId;
   }
 
-  const phoneNumber = await getPNForLID(chatId);
-  return phoneNumber ? jidNormalizedUser(phoneNumber) : chatId;
+  try {
+    const phoneNumber = await lidMapping.getPNForLID(chatId);
+    return phoneNumber ? jidNormalizedUser(phoneNumber) : chatId;
+  } catch (error) {
+    log.debug("Could not normalize LID poll chat id; preserving original chat id", error);
+    return chatId;
+  }
 }
 
 /**
