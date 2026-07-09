@@ -1,7 +1,11 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { getChatRootDir } from "./chat-paths.js";
+import { getChatBaseDir, getChatRootDir } from "./chat-paths.js";
 import { normalizeChatRow } from "./store/normalizers.js";
+import {
+  hasLegacyOutputVisibilityOverrides,
+  migrateLegacyOutputVisibilityOverrides,
+} from "./chat-output-visibility.js";
 
 /**
  * @param {string} chatId
@@ -88,6 +92,71 @@ export async function writeChatConfig(chatId, config) {
   await writeFile(tempPath, `${JSON.stringify(normalized, null, 2)}\n`);
   await rename(tempPath, filePath);
   return normalized;
+}
+
+/**
+ * Explicitly migrate one chat config from legacy output visibility flags to
+ * the new category-owned presentation contract.
+ * @param {string} chatId
+ * @returns {Promise<{ migrated: boolean, outputVisibility: import("./chat-output-visibility.js").OutputVisibilityOverrides }>}
+ */
+export async function migrateChatConfigOutputVisibility(chatId) {
+  const filePath = getChatConfigPath(chatId);
+  const text = await readFile(filePath, "utf8");
+  const raw = JSON.parse(text);
+  const rawConfig = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? /** @type {Record<string, unknown>} */ (raw)
+    : {};
+  const rawOutputVisibility = rawConfig.output_visibility;
+  if (!hasLegacyOutputVisibilityOverrides(rawOutputVisibility)) {
+    return {
+      migrated: false,
+      outputVisibility: normalizeChatConfig(chatId, rawConfig).output_visibility,
+    };
+  }
+  const outputVisibility = migrateLegacyOutputVisibilityOverrides(rawOutputVisibility);
+  const normalized = await writeChatConfig(chatId, {
+    ...rawConfig,
+    output_visibility: outputVisibility,
+  });
+  return { migrated: true, outputVisibility: normalized.output_visibility };
+}
+
+/**
+ * Migrate all chat config files under the configured chat base directory.
+ * @returns {Promise<{ scanned: number, migrated: number }>}
+ */
+export async function migrateAllChatConfigOutputVisibility() {
+  let entries;
+  try {
+    entries = await readdir(getChatBaseDir(), { withFileTypes: true });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return { scanned: 0, migrated: 0 };
+    }
+    throw error;
+  }
+
+  let scanned = 0;
+  let migrated = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    try {
+      const result = await migrateChatConfigOutputVisibility(entry.name);
+      scanned += 1;
+      if (result.migrated) {
+        migrated += 1;
+      }
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+  }
+  return { scanned, migrated };
 }
 
 /**

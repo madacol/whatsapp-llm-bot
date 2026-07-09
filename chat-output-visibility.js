@@ -1,71 +1,189 @@
 /**
- * Shared semantics for chat-configurable agent progress visibility.
+ * Shared semantics for WhatsApp-configurable side-channel presentation.
  */
 
 /**
- * @typedef {"toolStatus" | "thinking" | "changes" | "subagents"} OutputVisibilityKey
+ * @typedef {"fullDetails" | "indicatorInspectable" | "pinnedIndicator" | "hidden"} TextPresentationMode
+ * @typedef {"shown" | "hidden"} BinaryPresentationMode
+ * @typedef {"shown" | "pinnedCurrentStep" | "hidden"} PlanPresentationMode
+ * @typedef {"shown" | "pinned" | "hidden"} UsagePresentationMode
+ * @typedef {"on" | "off"} TogglePresentationMode
+ * @typedef {"reasoning" | "tools" | "plans" | "fileChanges" | "snapshots" | "subagents" | "usage" | "transcription" | "middleAssistantMessages"} OutputPresentationKey
  *
  * @typedef {{
- *   tools?: boolean;
- *   commands?: boolean;
- *   toolStatus?: boolean;
- *   thinking?: boolean;
- *   changes?: boolean;
- *   subagents?: boolean;
+ *   reasoning?: TextPresentationMode;
+ *   tools?: TextPresentationMode;
+ *   plans?: PlanPresentationMode;
+ *   fileChanges?: BinaryPresentationMode;
+ *   snapshots?: TogglePresentationMode;
+ *   subagents?: BinaryPresentationMode;
+ *   usage?: UsagePresentationMode;
+ *   transcription?: TextPresentationMode;
+ *   middleAssistantMessages?: TogglePresentationMode;
  * }} OutputVisibilityOverrides
  *
  * @typedef {{
- *   toolDetails: boolean;
- *   toolStatus: boolean;
- *   thinking: boolean;
- *   changes: boolean;
- *   subagents: boolean;
+ *   reasoning: TextPresentationMode;
+ *   tools: TextPresentationMode;
+ *   plans: PlanPresentationMode;
+ *   fileChanges: BinaryPresentationMode;
+ *   snapshots: TogglePresentationMode;
+ *   subagents: BinaryPresentationMode;
+ *   usage: UsagePresentationMode;
+ *   transcription: TextPresentationMode;
+ *   middleAssistantMessages: TogglePresentationMode;
  * }} OutputVisibility
  *
  * @typedef {{
- *   key: OutputVisibilityKey;
+ *   key: OutputPresentationKey;
  *   label: string;
  *   description: string;
- *   defaultValue: boolean;
- * }} OutputVisibilityFlagDefinition
+ *   defaultValue: string;
+ *   options: readonly string[];
+ *   aliases?: readonly string[];
+ * }} OutputPresentationSettingDefinition
+ *
+ * @typedef {{
+ *   key: string;
+ *   label: string;
+ *   description: string;
+ *   overrides: OutputVisibilityOverrides;
+ *   aliases?: readonly string[];
+ * }} OutputPresentationPresetDefinition
  */
 
-/** @type {readonly OutputVisibilityFlagDefinition[]} */
-export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
+/** @type {readonly TextPresentationMode[]} */
+export const TEXT_PRESENTATION_OPTIONS = Object.freeze([
+  "fullDetails",
+  "indicatorInspectable",
+  "pinnedIndicator",
+  "hidden",
+]);
+
+/** @type {readonly OutputPresentationSettingDefinition[]} */
+export const OUTPUT_PRESENTATION_SETTINGS = Object.freeze([
   {
-    key: "toolStatus",
-    label: "tool status",
-    description: "Show tool and command progress as one pinned status message instead of individual messages.",
-    defaultValue: false,
+    key: "reasoning",
+    label: "reasoning",
+    description: "Reasoning traces.",
+    defaultValue: "indicatorInspectable",
+    options: TEXT_PRESENTATION_OPTIONS,
   },
   {
-    key: "thinking",
-    label: "thinking",
-    description: "Show reasoning placeholders and inspectable thinking summaries when available.",
-    defaultValue: true,
+    key: "tools",
+    label: "tools",
+    description: "Tool and command lifecycle, output, and failures.",
+    defaultValue: "indicatorInspectable",
+    options: TEXT_PRESENTATION_OPTIONS,
   },
   {
-    key: "changes",
-    label: "changes",
-    description: "Show file changes and diff-style output from edits.",
-    defaultValue: true,
+    key: "plans",
+    label: "plans",
+    description: "Agent plan and checklist updates.",
+    defaultValue: "shown",
+    options: ["shown", "pinnedCurrentStep", "hidden"],
+  },
+  {
+    key: "fileChanges",
+    label: "file changes",
+    description: "Explicit file edit/change presentation.",
+    defaultValue: "shown",
+    options: ["shown", "hidden"],
+    aliases: ["file-changes", "file_changes"],
+  },
+  {
+    key: "snapshots",
+    label: "snapshots",
+    description: "Unreported snapshot file-change detection and presentation.",
+    defaultValue: "on",
+    options: ["on", "off"],
   },
   {
     key: "subagents",
     label: "subagents",
-    description: "Show final responses from spawned sub-agents.",
-    defaultValue: true,
+    description: "Subagent text output.",
+    defaultValue: "shown",
+    options: ["shown", "hidden"],
+  },
+  {
+    key: "usage",
+    label: "usage",
+    description: "Token and cost summaries.",
+    defaultValue: "shown",
+    options: ["shown", "pinned", "hidden"],
+  },
+  {
+    key: "transcription",
+    label: "transcription",
+    description: "Audio transcription status and transcript presentation.",
+    defaultValue: "indicatorInspectable",
+    options: TEXT_PRESENTATION_OPTIONS,
+  },
+  {
+    key: "middleAssistantMessages",
+    label: "middle assistant messages",
+    description: "Assistant text emitted before the final answer.",
+    defaultValue: "on",
+    options: ["on", "off"],
+    aliases: ["middle-assistant-messages", "middle_assistant_messages", "assistant-updates", "assistantUpdates"],
   },
 ]);
 
 /** @type {OutputVisibility} */
 export const DEFAULT_OUTPUT_VISIBILITY = Object.freeze({
-  toolDetails: false,
-  toolStatus: false,
-  thinking: true,
-  changes: true,
-  subagents: true,
+  reasoning: "indicatorInspectable",
+  tools: "indicatorInspectable",
+  plans: "shown",
+  fileChanges: "shown",
+  snapshots: "on",
+  subagents: "shown",
+  usage: "shown",
+  transcription: "indicatorInspectable",
+  middleAssistantMessages: "on",
 });
+
+/** @type {readonly OutputPresentationPresetDefinition[]} */
+export const OUTPUT_PRESENTATION_PRESETS = Object.freeze([
+  {
+    key: "default",
+    label: "default",
+    description: "Balanced current WhatsApp presentation.",
+    overrides: {},
+    aliases: ["balanced", "reset"],
+  },
+  {
+    key: "compact",
+    label: "compact",
+    description: "Move progress into pinned status and suppress optional mid-turn noise.",
+    overrides: {
+      reasoning: "pinnedIndicator",
+      tools: "pinnedIndicator",
+      plans: "pinnedCurrentStep",
+      snapshots: "off",
+      usage: "pinned",
+      transcription: "pinnedIndicator",
+      middleAssistantMessages: "off",
+    },
+    aliases: ["quiet"],
+  },
+  {
+    key: "minimal",
+    label: "minimal",
+    description: "Hide side-channel output and keep normal assistant answers.",
+    overrides: {
+      reasoning: "hidden",
+      tools: "hidden",
+      plans: "hidden",
+      fileChanges: "hidden",
+      snapshots: "off",
+      subagents: "hidden",
+      usage: "hidden",
+      transcription: "hidden",
+      middleAssistantMessages: "off",
+    },
+    aliases: ["silent"],
+  },
+]);
 
 /**
  * @param {unknown} value
@@ -77,11 +195,132 @@ function isRecord(value) {
 
 /**
  * @param {string} value
- * @returns {value is OutputVisibilityKey}
+ * @returns {string}
  */
-export function isOutputVisibilityKey(value) {
-  const trimmed = value.trim();
-  return OUTPUT_VISIBILITY_FLAGS.some((flag) => flag.key.toLowerCase() === trimmed.toLowerCase());
+function normalizeToken(value) {
+  return value.trim().toLowerCase().replace(/[\s_+-]+/g, "");
+}
+
+/**
+ * @param {string} key
+ * @returns {OutputPresentationSettingDefinition | null}
+ */
+export function getOutputPresentationSettingDefinition(key) {
+  const normalized = normalizeToken(key);
+  return OUTPUT_PRESENTATION_SETTINGS.find((setting) =>
+    normalizeToken(setting.key) === normalized
+    || normalizeToken(setting.label) === normalized
+    || (setting.aliases ?? []).some((alias) => normalizeToken(alias) === normalized)) ?? null;
+}
+
+/**
+ * @param {string} key
+ * @returns {OutputPresentationPresetDefinition | null}
+ */
+export function getOutputPresentationPresetDefinition(key) {
+  const normalized = normalizeToken(key);
+  return OUTPUT_PRESENTATION_PRESETS.find((preset) =>
+    normalizeToken(preset.key) === normalized
+    || normalizeToken(preset.label) === normalized
+    || (preset.aliases ?? []).some((alias) => normalizeToken(alias) === normalized)) ?? null;
+}
+
+/**
+ * @param {OutputPresentationKey} key
+ * @param {string} raw
+ * @returns {string | null}
+ */
+export function normalizeOutputPresentationOption(key, raw) {
+  const normalized = normalizeToken(raw);
+  if (key === "reasoning" || key === "tools" || key === "transcription") {
+    if (["fulldetails", "full", "details", "detail"].includes(normalized)) return "fullDetails";
+    if (["indicatorinspectable", "inspectable", "inspect", "message", "dedicated", "on", "shown", "true"].includes(normalized)) return "indicatorInspectable";
+    if (["indicatorinpinnedstatus", "pinnedindicator", "pinned", "status"].includes(normalized)) return "pinnedIndicator";
+    if (["hidden", "hide", "off", "none", "false"].includes(normalized)) return "hidden";
+    return null;
+  }
+  if (key === "plans") {
+    if (["shown", "show", "on", "message"].includes(normalized)) return "shown";
+    if (["pinnedcurrentstep", "currentstepinpinnedstatus", "currentstep", "pinned", "status"].includes(normalized)) return "pinnedCurrentStep";
+    if (["hidden", "hide", "off", "none"].includes(normalized)) return "hidden";
+    return null;
+  }
+  if (key === "usage") {
+    if (["shown", "show", "on", "message"].includes(normalized)) return "shown";
+    if (["pinned", "status", "pinnedstatus"].includes(normalized)) return "pinned";
+    if (["hidden", "hide", "off", "none"].includes(normalized)) return "hidden";
+    return null;
+  }
+  if (key === "snapshots" || key === "middleAssistantMessages") {
+    if (["on", "shown", "show", "enabled", "true"].includes(normalized)) return "on";
+    if (["off", "hidden", "hide", "disabled", "false", "none"].includes(normalized)) return "off";
+    return null;
+  }
+  if (key === "fileChanges" || key === "subagents") {
+    if (["shown", "show", "on", "enabled", "true"].includes(normalized)) return "shown";
+    if (["hidden", "hide", "off", "disabled", "false", "none"].includes(normalized)) return "hidden";
+    return null;
+  }
+  return null;
+}
+
+/**
+ * @param {OutputPresentationKey} key
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function normalizeKnownOutputPresentationValue(key, value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return normalizeOutputPresentationOption(key, value);
+}
+
+/**
+ * @param {OutputVisibilityOverrides} overrides
+ * @param {OutputPresentationKey} key
+ * @param {string} value
+ * @returns {void}
+ */
+function assignPresentationOverride(overrides, key, value) {
+  switch (key) {
+    case "reasoning":
+      overrides.reasoning = /** @type {TextPresentationMode} */ (value);
+      break;
+    case "tools":
+      overrides.tools = /** @type {TextPresentationMode} */ (value);
+      break;
+    case "plans":
+      overrides.plans = /** @type {PlanPresentationMode} */ (value);
+      break;
+    case "fileChanges":
+      overrides.fileChanges = /** @type {BinaryPresentationMode} */ (value);
+      break;
+    case "snapshots":
+      overrides.snapshots = /** @type {TogglePresentationMode} */ (value);
+      break;
+    case "subagents":
+      overrides.subagents = /** @type {BinaryPresentationMode} */ (value);
+      break;
+    case "usage":
+      overrides.usage = /** @type {UsagePresentationMode} */ (value);
+      break;
+    case "transcription":
+      overrides.transcription = /** @type {TextPresentationMode} */ (value);
+      break;
+    case "middleAssistantMessages":
+      overrides.middleAssistantMessages = /** @type {TogglePresentationMode} */ (value);
+      break;
+  }
+}
+
+/**
+ * @param {OutputVisibilityOverrides} overrides
+ * @param {OutputPresentationKey} key
+ * @returns {void}
+ */
+function deletePresentationOverride(overrides, key) {
+  delete overrides[key];
 }
 
 /**
@@ -95,26 +334,111 @@ export function normalizeOutputVisibility(raw) {
 
   /** @type {OutputVisibilityOverrides} */
   const normalized = {};
-  const toolStatus = raw.toolStatus;
-  if (typeof toolStatus === "boolean") {
-    normalized.toolStatus = toolStatus;
+
+  for (const setting of OUTPUT_PRESENTATION_SETTINGS) {
+    const value = normalizeKnownOutputPresentationValue(setting.key, raw[setting.key]);
+    if (value) {
+      assignPresentationOverride(normalized, setting.key, value);
+    }
   }
 
-  const thinking = raw.thinking;
-  if (typeof thinking === "boolean") {
-    normalized.thinking = thinking;
-  }
+  return compactOutputVisibilityOverrides(normalized);
+}
 
-  const changes = raw.changes;
-  if (typeof changes === "boolean") {
-    normalized.changes = changes;
+/**
+ * @param {unknown} raw
+ * @returns {raw is Record<string, unknown>}
+ */
+export function hasLegacyOutputVisibilityOverrides(raw) {
+  if (!isRecord(raw)) {
+    return false;
   }
+  return typeof raw.thinking === "boolean"
+    || typeof raw.changes === "boolean"
+    || typeof raw.toolStatus === "boolean"
+    || typeof raw.toolDetails === "boolean"
+    || typeof raw.tools === "boolean"
+    || typeof raw.usage === "boolean"
+    || typeof raw.subagents === "boolean";
+}
 
-  const subagents = raw.subagents;
-  if (typeof subagents === "boolean") {
-    normalized.subagents = subagents;
+/**
+ * Translate legacy persisted visibility flags into the new category-owned
+ * contract. Runtime normalization intentionally does not call this.
+ * @param {unknown} raw
+ * @returns {OutputVisibilityOverrides}
+ */
+export function migrateLegacyOutputVisibilityOverrides(raw) {
+  if (!isRecord(raw)) {
+    return {};
   }
-  return normalized;
+  /** @type {OutputVisibilityOverrides} */
+  const migrated = normalizeOutputVisibility(raw);
+  if (typeof raw.thinking === "boolean" && migrated.reasoning === undefined) {
+    migrated.reasoning = raw.thinking ? "indicatorInspectable" : "hidden";
+  }
+  if (migrated.tools === undefined) {
+    if (typeof raw.tools === "boolean") {
+      migrated.tools = raw.tools ? "indicatorInspectable" : "pinnedIndicator";
+    } else if (raw.toolDetails === true) {
+      migrated.tools = "fullDetails";
+    } else if (typeof raw.toolStatus === "boolean") {
+      migrated.tools = raw.toolStatus ? "pinnedIndicator" : "indicatorInspectable";
+    }
+  }
+  if (typeof raw.changes === "boolean" && migrated.fileChanges === undefined) {
+    migrated.fileChanges = raw.changes ? "shown" : "hidden";
+  }
+  if (typeof raw.subagents === "boolean" && migrated.subagents === undefined) {
+    migrated.subagents = raw.subagents ? "shown" : "hidden";
+  }
+  if (typeof raw.usage === "boolean" && migrated.usage === undefined) {
+    migrated.usage = raw.usage ? "shown" : "hidden";
+  }
+  return compactOutputVisibilityOverrides(migrated);
+}
+
+/**
+ * @param {OutputVisibilityOverrides} raw
+ * @returns {OutputVisibilityOverrides}
+ */
+export function compactOutputVisibilityOverrides(raw) {
+  /** @type {OutputVisibilityOverrides} */
+  const compacted = {};
+  for (const setting of OUTPUT_PRESENTATION_SETTINGS) {
+    const value = normalizeKnownOutputPresentationValue(setting.key, raw[setting.key]);
+    if (value && value !== DEFAULT_OUTPUT_VISIBILITY[setting.key]) {
+      assignPresentationOverride(compacted, setting.key, value);
+    }
+  }
+  return compacted;
+}
+
+/**
+ * @param {unknown} leftRaw
+ * @param {unknown} rightRaw
+ * @returns {boolean}
+ */
+function outputVisibilityOverridesEqual(leftRaw, rightRaw) {
+  const left = normalizeOutputVisibility(leftRaw);
+  const right = normalizeOutputVisibility(rightRaw);
+  return OUTPUT_PRESENTATION_SETTINGS.every((setting) => left[setting.key] === right[setting.key]);
+}
+
+/**
+ * @param {OutputPresentationPresetDefinition} preset
+ * @returns {OutputVisibilityOverrides}
+ */
+export function buildOutputPresentationPresetOverrides(preset) {
+  return compactOutputVisibilityOverrides(preset.overrides);
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {OutputPresentationPresetDefinition | null}
+ */
+export function getOutputPresentationPresetForVisibility(raw) {
+  return OUTPUT_PRESENTATION_PRESETS.find((preset) => outputVisibilityOverridesEqual(raw, preset.overrides)) ?? null;
 }
 
 /**
@@ -122,10 +446,56 @@ export function normalizeOutputVisibility(raw) {
  * @returns {OutputVisibility}
  */
 export function resolveOutputVisibility(raw) {
+  const overrides = normalizeOutputVisibility(raw);
+  const reasoning = overrides.reasoning ?? DEFAULT_OUTPUT_VISIBILITY.reasoning;
+  const tools = typeof overrides.tools === "string" ? overrides.tools : DEFAULT_OUTPUT_VISIBILITY.tools;
+  const plans = overrides.plans ?? DEFAULT_OUTPUT_VISIBILITY.plans;
+  const fileChanges = overrides.fileChanges ?? DEFAULT_OUTPUT_VISIBILITY.fileChanges;
+  const snapshots = overrides.snapshots ?? DEFAULT_OUTPUT_VISIBILITY.snapshots;
+  const subagents = typeof overrides.subagents === "string" ? overrides.subagents : DEFAULT_OUTPUT_VISIBILITY.subagents;
+  const usage = typeof overrides.usage === "string" ? overrides.usage : DEFAULT_OUTPUT_VISIBILITY.usage;
+  const transcription = overrides.transcription ?? DEFAULT_OUTPUT_VISIBILITY.transcription;
+  const middleAssistantMessages = overrides.middleAssistantMessages ?? DEFAULT_OUTPUT_VISIBILITY.middleAssistantMessages;
   return {
-    ...DEFAULT_OUTPUT_VISIBILITY,
-    ...normalizeOutputVisibility(raw),
+    reasoning,
+    tools,
+    plans,
+    fileChanges,
+    snapshots,
+    subagents,
+    usage,
+    transcription,
+    middleAssistantMessages,
   };
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+export function formatOutputPresentationOption(value) {
+  switch (value) {
+    case "fullDetails":
+      return "full details";
+    case "indicatorInspectable":
+      return "indicator + inspectable";
+    case "pinnedIndicator":
+      return "indicator in pinned status";
+    case "pinnedCurrentStep":
+      return "current step in pinned status";
+    case "shown":
+      return "shown";
+    case "hidden":
+      return "hidden";
+    case "pinned":
+      return "pinned status";
+    case "on":
+      return "on";
+    case "off":
+      return "off";
+    default:
+      return value;
+  }
 }
 
 /**
@@ -134,8 +504,8 @@ export function resolveOutputVisibility(raw) {
  */
 export function formatOutputVisibility(raw) {
   const visibility = resolveOutputVisibility(raw);
-  return OUTPUT_VISIBILITY_FLAGS
-    .map((flag) => `${flag.label} ${visibility[flag.key] ? "on" : "off"}`)
+  return OUTPUT_PRESENTATION_SETTINGS
+    .map((setting) => `${setting.label} ${formatOutputPresentationOption(visibility[setting.key])}`)
     .join(", ");
 }
 
@@ -143,92 +513,57 @@ export function formatOutputVisibility(raw) {
  * @returns {string}
  */
 export function formatOutputVisibilityDefault() {
-  return formatOutputVisibility(DEFAULT_OUTPUT_VISIBILITY);
+  return formatOutputVisibility({});
 }
 
 /**
  * @param {unknown} raw
- * @returns {OutputVisibilityKey[]}
- */
-export function getEnabledOutputVisibilityKeys(raw) {
-  const visibility = resolveOutputVisibility(raw);
-  return OUTPUT_VISIBILITY_FLAGS
-    .filter((flag) => visibility[flag.key])
-    .map((flag) => flag.key);
-}
-
-/**
- * @param {string} key
- * @returns {OutputVisibilityFlagDefinition | null}
- */
-export function getOutputVisibilityFlagDefinition(key) {
-  const normalizedKey = key.trim().toLowerCase();
-  return OUTPUT_VISIBILITY_FLAGS.find((flag) => flag.key.toLowerCase() === normalizedKey) ?? null;
-}
-
-/**
- * @param {unknown} raw
- * @param {OutputVisibilityKey} key
- * @param {boolean} enabled
+ * @param {OutputPresentationKey} key
+ * @param {string} value
  * @returns {OutputVisibilityOverrides}
  */
-export function setOutputVisibilityOverride(raw, key, enabled) {
+export function setOutputPresentationOverride(raw, key, value) {
+  const option = normalizeOutputPresentationOption(key, value);
+  if (!option) {
+    return normalizeOutputVisibility(raw);
+  }
   const overrides = normalizeOutputVisibility(raw);
-  if (enabled === DEFAULT_OUTPUT_VISIBILITY[key]) {
-    delete overrides[key];
+  if (option === DEFAULT_OUTPUT_VISIBILITY[key]) {
+    deletePresentationOverride(overrides, key);
   } else {
-    overrides[key] = enabled;
+    assignPresentationOverride(overrides, key, option);
   }
-  return overrides;
+  return compactOutputVisibilityOverrides(overrides);
 }
 
 /**
- * Normalize persisted overrides into the current compact DB shape.
- * @param {unknown} raw
- * @returns {OutputVisibilityOverrides}
+ * @param {string} raw
+ * @returns {{ key: OutputPresentationKey, option: string } | null}
  */
-export function compactOutputVisibilityOverrides(raw) {
-  return buildOutputVisibilityOverrides(getEnabledOutputVisibilityKeys(raw));
-}
-
-/**
- * Build overrides from the full set of enabled keys.
- * @param {readonly OutputVisibilityKey[]} enabledKeys
- * @returns {OutputVisibilityOverrides}
- */
-export function buildOutputVisibilityOverrides(enabledKeys) {
-  const enabledSet = new Set(enabledKeys);
-  /** @type {OutputVisibilityOverrides} */
-  const overrides = {};
-
-  for (const flag of OUTPUT_VISIBILITY_FLAGS) {
-    const enabled = enabledSet.has(flag.key);
-    if (enabled !== DEFAULT_OUTPUT_VISIBILITY[flag.key]) {
-      overrides[flag.key] = enabled;
+export function parseOutputPresentationSetting(raw) {
+  const parts = raw.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) {
+    return null;
+  }
+  for (let length = Math.min(4, parts.length - 1); length >= 1; length -= 1) {
+    const keyText = parts.slice(0, length).join(" ");
+    const setting = getOutputPresentationSettingDefinition(keyText);
+    if (!setting) {
+      continue;
+    }
+    const optionText = parts.slice(length).join(" ");
+    const option = normalizeOutputPresentationOption(setting.key, optionText);
+    if (option) {
+      return { key: setting.key, option };
     }
   }
-
-  return overrides;
+  return null;
 }
 
 /**
- * Toggle a subset of keys relative to the current resolved visibility.
- * @param {unknown} raw
- * @param {readonly OutputVisibilityKey[]} toggledKeys
- * @returns {OutputVisibilityOverrides}
+ * @param {OutputPresentationKey} key
+ * @returns {string}
  */
-export function toggleOutputVisibilityOverrides(raw, toggledKeys) {
-  const current = resolveOutputVisibility(raw);
-  const toggledSet = new Set(toggledKeys);
-  /** @type {OutputVisibilityKey[]} */
-  const enabledKeys = [];
-
-  for (const flag of OUTPUT_VISIBILITY_FLAGS) {
-    const enabled = toggledSet.has(flag.key) ? !current[flag.key] : current[flag.key];
-    if (enabled) {
-      enabledKeys.push(flag.key);
-    }
-  }
-
-  return buildOutputVisibilityOverrides(enabledKeys);
+export function getOutputPresentationLabel(key) {
+  return getOutputPresentationSettingDefinition(key)?.label ?? key;
 }

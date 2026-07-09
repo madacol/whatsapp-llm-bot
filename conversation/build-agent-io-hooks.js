@@ -3,7 +3,7 @@ import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../agent-io-defaults.js";
 import { reasoningInspectState, textUpdate } from "../message-handle-events.js";
 import { createAgentRunOutputPort } from "../agent-run-output-port.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
-import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+import { DEFAULT_OUTPUT_VISIBILITY, resolveOutputVisibility } from "../chat-output-visibility.js";
 
 export const MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES = 25;
 export const SNAPSHOT_FILE_CHANGE_BATCH_FLUSH_DELAY_MS = 25;
@@ -42,8 +42,8 @@ function describeSnapshotFileChangeSample(events, cwd) {
 
 /**
  * File-mutating tool calls are part of change visibility, not just full tool
- * detail progress. Keep them renderable when `toolDetails` is compacted but
- * `changes` remains enabled.
+ * detail progress. Keep them renderable when tool output is compact but file
+ * changes remain enabled.
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
  * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
  * @param {string | null | undefined} cwd
@@ -118,6 +118,7 @@ export function buildAgentIoHooks(
   visibility = DEFAULT_OUTPUT_VISIBILITY,
   recordDeliveredContent,
 ) {
+  const outputVisibility = resolveOutputVisibility(visibility);
   const agentOutput = createAgentRunOutputPort(context, { cwd });
   /**
    * @template T
@@ -131,7 +132,7 @@ export function buildAgentIoHooks(
   const codexDisplayHooks = createCodexDisplayHooks({
     context,
     cwd,
-    visibility,
+    visibility: outputVisibility,
   });
   /** @type {LlmChatResponse["toolCalls"][0][]} */
   const pendingRuntimeToolCalls = [];
@@ -142,6 +143,7 @@ export function buildAgentIoHooks(
   let pendingEncryptedReasoning = false;
   let reasoningInspectAttached = false;
   let reasoningFinalized = false;
+  let pinnedReasoningShown = false;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let snapshotFlushTimer = null;
 
@@ -210,17 +212,27 @@ export function buildAgentIoHooks(
   }
 
   /**
-   * @param {{ text?: string, summaryParts: string[], contentParts: string[] }} event
+   * @param {{ text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
+   * @returns {string}
+   */
+  function getCompletedReasoningText(event) {
+    const traceParts = getReasoningTraceParts(event);
+    return traceParts.length > 0
+      ? traceParts.join("\n\n").trim()
+      : (pendingEncryptedReasoning || event.hasEncryptedContent === true
+        ? "_Reasoning is encrypted and not available for display._"
+        : "");
+  }
+
+  /**
+   * @param {{ text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
    * @returns {boolean}
    */
   function attachCompletedReasoningInspect(event) {
     if (!reasoningHandle || reasoningInspectAttached) {
       return false;
     }
-    const traceParts = getReasoningTraceParts(event);
-    const text = traceParts.length > 0
-      ? traceParts.join("\n\n").trim()
-      : (pendingEncryptedReasoning ? "_Reasoning is encrypted and not available for display._" : "");
+    const text = getCompletedReasoningText(event);
     if (!text) {
       return false;
     }
@@ -237,9 +249,54 @@ export function buildAgentIoHooks(
     return event.hasEncryptedContent === true || getReasoningTraceParts(event).length > 0;
   }
 
+  /**
+   * @param {{ status: string }} event
+   * @returns {Promise<void>}
+   */
+  async function emitPinnedReasoningIndicator(event) {
+    if (pinnedReasoningShown || event.status === "completed") {
+      return;
+    }
+    pinnedReasoningShown = true;
+    await sendRuntimePresentationEvent({
+      type: "reasoning.updated",
+      provider: "llm",
+      status: "updated",
+      text: "",
+      summaryParts: [],
+      contentParts: [],
+    });
+  }
+
+  /**
+   * @param {{ status: string, text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
+   * @returns {Promise<void>}
+   */
+  async function emitCompletedReasoningDetails(event) {
+    if (event.status !== "completed") {
+      return;
+    }
+    const text = getCompletedReasoningText(event);
+    if (!text) {
+      return;
+    }
+    await emitWhileWorking(() => agentOutput.replyWithAssistantOutput([{
+      type: "markdown",
+      text: `*Thought*\n\n${text}`,
+    }]));
+  }
+
   return {
     onReasoning: async (event) => {
-      if (!visibility.thinking) {
+      if (outputVisibility.reasoning === "hidden") {
+        return;
+      }
+      if (outputVisibility.reasoning === "pinnedIndicator") {
+        await emitPinnedReasoningIndicator(event);
+        return;
+      }
+      if (outputVisibility.reasoning === "fullDetails") {
+        await emitCompletedReasoningDetails(event);
         return;
       }
       if (reasoningFinalized && event.status !== "completed") {
@@ -277,7 +334,7 @@ export function buildAgentIoHooks(
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
       if (metadata?.source === "subagent") {
-        if (!visibility.subagents) {
+        if (outputVisibility.subagents === "hidden") {
           recordDeliveredContent?.(content);
           return;
         }
@@ -289,6 +346,9 @@ export function buildAgentIoHooks(
           ...(metadata.agentRole !== undefined && { agentRole: metadata.agentRole }),
         });
         recordDeliveredContent?.(content);
+        return;
+      }
+      if (metadata?.streamId && outputVisibility.middleAssistantMessages === "off") {
         return;
       }
       if (metadata?.streamId) {
@@ -323,8 +383,11 @@ export function buildAgentIoHooks(
       if (isNoopEditingFilesToolCall(toolCall)) {
         return undefined;
       }
-      if (!visibility.toolDetails) {
-        if (visibility.changes && shouldDisplayToolCallAsChange(toolCall, formatToolCall, cwd, toolContext)) {
+      if (outputVisibility.tools === "hidden") {
+        return undefined;
+      }
+      if (outputVisibility.tools !== "fullDetails") {
+        if (outputVisibility.fileChanges === "shown" && shouldDisplayToolCallAsChange(toolCall, formatToolCall, cwd, toolContext)) {
           return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
         }
         if (!pendingRuntimeToolCalls.some((pending) => pending.id === toolCall.id)) {
@@ -340,7 +403,10 @@ export function buildAgentIoHooks(
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
     onToolComplete: async (toolCall) => {
-      if (!visibility.toolDetails) {
+      if (outputVisibility.tools === "hidden") {
+        return;
+      }
+      if (outputVisibility.tools !== "fullDetails") {
         const index = pendingRuntimeToolCalls.findIndex((pending) => pending.id === toolCall.id);
         if (index !== -1) {
           pendingRuntimeToolCalls.splice(index, 1);
@@ -353,14 +419,17 @@ export function buildAgentIoHooks(
       }
     },
     onToolResult: async (blocks) => {
-      if (!visibility.toolDetails) {
+      if (outputVisibility.tools !== "fullDetails") {
         return;
       }
       await emitWhileWorking(() => agentOutput.sendToolResult(blocks));
       recordDeliveredContent?.(blocks);
     },
     onToolError: async (message) => {
-      if (!visibility.toolDetails) {
+      if (outputVisibility.tools === "hidden") {
+        return;
+      }
+      if (outputVisibility.tools !== "fullDetails") {
         const toolCall = pendingRuntimeToolCalls.pop();
         if (toolCall) {
           await agentOutput.sendRuntimeEvent({
@@ -374,6 +443,9 @@ export function buildAgentIoHooks(
       await emitWhileWorking(() => agentOutput.sendError(message));
     },
     onPlan: async (presentation) => {
+      if (outputVisibility.plans === "hidden") {
+        return;
+      }
       await emitWhileWorking(() => agentOutput.replyWithPlan(presentation));
     },
     onFileChange: async (fileChangeEvent) => {
@@ -384,16 +456,22 @@ export function buildAgentIoHooks(
       `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
     ),
     onUsage: async (cost, tokens) => {
+      if (outputVisibility.usage === "hidden") {
+        return;
+      }
       await agentOutput.sendUsage(cost, tokens);
     },
     onRuntimeEvent: async (event) => {
       if (event.type === "file-change.completed") {
-        if (!visibility.changes) {
-          return;
-        }
         if (event.change.source === "snapshot") {
+          if (outputVisibility.snapshots === "off") {
+            return;
+          }
           pendingSnapshotFileChanges.push(event);
           scheduleSnapshotFileChangeFlush();
+          return;
+        }
+        if (outputVisibility.fileChanges === "hidden") {
           return;
         }
       }

@@ -1,5 +1,6 @@
 import { getChatWorkDir } from "../utils.js";
 import { getHarnessInstanceConfig } from "../harness-config.js";
+import { resolveOutputVisibility } from "../chat-output-visibility.js";
 
 /**
  * @param {string} chatId
@@ -56,6 +57,7 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
   const workdir = resolveRunWorkdir(chatId, chatInfo, chatName, resolvedBinding);
   const protectedPaths = normalizeStringList(harnessConfig.protectedPaths);
   const ignoredFileChangePaths = normalizeStringList(harnessConfig.ignoredFileChangePaths);
+  const outputVisibility = resolveOutputVisibility(chatInfo?.output_visibility);
   return {
     workdir,
     harnessInstanceId: instanceId,
@@ -67,6 +69,7 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     sandboxMode: /** @type {HarnessRunConfig["sandboxMode"]} */ (typeof harnessConfig.sandboxMode === "string" ? harnessConfig.sandboxMode : "workspace-write"),
     approvalPolicy: /** @type {HarnessRunConfig["approvalPolicy"]} */ (typeof harnessConfig.approvalPolicy === "string" ? harnessConfig.approvalPolicy : undefined),
     approvalsReviewer: /** @type {HarnessRunConfig["approvalsReviewer"]} */ (typeof harnessConfig.approvalsReviewer === "string" ? harnessConfig.approvalsReviewer : undefined),
+    snapshotFileChanges: outputVisibility.snapshots === "on",
     ...(protectedPaths ? { protectedPaths } : {}),
     ...(ignoredFileChangePaths ? { ignoredFileChangePaths } : {}),
     ...(configValues ? { configValues } : {}),

@@ -229,7 +229,7 @@ async function runAcpMockProcessToWhatsApp() {
     sock,
     chatId,
     cwd: workdir,
-    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     outboundEvents,
     pinnedStatusDelivery,
   });
@@ -307,7 +307,7 @@ async function runFakeCodexSubagentChildToolsToWhatsApp() {
     sock,
     chatId,
     cwd: workdir,
-    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true, subagents: true },
+    visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     outboundEvents,
     pinnedStatusDelivery,
   });
@@ -506,7 +506,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       },
     ], {
       chatId: "acp-payload-mixed@s.whatsapp.net",
-      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     });
 
     const texts = sent.map((entry) => typeof entry.msg.text === "string" ? entry.msg.text : "");
@@ -596,7 +596,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ], {
       chatId: "acp-payload-long-running-tool@s.whatsapp.net",
       cwd: "/repo",
-      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
@@ -627,6 +627,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       },
     ], {
       chatId,
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "pinnedIndicator" },
       beforeEvents: [{
         type: "turn.started",
         provider: "acp",
@@ -783,7 +784,12 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       sock,
       chatId,
       cwd,
-      visibility: DEFAULT_OUTPUT_VISIBILITY,
+      visibility: {
+        ...DEFAULT_OUTPUT_VISIBILITY,
+        reasoning: "pinnedIndicator",
+        plans: "pinnedCurrentStep",
+        usage: "pinned",
+      },
       outboundEvents,
       pinnedStatusDelivery,
     });
@@ -1520,7 +1526,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ], {
       chatId: "acp-payload-web-actions@s.whatsapp.net",
       cwd: "/repo",
-      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
@@ -1621,7 +1627,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ], {
       chatId: "acp-payload-live-web-actions@s.whatsapp.net",
       cwd: "/repo",
-      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
@@ -1727,7 +1733,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ], {
       chatId: "acp-payload-guardian-approval@s.whatsapp.net",
       cwd: "/repo",
-      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
@@ -1771,7 +1777,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ], {
       chatId: "acp-payload-guardian-denial@s.whatsapp.net",
       cwd: "/repo",
-      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" },
     });
 
     assert.equal(sent[1]?.msg.text, "👎 🔧 *Shell*  `rm -rf actions`");

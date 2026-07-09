@@ -470,7 +470,7 @@ describe("per-chat model selection", () => {
       assert.equal(chat.harness_cwd, null);
     });
 
-    it("describes grouped visibility controls with pinned tool status opt-in", async () => {
+    it("describes side-channel presentation categories", async () => {
       await seedConfigChat("cfg-show-1", { output_visibility: {} });
       const result = await runChatSettingsCommand(
         { chatId: "cfg-show-1", rootDb: db, senderIds: ["u1"] },
@@ -478,90 +478,158 @@ describe("per-chat model selection", () => {
       );
 
       assert.ok(result.includes("*Show*"), `expected setting title, got: ${result}`);
-      assert.ok(result.includes("- Current: tool status off, thinking on, changes on, subagents on"), `expected current summary, got: ${result}`);
-      assert.ok(result.includes("*Controls*"), `expected controls section, got: ${result}`);
-      assert.ok(result.includes("- tool status"), `expected tool status flag, got: ${result}`);
-      assert.ok(result.includes("Default: off"), `expected tool status to default off, got: ${result}`);
-      assert.ok(result.includes("- thinking"), `expected thinking flag, got: ${result}`);
-      assert.ok(result.includes("- changes"), `expected changes flag, got: ${result}`);
-      assert.ok(result.includes("- subagents"), `expected subagents flag, got: ${result}`);
+      assert.ok(result.includes("reasoning indicator + inspectable"), `expected current reasoning summary, got: ${result}`);
+      assert.ok(result.includes("tools indicator + inspectable"), `expected current tools summary, got: ${result}`);
+      assert.ok(result.includes("*Presets*"), `expected presets section, got: ${result}`);
+      assert.ok(result.includes("- compact: Move progress into pinned status"), `expected compact preset, got: ${result}`);
+      assert.ok(result.includes("- custom: configure individual categories"), `expected custom preset option, got: ${result}`);
+      assert.ok(result.includes("*Categories*"), `expected categories section, got: ${result}`);
+      assert.ok(result.includes("- reasoning: full details, indicator + inspectable, indicator in pinned status, hidden"), `expected reasoning options, got: ${result}`);
+      assert.ok(result.includes("- snapshots: on, off"), `expected snapshot options, got: ${result}`);
+      assert.ok(result.includes("- middle assistant messages: on, off"), `expected middle assistant options, got: ${result}`);
     });
 
-    it("does not accept text subcommands for show anymore", async () => {
+    it("sets a show category with a text command", async () => {
       await seedConfigChat("cfg-show-2");
       const result = await runChatSettingsCommand(
         { chatId: "cfg-show-2", rootDb: db, senderIds: ["u1"] },
-        { setting: "show", value: "commands off" },
+        { setting: "show", value: "tools pinned" },
       );
 
-      assert.ok(result.includes("Use `!s show`"), `expected picker guidance, got: ${result}`);
-      assert.ok(result.includes("!s reset show"), `expected reset guidance, got: ${result}`);
+      assert.ok(result.includes("tools set to indicator in pinned status"), `expected set confirmation, got: ${result}`);
 
       const chat = await readRequiredChatConfig("cfg-show-2");
-      assert.deepEqual(chat.output_visibility, {});
+      assert.deepEqual(chat.output_visibility, { tools: "pinnedIndicator" });
     });
 
-    it("uses a multi-select picker for show and stores the selected outputs", async () => {
-      await seedConfigChat("cfg-show-3");
+    it("sets a show preset with a text command", async () => {
+      await seedConfigChat("cfg-show-preset-text-1");
+      const result = await runChatSettingsCommand(
+        { chatId: "cfg-show-preset-text-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "show", value: "compact" },
+      );
 
-      /** @type {string | null} */
-      let promptText = null;
-      /** @type {SelectOption[] | null} */
-      let pickerOptions = null;
+      assert.ok(result.includes("Show preset set to compact"), `expected preset confirmation, got: ${result}`);
+
+      const chat = await readRequiredChatConfig("cfg-show-preset-text-1");
+      assert.deepEqual(chat.output_visibility, {
+        reasoning: "pinnedIndicator",
+        tools: "pinnedIndicator",
+        plans: "pinnedCurrentStep",
+        snapshots: "off",
+        usage: "pinned",
+        transcription: "pinnedIndicator",
+        middleAssistantMessages: "off",
+      });
+    });
+
+    it("uses the reusable picker flow for show presets", async () => {
+      await seedConfigChat("cfg-show-preset-picker-1");
+      /** @type {Array<{ question: string, options: SelectOption[], currentId?: string }>} */
+      const selections = [];
       const result = await runChatSettingsCommand(
         {
-          chatId: "cfg-show-3",
+          chatId: "cfg-show-preset-picker-1",
           rootDb: db,
           senderIds: ["u1"],
-          selectMany: async (question, options) => {
-            promptText = question;
-            pickerOptions = options;
-            return { kind: "selected", ids: ["toolStatus", "changes"] };
+          select: async (question, options, config) => {
+            selections.push({
+              question,
+              options,
+              ...(config?.currentId ? { currentId: config.currentId } : {}),
+            });
+            return "compact";
           },
         },
         { setting: "show" },
       );
 
-      const prompt = requireString(promptText);
-      assert.equal(
-        prompt,
-        "Choose which extra agent progress outputs are shown in chat.",
-        `expected concise show prompt, got: ${prompt}`,
-      );
+      assert.equal(selections.length, 1);
+      assert.ok(selections[0]?.question.includes("Choose a preset"), `expected preset prompt, got: ${selections[0]?.question}`);
+      assert.equal(selections[0]?.currentId, "default");
       assert.deepEqual(
-        pickerOptions,
-        [
-          { id: "toolStatus", label: "⚪ Show pinned tool status" },
-          { id: "thinking", label: "🟢 Hide thinking" },
-          { id: "changes", label: "🟢 Hide file changes" },
-          { id: "subagents", label: "🟢 Hide sub-agent output" },
-          { id: "none", label: "⚪ Hide all extras" },
-        ],
+        selections[0]?.options.map((option) => typeof option === "string" ? option : option.id),
+        ["default", "compact", "minimal", "custom"],
       );
-      assert.ok(result.includes("Show pinned tool status"), `expected tool status summary, got: ${result}`);
-      assert.ok(result.includes("Hide file changes"), `expected hide summary, got: ${result}`);
-      assert.ok(!result.includes("thinking"), `did not expect unchanged thinking summary, got: ${result}`);
+      assert.ok(result.includes("Show preset set to compact"), `expected preset confirmation, got: ${result}`);
 
-      const chat = await readRequiredChatConfig("cfg-show-3");
-      assert.deepEqual(chat.output_visibility, {
-        toolStatus: true,
-        changes: false,
-      });
+      const chat = await readRequiredChatConfig("cfg-show-preset-picker-1");
+      assert.equal(chat.output_visibility.tools, "pinnedIndicator");
+      assert.equal(chat.output_visibility.middleAssistantMessages, "off");
     });
 
-    it("treats an empty multi-select result as a no-op for show", async () => {
-      await seedConfigChat("cfg-show-4");
+    it("uses the reusable picker flow for custom show category options", async () => {
+      await seedConfigChat("cfg-show-picker-1");
+      /** @type {Array<{ question: string, options: SelectOption[], currentId?: string }>} */
+      const selections = [];
       const result = await runChatSettingsCommand(
         {
-          chatId: "cfg-show-4",
+          chatId: "cfg-show-picker-1",
           rootDb: db,
           senderIds: ["u1"],
-          selectMany: async () => ({ kind: "unchanged" }),
+          select: async (question, options, config) => {
+            selections.push({
+              question,
+              options,
+              ...(config?.currentId ? { currentId: config.currentId } : {}),
+            });
+            if (selections.length === 1) return "custom";
+            if (selections.length === 2) return "tools";
+            return "pinnedIndicator";
+          },
         },
         { setting: "show" },
       );
 
-      assert.equal(result, "");
+      assert.equal(selections.length, 3);
+      assert.ok(selections[0]?.question.includes("Choose a preset"), `expected preset prompt, got: ${selections[0]?.question}`);
+      assert.equal(selections[0]?.currentId, "default");
+      assert.ok(selections[1]?.question.includes("Choose what to configure."), `expected category prompt, got: ${selections[1]?.question}`);
+      assert.ok(selections[1]?.options.some((option) =>
+        typeof option !== "string" && option.id === "tools" && option.label.includes("indicator + inspectable")));
+      assert.ok(selections[2]?.question.includes("*Show: tools*"), `expected option prompt, got: ${selections[2]?.question}`);
+      assert.equal(selections[2]?.currentId, "indicatorInspectable");
+      assert.deepEqual(
+        selections[2]?.options.map((option) => typeof option === "string" ? option : option.id),
+        ["fullDetails", "indicatorInspectable", "pinnedIndicator", "hidden"],
+      );
+      assert.ok(result.includes("tools set to indicator in pinned status"), `expected set confirmation, got: ${result}`);
+
+      const chat = await readRequiredChatConfig("cfg-show-picker-1");
+      assert.deepEqual(chat.output_visibility, { tools: "pinnedIndicator" });
+    });
+
+    it("does not use a multi-select picker for show", async () => {
+      await seedConfigChat("cfg-show-3");
+
+      const result = await runChatSettingsCommand(
+        {
+          chatId: "cfg-show-3",
+          rootDb: db,
+          senderIds: ["u1"],
+          selectMany: async () => {
+            assert.fail("show should not use the legacy multi-select picker");
+          },
+        },
+        { setting: "show" },
+      );
+
+      assert.ok(result.includes("*Categories*"), `expected show help, got: ${result}`);
+
+      const chat = await readRequiredChatConfig("cfg-show-3");
+      assert.deepEqual(chat.output_visibility, {});
+    });
+
+    it("rejects unknown show category commands with category guidance", async () => {
+      await seedConfigChat("cfg-show-4");
+      const result = await runChatSettingsCommand(
+        { chatId: "cfg-show-4", rootDb: db, senderIds: ["u1"] },
+        { setting: "show", value: "commands off" },
+      );
+
+      assert.ok(result.includes("show <category> <option>"), `expected command guidance, got: ${result}`);
+      assert.ok(result.includes("*Presets*"), `expected preset guidance, got: ${result}`);
+      assert.ok(result.includes("*Categories*"), `expected category guidance, got: ${result}`);
 
       const chat = await readRequiredChatConfig("cfg-show-4");
       assert.deepEqual(chat.output_visibility, {});

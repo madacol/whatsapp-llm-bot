@@ -19,6 +19,7 @@ import { deliverPendingRestartAck } from "./restart/restart-ack-delivery.js";
 import { createRestartAckStore } from "./restart/restart-ack-store.js";
 import { createRestartCommandHandler } from "./commands/restart-command.js";
 import { createGracefulShutdownHandler } from "./shutdown-lifecycle.js";
+import { migrateAllChatConfigOutputVisibility } from "./chat-config.js";
 
 const log = createLogger("index");
 const SHUTDOWN_FORCE_EXIT_MS = 10_000;
@@ -146,6 +147,11 @@ if (!process.env.TESTING) {
     }
   }
   process.on("exit", cleanupPidFile);
+
+  const outputVisibilityMigration = await migrateAllChatConfigOutputVisibility();
+  if (outputVisibilityMigration.migrated > 0) {
+    log.info(`Migrated output visibility settings for ${outputVisibilityMigration.migrated}/${outputVisibilityMigration.scanned} chat configs.`);
+  }
 
   const store = await initStore();
   const llmClient = createLlmClient();

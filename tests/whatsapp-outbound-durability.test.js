@@ -13,7 +13,7 @@ describe("WhatsApp outbound durability", () => {
     await seedChat(db, "chat-1", { enabled: true });
     await updateChatConfig("chat-1", (current) => ({
       ...current,
-      output_visibility: { thinking: false },
+      output_visibility: { reasoning: "hidden" },
     }));
 
     /** @type {Array<{ chatId: string, payload: unknown }>} */

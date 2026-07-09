@@ -249,7 +249,7 @@ describe("provider runtime events", () => {
     await updateChatConfig(chatId, (current) => ({
       ...current,
       harness: harnessName,
-      output_visibility: { toolDetails: false },
+      output_visibility: { tools: "indicatorInspectable" },
     }));
   });
 
@@ -326,7 +326,7 @@ describe("dummy runtime tools", () => {
     await updateChatConfig(chatId, (current) => ({
       ...current,
       harness: harnessName,
-      output_visibility: { toolDetails: true },
+      output_visibility: { tools: "fullDetails" },
     }));
   });
 
@@ -394,7 +394,7 @@ describe("ACP file changes through WhatsApp transport", () => {
       ...current,
       harness: harnessName,
       harness_cwd: workdir,
-      output_visibility: { changes: true, toolDetails: false },
+      output_visibility: { fileChanges: "shown", tools: "indicatorInspectable" },
     }));
 
     const captures = createMockBaileysSocket();
@@ -513,7 +513,7 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
       ...current,
       harness: harnessName,
       harness_cwd: workdir,
-      output_visibility: { changes: true, toolDetails: false },
+      output_visibility: { fileChanges: "shown", tools: "indicatorInspectable" },
     }));
 
     const captures = createMockBaileysSocket();
@@ -612,7 +612,13 @@ describe("ACP runtime events through WhatsApp transport", () => {
       ...current,
       harness: harnessName,
       harness_cwd: workdir,
-      output_visibility: { thinking: true, changes: true, toolDetails: true, usage: true, subagents: true },
+      output_visibility: {
+        reasoning: "indicatorInspectable",
+        fileChanges: "shown",
+        tools: "fullDetails",
+        usage: "shown",
+        subagents: "shown",
+      },
     }));
 
     const captures = createMockBaileysSocket();

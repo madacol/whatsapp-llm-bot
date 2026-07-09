@@ -10,6 +10,7 @@ import { buildLiveInputText } from "./live-input-text.js";
 import { decideChannelInputRoute } from "./channel-input-routing.js";
 import { createAgentRuntime } from "./agent-runtime.js";
 import { createCommandOrchestration } from "./command-orchestration.js";
+import { DEFAULT_OUTPUT_VISIBILITY, resolveOutputVisibility } from "../chat-output-visibility.js";
 import {
   createWaitSendBatchStore,
   parseWaitSendBatchCommandText,
@@ -130,14 +131,16 @@ function formatAudioTranscriptionInspectText(transcriptions) {
 }
 
 /**
- * @param {ExecuteActionContext} context
+ * @param {Pick<ExecuteActionContext, "send" | "reply">} context
+ * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
  * @returns {{
  *   onAudioTranscriptionStart: (event: { block: AudioContentBlock, modelId: string }) => Promise<void>,
  *   onAudioTranscriptionComplete: (event: { block: AudioContentBlock, modelId: string, transcription: string }) => Promise<void>,
  *   onAudioTranscriptionFailure: (event: { block: AudioContentBlock, modelId: string, error: unknown }) => Promise<void>,
  * }}
  */
-function createAudioTranscriptionStatusObserver(context) {
+export function createAudioTranscriptionStatusObserver(context, visibility = DEFAULT_OUTPUT_VISIBILITY) {
+  const outputVisibility = resolveOutputVisibility(visibility);
   const appOutput = createAppOutputPort(context);
   /** @type {Promise<MessageHandle | undefined> | null} */
   let handlePromise = null;
@@ -156,6 +159,14 @@ function createAudioTranscriptionStatusObserver(context) {
     return handlePromise;
   }
 
+  if (outputVisibility.transcription === "hidden") {
+    return {
+      onAudioTranscriptionStart: async () => {},
+      onAudioTranscriptionComplete: async () => {},
+      onAudioTranscriptionFailure: async () => {},
+    };
+  }
+
   return {
     onAudioTranscriptionStart: async () => {
       await ensureHandle();
@@ -167,9 +178,17 @@ function createAudioTranscriptionStatusObserver(context) {
         return;
       }
       transcriptions.push(transcription);
+      const inspectText = formatAudioTranscriptionInspectText(transcriptions);
+      if (outputVisibility.transcription === "fullDetails") {
+        await handle?.update({
+          kind: "text",
+          text: `Transcribed\n\n${inspectText}`,
+        });
+        return;
+      }
       handle?.setInspect({
         kind: "text",
-        text: formatAudioTranscriptionInspectText(transcriptions),
+        text: inspectText,
       });
       await handle?.update({
         kind: "text",
@@ -318,7 +337,10 @@ export function createConversationRunner({
       chatId,
       chatInfo,
       content,
-      audioTranscriptionObserver: createAudioTranscriptionStatusObserver(context),
+      audioTranscriptionObserver: createAudioTranscriptionStatusObserver(
+        context,
+        resolveOutputVisibility(chatInfo?.output_visibility),
+      ),
     });
   }
 
@@ -381,8 +403,12 @@ export function createConversationRunner({
     runtimeSelection,
     resolvedBinding,
     prebuiltInputText,
-    audioTranscriptionObserver = createAudioTranscriptionStatusObserver(context),
+    audioTranscriptionObserver,
   }) {
+    const resolvedAudioTranscriptionObserver = audioTranscriptionObserver ?? createAudioTranscriptionStatusObserver(
+      context,
+      resolveOutputVisibility(chatInfo?.output_visibility),
+    );
     const appOutput = createAppOutputPort(context);
     const { chatId, senderIds, content } = turn;
     const message = buildUserMessage(turn);
@@ -400,7 +426,12 @@ export function createConversationRunner({
     }
 
     const userText = prebuiltInputText ?? (agentRuntime.hasPendingRun(chatId)
-      ? await buildPendingRunInputText({ chatId, chatInfo, content, audioTranscriptionObserver })
+      ? await buildPendingRunInputText({
+        chatId,
+        chatInfo,
+        content,
+        audioTranscriptionObserver: resolvedAudioTranscriptionObserver,
+      })
       : getTopLevelText(content));
     const lifecycleDecision = await agentRuntime.beginRun({
       turn,
@@ -432,7 +463,7 @@ export function createConversationRunner({
       selection: runtimeSelection,
       resolvedBinding,
       prebuiltInputText,
-      audioTranscriptionObserver,
+      audioTranscriptionObserver: resolvedAudioTranscriptionObserver,
     });
   }
 
@@ -573,7 +604,10 @@ export function createConversationRunner({
         return null;
       }
       const runtimeSelection = await agentRuntime.resolveSelection(chatInfo);
-      const audioTranscriptionObserver = createAudioTranscriptionStatusObserver(context);
+      const audioTranscriptionObserver = createAudioTranscriptionStatusObserver(
+        context,
+        resolveOutputVisibility(chatInfo?.output_visibility),
+      );
       const userText = await buildPendingRunInputText({
         chatId,
         chatInfo,

@@ -401,7 +401,7 @@ describe("workspace lifecycle", () => {
       memory_threshold: 0.42,
       model_roles: { coding: "openai/gpt-4.1" },
       harness: "codex",
-      output_visibility: { thinking: true },
+      output_visibility: { reasoning: "hidden" },
       harness_config: { codex: { model: "openai/gpt-4.1", sandboxMode: "workspace-write" } },
       media_to_text_models: { general: "openai/gpt-4.1-mini", image: "openai/gpt-4.1" },
     }));
@@ -453,7 +453,7 @@ describe("workspace lifecycle", () => {
     assert.equal(enabledChat?.memory_threshold, 0.42);
     assert.deepEqual(enabledChat?.model_roles, { coding: "openai/gpt-4.1" });
     assert.equal(enabledChat?.harness, "codex");
-    assert.deepEqual(enabledChat?.output_visibility, { thinking: true });
+    assert.deepEqual(enabledChat?.output_visibility, { reasoning: "hidden" });
     assert.deepEqual(enabledChat?.harness_config, {
       codex: { model: "openai/gpt-4.1", sandboxMode: "workspace-write" },
     });

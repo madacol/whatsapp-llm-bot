@@ -4,12 +4,14 @@ import { MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES, buildAgentIoHooks } from "../
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 
+/** @type {import("../chat-output-visibility.js").OutputVisibility} */
 const VISIBLE_TOOL_OUTPUT = {
   ...DEFAULT_OUTPUT_VISIBILITY,
-  toolDetails: true,
+  tools: "fullDetails",
 };
 
 /**
+ * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
@@ -39,6 +41,7 @@ function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
 
 /**
  * @param {string | null} cwd
+ * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
@@ -67,6 +70,7 @@ function createSubjectWithCwd(cwd, visibility = DEFAULT_OUTPUT_VISIBILITY) {
 }
 
 /**
+ * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
@@ -74,7 +78,7 @@ function createSubjectWithCwd(cwd, visibility = DEFAULT_OUTPUT_VISIBILITY) {
  *   reasoningInspects: MessageInspectState[],
  * }}
  */
-function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thinking: true }) {
+function createReasoningSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
   /** @type {MessageHandleUpdate[]} */
@@ -274,7 +278,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("suppresses sub-agent llm responses when sub-agent visibility is off", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, subagents: false });
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, subagents: "hidden" });
 
     await hooks.onLlmResponse?.("Hidden sub-agent update", {
       source: "subagent",
@@ -306,7 +310,7 @@ describe("buildAgentIoHooks", () => {
         confirm: async () => true,
       },
       "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+      { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" },
     );
 
     await emitRuntimeCommand(hooks, "pnpm test", "started");
@@ -569,7 +573,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("suppresses thinking output when visibility disables it", async () => {
-    const subject = createReasoningSubject({ ...DEFAULT_OUTPUT_VISIBILITY, thinking: false });
+    const subject = createReasoningSubject({ ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "hidden" });
 
     await subject.hooks.onReasoning?.({
       status: "completed",
@@ -582,6 +586,72 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.sent.length, 0);
     assert.deepEqual(subject.reasoningUpdates, []);
     assert.deepEqual(subject.reasoningInspects, []);
+  });
+
+  it("emits reasoning as a pinned runtime indicator when configured", async () => {
+    const subject = createReasoningSubject({ ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "pinnedIndicator" });
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      itemId: "reason-pinned-1",
+      summaryParts: [],
+      contentParts: ["Working"],
+      text: "Working",
+    });
+
+    assert.deepEqual(subject.reasoningUpdates, []);
+    assert.deepEqual(subject.reasoningInspects, []);
+    assert.equal(subject.sent.length, 1);
+    assert.equal(subject.sent[0]?.event.kind, "runtime_event");
+    if (subject.sent[0]?.event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
+    }
+    assert.equal(subject.sent[0].event.event.type, "reasoning.updated");
+  });
+
+  it("emits completed reasoning as a full detail message when configured", async () => {
+    const subject = createReasoningSubject({ ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "fullDetails" });
+
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      itemId: "reason-full-1",
+      summaryParts: [],
+      contentParts: ["Detailed trace."],
+      text: "Detailed trace.",
+    });
+
+    assert.deepEqual(subject.reasoningUpdates, []);
+    assert.deepEqual(subject.reasoningInspects, []);
+    assert.equal(subject.sent.length, 1);
+    assert.equal(subject.sent[0]?.event.kind, "assistant_output");
+    if (subject.sent[0]?.event.kind !== "assistant_output") {
+      assert.fail("Expected assistant_output");
+    }
+    assert.deepEqual(subject.sent[0].event.content, [{
+      type: "markdown",
+      text: "*Thought*\n\nDetailed trace.",
+    }]);
+  });
+
+  it("suppresses middle assistant messages when configured", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, middleAssistantMessages: "off" });
+
+    await hooks.onLlmResponse?.("Intermediate answer", {
+      source: "llm",
+      streamId: "assistant-item-1",
+      streamStatus: "final",
+    });
+    await hooks.onLlmResponse?.("Final answer");
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["assistant_output"]);
+    if (sent[0]?.event.kind !== "assistant_output" || !Array.isArray(sent[0].event.content)) {
+      assert.fail("Expected assistant_output array content");
+    }
+    const block = sent[0].event.content[0];
+    if (!block || (block.type !== "text" && block.type !== "markdown")) {
+      assert.fail("Expected text assistant output block");
+    }
+    assert.equal(block.text, "Final answer");
   });
 
   it("emits command starts as runtime events", async () => {
@@ -601,7 +671,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("passes command runtime events without transport presentation flags", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
 
     await emitRuntimeCommand(hooks, "pnpm type-check", "started");
 
@@ -611,7 +681,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("suppresses no-op ACP editing-files placeholder tool calls", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
 
     const toolCall = { id: "acp-editing-files", name: "Editing files", arguments: "{}" };
     await hooks.onToolCall?.(toolCall);
@@ -621,7 +691,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("emits direct tool lifecycle as runtime outbound events", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
     const toolCall = {
       id: "tool-complete-1",
       name: "spawn_agent",
@@ -661,7 +731,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("passes unrecognized tool actions through runtime output events", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
     const toolCall = {
       id: "mass-rename-1",
       name: "mass_rename",
@@ -713,8 +783,8 @@ describe("buildAgentIoHooks", () => {
   it("renders edit diffs even when generic tool progress is hidden", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,
-      toolDetails: false,
-      changes: true,
+      tools: "indicatorInspectable",
+      fileChanges: "shown",
     });
 
     await hooks.onToolCall?.({
@@ -745,7 +815,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("passes command failures as runtime outbound events instead of sending a separate error message", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
 
     await emitRuntimeCommand(hooks, "pnpm test", "started");
     await emitRuntimeCommand(hooks, "pnpm test", "failed", "boom");
@@ -755,7 +825,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("passes runtime progress without inserting transport close events", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
     await emitRuntimeCommand(hooks, "pwd", "started");
     await emitRuntimeCommand(hooks, "pnpm type-check", "started");
     await hooks.onLlmResponse?.("Done");
@@ -779,7 +849,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("keeps runtime progress and non-tool events separate without transport grouping", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
 
     await emitRuntimeCommand(hooks, "pwd", "started");
     await hooks.onPlan?.(requirePlanPresentation(buildToolPresentation("update_plan", {
@@ -807,19 +877,66 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("suppresses tool result progress events when visibility disables full tool details", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" });
 
     await hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }], "tool", {});
 
     assert.equal(sent.length, 0);
   });
 
+  it("suppresses all tool presentation when tools are hidden", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: "hidden" });
+    const toolCall = {
+      id: "hidden-tool-1",
+      name: "Read",
+      arguments: JSON.stringify({ file_path: "/repo/file.js" }),
+    };
+
+    await hooks.onToolCall?.(toolCall);
+    await hooks.onToolComplete?.(toolCall);
+    await hooks.onToolResult?.([{ type: "text", text: "output" }], "Read", {});
+    await hooks.onToolError?.("tool failed");
+
+    assert.deepEqual(sent, []);
+  });
+
   it("suppresses file change progress when visibility disables changes", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, changes: false });
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, fileChanges: "hidden" });
 
     await hooks.onFileChange?.({ path: "/tmp/file.js", summary: "Updated file" });
 
     assert.equal(sent.length, 0);
+  });
+
+  it("suppresses snapshot file changes when snapshots are off", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, snapshots: "off" });
+
+    await hooks.onRuntimeEvent?.({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: "/tmp/snapshot.js",
+        source: "snapshot",
+        kind: "update",
+      },
+    });
+
+    assert.deepEqual(sent, []);
+  });
+
+  it("suppresses plans and usage when their categories are hidden", async () => {
+    const { hooks, sent } = createSubject({
+      ...DEFAULT_OUTPUT_VISIBILITY,
+      plans: "hidden",
+      usage: "hidden",
+    });
+
+    await hooks.onPlan?.(requirePlanPresentation(buildToolPresentation("update_plan", {
+      plan: [{ step: "Inspect output", status: "in_progress" }],
+    }, undefined, undefined, undefined)));
+    await hooks.onUsage?.("0.000000", { prompt: 1, completion: 1, cached: 0 });
+
+    assert.deepEqual(sent, []);
   });
 
   it("passes command text to WhatsApp without Shell presentation", async () => {

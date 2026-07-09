@@ -456,7 +456,7 @@ export function toolCall(name, args) {
  *   persona?: string | null;
  *   modelRoles?: Record<string, string>;
  *   mediaToTextModels?: { image?: string; audio?: string; video?: string; general?: string };
- *   outputVisibility?: { commands?: boolean; thinking?: boolean; tools?: boolean; toolDetails?: boolean };
+ *   outputVisibility?: import("../chat-output-visibility.js").OutputVisibilityOverrides;
  * }} ChatConfig
  */
 

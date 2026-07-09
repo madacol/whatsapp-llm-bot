@@ -893,16 +893,21 @@ export async function startAcpRun(input) {
     },
     workdir: input.runConfig?.workdir ?? null,
   });
-  const beforeSnapshotStartedAt = Date.now();
-  log.info("ACP before workdir snapshot starting", {
-    workdir: input.runConfig?.workdir ?? null,
-  });
-  const beforeSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
-  log.info("ACP before workdir snapshot completed", {
-    workdir: input.runConfig?.workdir ?? null,
-    fileCount: beforeSnapshot?.size ?? 0,
-    durationMs: Date.now() - beforeSnapshotStartedAt,
-  });
+  const snapshotFileChangesEnabled = input.runConfig?.snapshotFileChanges !== false;
+  /** @type {Map<string, string> | null} */
+  let beforeSnapshot = null;
+  if (snapshotFileChangesEnabled) {
+    const beforeSnapshotStartedAt = Date.now();
+    log.info("ACP before workdir snapshot starting", {
+      workdir: input.runConfig?.workdir ?? null,
+    });
+    beforeSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
+    log.info("ACP before workdir snapshot completed", {
+      workdir: input.runConfig?.workdir ?? null,
+      fileCount: beforeSnapshot?.size ?? 0,
+      durationMs: Date.now() - beforeSnapshotStartedAt,
+    });
+  }
   const reconciliationBaseline = beforeSnapshot ? new Map(beforeSnapshot) : new Map();
   /** @type {Set<string>} */
   const emittedFileChangePaths = new Set();
@@ -1086,22 +1091,24 @@ export async function startAcpRun(input) {
     for (const event of runtimeModel.flushAssistantSegment()) {
       await emitRuntimeEvent(event);
     }
-    const afterSnapshotStartedAt = Date.now();
-    log.info("ACP after workdir snapshot starting", {
-      workdir: input.runConfig?.workdir ?? null,
-    });
-    const afterSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
-    log.info("ACP after workdir snapshot completed", {
-      workdir: input.runConfig?.workdir ?? null,
-      fileCount: afterSnapshot?.size ?? 0,
-      durationMs: Date.now() - afterSnapshotStartedAt,
-    });
-    const snapshotFileChanges = collectAcpSnapshotFileChanges({
-      before: beforeSnapshot,
-      after: afterSnapshot,
-      emittedPaths: emittedFileChangePaths,
-    });
-    await emitAcpSnapshotFileChangeEvents(snapshotFileChanges, emitRuntimeEvent);
+    if (snapshotFileChangesEnabled) {
+      const afterSnapshotStartedAt = Date.now();
+      log.info("ACP after workdir snapshot starting", {
+        workdir: input.runConfig?.workdir ?? null,
+      });
+      const afterSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
+      log.info("ACP after workdir snapshot completed", {
+        workdir: input.runConfig?.workdir ?? null,
+        fileCount: afterSnapshot?.size ?? 0,
+        durationMs: Date.now() - afterSnapshotStartedAt,
+      });
+      const snapshotFileChanges = collectAcpSnapshotFileChanges({
+        before: beforeSnapshot,
+        after: afterSnapshot,
+        emittedPaths: emittedFileChangePaths,
+      });
+      await emitAcpSnapshotFileChangeEvents(snapshotFileChanges, emitRuntimeEvent);
+    }
     promptCompleted = true;
     return {
       result: runtimeDispatcher.result,

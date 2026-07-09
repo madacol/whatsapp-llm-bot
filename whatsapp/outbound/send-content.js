@@ -1555,7 +1555,31 @@ function pinnedStatusHasTurnEntry(state) {
  * @returns {boolean}
  */
 function shouldUsePinnedRuntimeActionStatus(outputVisibility) {
-  return outputVisibility?.toolStatus === true;
+  return outputVisibility?.tools === "pinnedIndicator";
+}
+
+/**
+ * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
+ * @returns {boolean}
+ */
+function shouldUsePinnedReasoningStatus(outputVisibility) {
+  return outputVisibility?.reasoning === "pinnedIndicator";
+}
+
+/**
+ * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
+ * @returns {boolean}
+ */
+function shouldUsePinnedPlanStatus(outputVisibility) {
+  return outputVisibility?.plans === "pinnedCurrentStep";
+}
+
+/**
+ * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
+ * @returns {boolean}
+ */
+function shouldUsePinnedUsageStatus(outputVisibility) {
+  return outputVisibility?.usage === "pinned";
 }
 
 /**
@@ -1618,14 +1642,14 @@ function getPreviousPinnedStatusDetail(state, key, prefix, fallback) {
 /**
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> } | undefined} state
- * @param {{ includeRuntimeActions: boolean }} options
+ * @param {{ includeRuntimeActions: boolean, includeReasoning: boolean }} options
  * @returns {{ key: string, icon: string, provider?: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
 function formatPinnedRuntimeStatusPresentation(event, state, options) {
   const runtimeEvent = event.event;
   const provider = formatRuntimeProvider(runtimeEvent.provider);
   if (runtimeEvent.type === "reasoning.started" || runtimeEvent.type === "reasoning.updated") {
-    if (!state || state.entries.some((entry) => entry.key === "thinking")) {
+    if (!options.includeReasoning || !state || state.entries.some((entry) => entry.key === "thinking")) {
       return null;
     }
     return {
@@ -1817,7 +1841,7 @@ function formatPinnedRuntimeStatusPresentation(event, state, options) {
 /**
  * @param {OutboundEvent} event
  * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string, reviewPrefix?: "👍" | "👎" }> } | undefined} state
- * @param {{ includeRuntimeActions: boolean }} options
+ * @param {{ includeRuntimeActions: boolean, includeReasoning: boolean, includePlans: boolean, includeUsage: boolean }} options
  * @returns {{ key: string, icon: string, provider?: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
 function formatPinnedStatusPresentation(event, state, options) {
@@ -1829,6 +1853,9 @@ function formatPinnedStatusPresentation(event, state, options) {
   }
   switch (event.kind) {
     case "assistant_output": {
+      if (!options.includeReasoning) {
+        return null;
+      }
       if (!Array.isArray(event.content)) {
         return null;
       }
@@ -1847,6 +1874,9 @@ function formatPinnedStatusPresentation(event, state, options) {
       };
     }
     case "plan":
+      if (!options.includePlans) {
+        return null;
+      }
       return {
         key: "plan",
         icon: "📋",
@@ -1861,6 +1891,9 @@ function formatPinnedStatusPresentation(event, state, options) {
         summary: event.agentNickname ? `${event.agentNickname} replied` : "subagent replied",
       };
     case "usage":
+      if (!options.includeUsage) {
+        return null;
+      }
       if (
         isZeroPinnedUsageCost(event.cost)
         && latestPinnedStatusEntryIsAction(state)
@@ -1901,6 +1934,9 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
   let state = turnStatusByChat.get(chatId);
   const presentation = formatPinnedStatusPresentation(event, state, {
     includeRuntimeActions: shouldUsePinnedRuntimeActionStatus(sendOptions.outputVisibility),
+    includeReasoning: shouldUsePinnedReasoningStatus(sendOptions.outputVisibility),
+    includePlans: shouldUsePinnedPlanStatus(sendOptions.outputVisibility),
+    includeUsage: shouldUsePinnedUsageStatus(sendOptions.outputVisibility),
   });
   if (!presentation) {
     return undefined;
@@ -2045,6 +2081,39 @@ function renderOutboundEvent(event) {
     default:
       return null;
   }
+}
+
+/**
+ * @param {AssistantOutputEvent} event
+ * @returns {boolean}
+ */
+function isThinkingAssistantOutputEvent(event) {
+  if (!Array.isArray(event.content)) {
+    return false;
+  }
+  const text = event.content
+    .map((block) => block.type === "text" || block.type === "markdown" ? block.text : "")
+    .join("\n")
+    .trim();
+  return text === "Thinking...";
+}
+
+/**
+ * @param {OutboundEvent} event
+ * @param {import("../../chat-output-visibility.js").OutputVisibility | undefined} outputVisibility
+ * @returns {boolean}
+ */
+function shouldSuppressStandaloneOutboundEvent(event, outputVisibility) {
+  if (event.kind === "plan") {
+    return shouldUsePinnedPlanStatus(outputVisibility);
+  }
+  if (event.kind === "usage") {
+    return shouldUsePinnedUsageStatus(outputVisibility);
+  }
+  if (event.kind === "assistant_output" && shouldUsePinnedReasoningStatus(outputVisibility)) {
+    return isThinkingAssistantOutputEvent(event);
+  }
+  return false;
 }
 
 /**
@@ -2323,7 +2392,10 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime, s
   if (event.kind === "runtime_event") {
     return sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
-  await updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions);
+  const pinnedStatusHandle = await updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions);
+  if (shouldSuppressStandaloneOutboundEvent(event, sendOptions.outputVisibility)) {
+    return pinnedStatusHandle;
+  }
   const rendered = renderOutboundEvent(event);
   if (!rendered) {
     return undefined;

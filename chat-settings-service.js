@@ -11,14 +11,18 @@ import { createWorkspaceBindingService } from "./workspace-binding-service.js";
 import { getChatWorkDir } from "./utils.js";
 import { updateChatConfig } from "./chat-config.js";
 import {
-  buildOutputVisibilityOverrides,
-  OUTPUT_VISIBILITY_FLAGS,
+  OUTPUT_PRESENTATION_PRESETS,
+  OUTPUT_PRESENTATION_SETTINGS,
+  buildOutputPresentationPresetOverrides,
+  formatOutputPresentationOption,
   formatOutputVisibility,
   formatOutputVisibilityDefault,
-  getEnabledOutputVisibilityKeys,
-  isOutputVisibilityKey,
+  getOutputPresentationPresetDefinition,
+  getOutputPresentationPresetForVisibility,
+  getOutputPresentationLabel,
+  parseOutputPresentationSetting,
   resolveOutputVisibility,
-  toggleOutputVisibilityOverrides,
+  setOutputPresentationOverride,
 } from "./chat-output-visibility.js";
 
 /**
@@ -51,11 +55,7 @@ export const SETTINGS = [
 const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
 const CHAT_WORKSPACE_DEFAULT_LABEL = "chat workspace default";
 const BOOL_VALUE_IDS = ["on", "off"];
-const SHOW_NONE_OPTION_ID = "none";
-
-/**
- * @typedef {import("./chat-output-visibility.js").OutputVisibilityFlagDefinition} ConfigFlagDefinition
- */
+const SHOW_CUSTOM_OPTION_ID = "custom";
 
 /**
  * @typedef {{
@@ -97,6 +97,30 @@ const SHOW_NONE_OPTION_ID = "none";
  */
 
 /**
+ * @template TState
+ * @typedef {{
+ *   kind: "next";
+ *   step: string;
+ *   state: TState;
+ * } | {
+ *   kind: "complete";
+ *   result: string;
+ * } | {
+ *   kind: "cancel";
+ * }} ConfigSelectFlowTransition
+ */
+
+/**
+ * @template TState
+ * @typedef {{
+ *   prompt: (state: TState) => string | Promise<string>;
+ *   options: (state: TState) => SelectOption[] | Promise<SelectOption[]>;
+ *   currentId?: (state: TState) => string | undefined;
+ *   apply: (state: TState, selectedId: string) => ConfigSelectFlowTransition<TState> | Promise<ConfigSelectFlowTransition<TState>>;
+ * }} ConfigSelectFlowStep
+ */
+
+/**
  * @typedef {{
  *   key: string;
   *   setting: string;
@@ -106,7 +130,6 @@ const SHOW_NONE_OPTION_ID = "none";
  *   aliases?: readonly string[];
  *   picker?: ConfigPickerDefinition;
  *   multiPicker?: ConfigMultiPickerDefinition;
- *   flags?: readonly ConfigFlagDefinition[];
  *   resettable?: boolean;
  *   formatCurrent: ConfigCurrentFormatter;
  *   formatDefault: ConfigDefaultFormatter;
@@ -150,89 +173,64 @@ function formatSettingTitle(label) {
 }
 
 /**
- * @param {string[]} selectedIds
- * @returns {selectedIds is import("./chat-output-visibility.js").OutputVisibilityKey[]}
+ * Run an ordered or branching picker flow using WhatsApp's single-select primitive.
+ * @template TState
+ * @param {{
+ *   select: (question: string, options: SelectOption[], config?: { deleteOnSelect?: boolean, currentId?: string }) => Promise<string>;
+ *   startStep: string;
+ *   initialState: TState;
+ *   steps: Record<string, ConfigSelectFlowStep<TState>>;
+ *   fallback: () => string | Promise<string>;
+ *   maxSteps?: number;
+ * }} flow
+ * @returns {Promise<string>}
  */
-function areOutputVisibilityKeys(selectedIds) {
-  return selectedIds.every((id) => isOutputVisibilityKey(id));
-}
+async function runSelectFlow(flow) {
+  let state = flow.initialState;
+  let stepId = flow.startStep;
+  const maxSteps = flow.maxSteps ?? 8;
 
-/**
- * @param {boolean} enabled
- * @returns {string}
- */
-function formatOutputVisibilityStateEmoji(enabled) {
-  return enabled ? "🟢" : "⚪";
-}
+  for (let index = 0; index < maxSteps; index += 1) {
+    const step = flow.steps[stepId];
+    if (!step) {
+      return flow.fallback();
+    }
+    const options = await step.options(state);
+    if (options.length === 0) {
+      return flow.fallback();
+    }
+    const currentId = step.currentId?.(state);
+    const selectedId = await flow.select(
+      await step.prompt(state),
+      options,
+      {
+        deleteOnSelect: true,
+        ...(currentId ? { currentId } : {}),
+      },
+    );
+    if (!selectedId) {
+      return flow.fallback();
+    }
 
-/**
- * @param {import("./chat-output-visibility.js").OutputVisibilityKey} key
- * @returns {string}
- */
-function getShowPickerSubject(key) {
-  switch (key) {
-    case "toolStatus":
-      return "pinned tool status";
-    case "thinking":
-      return "thinking";
-    case "changes":
-      return "file changes";
-    case "subagents":
-      return "sub-agent output";
+    const transition = await step.apply(state, selectedId);
+    switch (transition.kind) {
+      case "next":
+        state = transition.state;
+        stepId = transition.step;
+        break;
+      case "complete":
+        return transition.result;
+      case "cancel":
+        return flow.fallback();
+      default: {
+        /** @type {never} */
+        const exhaustive = transition;
+        throw new Error(`Unsupported select-flow transition: ${JSON.stringify(exhaustive)}`);
+      }
+    }
   }
-}
 
-/**
- * @param {import("./chat-output-visibility.js").OutputVisibilityKey} key
- * @param {boolean} enabled
- * @returns {string}
- */
-function formatShowPickerOptionLabel(key, enabled) {
-  const verb = enabled ? "Hide" : "Show";
-  return `${formatOutputVisibilityStateEmoji(enabled)} ${verb} ${getShowPickerSubject(key)}`;
-}
-
-/**
- * @param {boolean} allHidden
- * @returns {string}
- */
-function formatShowHideAllOptionLabel(allHidden) {
-  return `${formatOutputVisibilityStateEmoji(allHidden)} Hide all extras`;
-}
-
-/**
- * @param {import("./store.js").ChatRow} chat
- * @returns {SelectOption[]}
- */
-function getShowMultiPickerOptions(chat) {
-  const enabledKeys = new Set(getEnabledOutputVisibilityKeys(chat.output_visibility));
-  return [
-    ...OUTPUT_VISIBILITY_FLAGS.map((flag) => ({
-      id: flag.key,
-      label: formatShowPickerOptionLabel(flag.key, enabledKeys.has(flag.key)),
-    })),
-    {
-      id: SHOW_NONE_OPTION_ID,
-      label: formatShowHideAllOptionLabel(enabledKeys.size === 0),
-    },
-  ];
-}
-
-/**
- * @param {string[]} items
- * @returns {string}
- */
-function formatReadableList(items) {
-  if (items.length === 0) {
-    return "";
-  }
-  if (items.length === 1) {
-    return items[0] ?? "";
-  }
-  if (items.length === 2) {
-    return `${items[0] ?? ""} and ${items[1] ?? ""}`;
-  }
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1] ?? ""}`;
+  return flow.fallback();
 }
 
 /**
@@ -260,6 +258,123 @@ async function formatResolvedWorkspacePath(rootDb, chatId, chat) {
 }
 
 /**
+ * @returns {string[]}
+ */
+function formatOutputPresentationSettingLines() {
+  return OUTPUT_PRESENTATION_SETTINGS.map((setting) => {
+    const options = setting.options.map((option) => formatOutputPresentationOption(option)).join(", ");
+    return `- ${setting.label}: ${options}`;
+  });
+}
+
+/**
+ * @returns {string[]}
+ */
+function formatOutputPresentationPresetLines() {
+  return [
+    ...OUTPUT_PRESENTATION_PRESETS.map((preset) => `- ${preset.label}: ${preset.description}`),
+    "- custom: configure individual categories",
+  ];
+}
+
+/**
+ * @param {import("./store.js").ChatRow} chat
+ * @returns {string}
+ */
+function getShowCurrentPresetId(chat) {
+  return getOutputPresentationPresetForVisibility(chat.output_visibility)?.key ?? SHOW_CUSTOM_OPTION_ID;
+}
+
+/**
+ * @returns {SelectOption[]}
+ */
+function getShowPresetSelectOptions() {
+  return [
+    ...OUTPUT_PRESENTATION_PRESETS.map((preset) => ({
+      id: preset.key,
+      label: `${preset.label}: ${preset.description}`,
+    })),
+    {
+      id: SHOW_CUSTOM_OPTION_ID,
+      label: "custom: configure individual categories",
+    },
+  ];
+}
+
+/**
+ * @param {import("./store.js").ChatRow} chat
+ * @returns {string}
+ */
+function formatShowPresetSelectPrompt(chat) {
+  const currentPreset = getOutputPresentationPresetForVisibility(chat.output_visibility);
+  return [
+    "*Show*",
+    `- Current preset: ${currentPreset?.label ?? "custom"}`,
+    `- Current: ${formatOutputVisibility(chat.output_visibility)}`,
+    "",
+    "Choose a preset, or choose custom for individual settings.",
+  ].join("\n");
+}
+
+/**
+ * @param {import("./store.js").ChatRow} chat
+ * @returns {SelectOption[]}
+ */
+function getShowCategorySelectOptions(chat) {
+  const visibility = resolveOutputVisibility(chat.output_visibility);
+  return OUTPUT_PRESENTATION_SETTINGS.map((setting) => ({
+    id: setting.key,
+    label: `${setting.label}: ${formatOutputPresentationOption(visibility[setting.key])}`,
+  }));
+}
+
+/**
+ * @param {import("./store.js").ChatRow} chat
+ * @returns {string}
+ */
+function formatShowCategorySelectPrompt(chat) {
+  return [
+    "*Show*",
+    `- Current: ${formatOutputVisibility(chat.output_visibility)}`,
+    "",
+    "Choose what to configure.",
+  ].join("\n");
+}
+
+/**
+ * @param {typeof OUTPUT_PRESENTATION_SETTINGS[number]} setting
+ * @param {string} currentOption
+ * @returns {string}
+ */
+function formatShowOptionSelectPrompt(setting, currentOption) {
+  return [
+    `*Show: ${setting.label}*`,
+    `- Current: ${formatOutputPresentationOption(currentOption)}`,
+    "",
+    "Choose how to show it.",
+  ].join("\n");
+}
+
+/**
+ * @param {typeof OUTPUT_PRESENTATION_SETTINGS[number]} setting
+ * @returns {SelectOption[]}
+ */
+function getShowOptionSelectOptions(setting) {
+  return setting.options.map((option) => ({
+    id: option,
+    label: formatOutputPresentationOption(option),
+  }));
+}
+
+/**
+ * @param {string} key
+ * @returns {typeof OUTPUT_PRESENTATION_SETTINGS[number] | null}
+ */
+function getOutputPresentationSettingByKey(key) {
+  return OUTPUT_PRESENTATION_SETTINGS.find((setting) => setting.key === key) ?? null;
+}
+
+/**
  * @param {unknown} previousRaw
  * @param {unknown} nextRaw
  * @returns {string}
@@ -268,32 +383,129 @@ function formatOutputVisibilityChanges(previousRaw, nextRaw) {
   const previous = resolveOutputVisibility(previousRaw);
   const next = resolveOutputVisibility(nextRaw);
   /** @type {string[]} */
-  const shown = [];
-  /** @type {string[]} */
-  const hidden = [];
-
-  for (const flag of OUTPUT_VISIBILITY_FLAGS) {
-    if (previous[flag.key] === next[flag.key]) {
+  const changes = [];
+  for (const setting of OUTPUT_PRESENTATION_SETTINGS) {
+    const before = previous[setting.key];
+    const after = next[setting.key];
+    if (before === after) {
       continue;
     }
-    const subject = getShowPickerSubject(flag.key);
-    if (next[flag.key]) {
-      shown.push(subject);
-    } else {
-      hidden.push(subject);
-    }
+    changes.push(`${setting.label}: ${formatOutputPresentationOption(before)} -> ${formatOutputPresentationOption(after)}`);
+  }
+  return changes.length > 0 ? `Show updated: ${changes.join("; ")}.` : "No changes.";
+}
+
+/**
+ * @typedef {{
+ *   chat: import("./store.js").ChatRow;
+ *   setting?: typeof OUTPUT_PRESENTATION_SETTINGS[number];
+ * }} ShowSettingsFlowState
+ */
+
+/**
+ * @param {ChatDb} rootDb
+ * @param {string} chatId
+ * @param {{
+ *   select?: ExecuteActionContext["select"],
+ *   getIsAdmin?: ExecuteActionContext["getIsAdmin"],
+ * }} context
+ * @param {{ senderIds?: string[], rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} serviceExtra
+ * @returns {Promise<string>}
+ */
+async function runInteractiveShowSettings(rootDb, chatId, context, serviceExtra) {
+  if (typeof context.select !== "function") {
+    return describeConfigKey(rootDb, chatId, "show", serviceExtra);
   }
 
-  /** @type {string[]} */
-  const parts = [];
-  if (shown.length > 0) {
-    parts.push(`Show ${formatReadableList(shown)}`);
-  }
-  if (hidden.length > 0) {
-    parts.push(`Hide ${formatReadableList(hidden)}`);
-  }
-
-  return parts.length > 0 ? `${parts.join(". ")}.` : "No changes.";
+  const chat = await getChatOrThrow(rootDb, chatId);
+  /** @type {ShowSettingsFlowState} */
+  const initialState = { chat };
+  return runSelectFlow({
+    select: context.select,
+    startStep: "preset",
+    initialState,
+    fallback: () => describeConfigKey(rootDb, chatId, "show", serviceExtra),
+    steps: {
+      preset: {
+        prompt: (state) => formatShowPresetSelectPrompt(state.chat),
+        options: () => getShowPresetSelectOptions(),
+        currentId: (state) => getShowCurrentPresetId(state.chat),
+        apply: async (state, selectedId) => {
+          if (selectedId === SHOW_CUSTOM_OPTION_ID) {
+            return {
+              kind: "next",
+              step: "category",
+              state,
+            };
+          }
+          const selectedPreset = getOutputPresentationPresetDefinition(selectedId);
+          if (!selectedPreset) {
+            return { kind: "cancel" };
+          }
+          const isAdmin = context.getIsAdmin ? await context.getIsAdmin() : true;
+          if (!isAdmin) {
+            return { kind: "complete", result: "Only admins can change settings." };
+          }
+          const nextVisibility = buildOutputPresentationPresetOverrides(selectedPreset);
+          await updateChatSettingsFile(chatId, { output_visibility: nextVisibility });
+          return {
+            kind: "complete",
+            result: `Show preset set to ${selectedPreset.label}. ${formatOutputVisibilityChanges(state.chat.output_visibility, nextVisibility)}`,
+          };
+        },
+      },
+      category: {
+        prompt: (state) => formatShowCategorySelectPrompt(state.chat),
+        options: (state) => getShowCategorySelectOptions(state.chat),
+        apply: (state, selectedId) => {
+          const selectedSetting = getOutputPresentationSettingByKey(selectedId);
+          if (!selectedSetting) {
+            return { kind: "cancel" };
+          }
+          return {
+            kind: "next",
+            step: "option",
+            state: {
+              ...state,
+              setting: selectedSetting,
+            },
+          };
+        },
+      },
+      option: {
+        prompt: (state) => {
+          if (!state.setting) {
+            return "*Show*";
+          }
+          const visibility = resolveOutputVisibility(state.chat.output_visibility);
+          return formatShowOptionSelectPrompt(state.setting, visibility[state.setting.key]);
+        },
+        options: (state) => state.setting ? getShowOptionSelectOptions(state.setting) : [],
+        currentId: (state) => {
+          if (!state.setting) {
+            return undefined;
+          }
+          const visibility = resolveOutputVisibility(state.chat.output_visibility);
+          return visibility[state.setting.key];
+        },
+        apply: async (state, selectedId) => {
+          if (!state.setting || !state.setting.options.includes(selectedId)) {
+            return { kind: "cancel" };
+          }
+          const isAdmin = context.getIsAdmin ? await context.getIsAdmin() : true;
+          if (!isAdmin) {
+            return { kind: "complete", result: "Only admins can change settings." };
+          }
+          const nextVisibility = setOutputPresentationOverride(state.chat.output_visibility, state.setting.key, selectedId);
+          await updateChatSettingsFile(chatId, { output_visibility: nextVisibility });
+          return {
+            kind: "complete",
+            result: `${state.setting.label} set to ${formatOutputPresentationOption(selectedId)}. ${formatOutputVisibilityChanges(state.chat.output_visibility, nextVisibility)}`,
+          };
+        },
+      },
+    },
+  });
 }
 
 /**
@@ -508,14 +720,18 @@ const BASE_CONFIG_KEYS = [
     key: "show",
     setting: "output_visibility",
     label: "show",
-    description: "Controls which extra agent progress outputs are shown in chat.",
+    description: "Controls side-channel presentation categories for WhatsApp.",
     aliases: ["output_visibility", "output-visibility"],
-    examples: [formatChatSettingsCommand("show"), formatChatSettingsCommand("reset show")],
-    multiPicker: {
-      getOptions: (chat) => getShowMultiPickerOptions(chat),
-      currentIds: () => [],
-    },
-    flags: OUTPUT_VISIBILITY_FLAGS,
+    examples: [
+      formatChatSettingsCommand("show"),
+      formatChatSettingsCommand("show compact"),
+      formatChatSettingsCommand("show minimal"),
+      formatChatSettingsCommand("show reasoning hidden"),
+      formatChatSettingsCommand("show tools pinned"),
+      formatChatSettingsCommand("show snapshots off"),
+      formatChatSettingsCommand("show middle assistant messages off"),
+      formatChatSettingsCommand("reset show"),
+    ],
     resettable: true,
     formatCurrent: (chat) => formatOutputVisibility(chat.output_visibility),
     formatDefault: () => formatOutputVisibilityDefault(),
@@ -526,21 +742,29 @@ const BASE_CONFIG_KEYS = [
         return `Show reset to defaults (${formatOutputVisibilityDefault()}).`;
       }
 
-      const selectedIds = [...new Set(trimmed.split(/\s+/).filter((part) => part.length > 0))];
-      if (selectedIds.includes(SHOW_NONE_OPTION_ID)) {
-        if (selectedIds.length > 1) {
-          return "Choose `none` by itself to hide all extra outputs.";
-        }
-        const nextVisibility = buildOutputVisibilityOverrides([]);
+      const preset = getOutputPresentationPresetDefinition(trimmed);
+      if (preset) {
+        const nextVisibility = buildOutputPresentationPresetOverrides(preset);
         await updateChatSettingsFile(chatId, { output_visibility: nextVisibility });
-        return formatOutputVisibilityChanges(chat.output_visibility, nextVisibility);
+        return `Show preset set to ${preset.label}. ${formatOutputVisibilityChanges(chat.output_visibility, nextVisibility)}`;
       }
-      if (!areOutputVisibilityKeys(selectedIds)) {
-        return `Use \`${formatChatSettingsCommand("show")}\` to pick visible outputs, or \`${formatChatSettingsCommand("reset show")}\` to restore defaults.`;
+
+      const parsed = parseOutputPresentationSetting(trimmed);
+      if (!parsed) {
+        return [
+          `Use \`${formatChatSettingsCommand("show <preset>")}\` or \`${formatChatSettingsCommand("show <category> <option>")}\`.`,
+          "",
+          "*Presets*",
+          ...formatOutputPresentationPresetLines(),
+          "",
+          "*Categories*",
+          ...formatOutputPresentationSettingLines(),
+        ].join("\n");
       }
-      const nextVisibility = toggleOutputVisibilityOverrides(chat.output_visibility, selectedIds);
+      const nextVisibility = setOutputPresentationOverride(chat.output_visibility, parsed.key, parsed.option);
       await updateChatSettingsFile(chatId, { output_visibility: nextVisibility });
-      return formatOutputVisibilityChanges(chat.output_visibility, nextVisibility);
+      const label = getOutputPresentationLabel(parsed.key);
+      return `${label} set to ${formatOutputPresentationOption(parsed.option)}. ${formatOutputVisibilityChanges(chat.output_visibility, nextVisibility)}`;
     },
   }),
   createConfigKeyDefinition({
@@ -1029,13 +1253,12 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
   }
 
   if (extra.compact && definition.key === "show") {
-    return "Choose which extra agent progress outputs are shown in chat.";
+    return `Use \`${formatChatSettingsCommand("show")}\` to choose a preset, or \`${formatChatSettingsCommand("show <category> <option>")}\` for custom output.`;
   }
 
   const chat = await getChatOrThrow(rootDb, chatId);
   const current = await formatCurrentValue(chat, definition, { ...extra, rootDb: extra.rootDb ?? rootDb, chatId });
   const options = getDefinitionOptions(definition);
-  const flags = definition.flags ?? [];
   const title = formatSettingTitle(definition.label);
   const lines = [
     `*${title}*`,
@@ -1050,10 +1273,13 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
     lines.push(...options.map((option) => `- ${option}`));
   }
 
-  if (!extra.compact && flags.length > 0) {
+  if (!extra.compact && definition.key === "show") {
     lines.push("");
-    lines.push("*Controls*");
-    lines.push(...flags.map((flag) => `- ${flag.label}: ${flag.description} Default: ${flag.defaultValue ? "on" : "off"}.`));
+    lines.push("*Presets*");
+    lines.push(...formatOutputPresentationPresetLines());
+    lines.push("");
+    lines.push("*Categories*");
+    lines.push(...formatOutputPresentationSettingLines());
   }
 
   if (!extra.compact) {
@@ -1192,6 +1418,9 @@ export async function runChatSettingsInteraction(context, { setting, value }) {
     const definition = getConfigKeyDefinition(setting);
     if (!definition) {
       return `Unknown config key \`${setting}\`.\nAvailable keys: ${CONFIG_KEYS.join(", ")}`;
+    }
+    if (definition.key === "show") {
+      return runInteractiveShowSettings(rootDb, context.chatId, context, serviceExtra);
     }
     const chat = await getChatOrThrow(rootDb, context.chatId);
     const multiSelectable = getMultiSelectableOptions(definition, chat);

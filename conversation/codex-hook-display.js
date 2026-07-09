@@ -30,7 +30,7 @@ export function createCodexDisplayHooks({ context, cwd, visibility }) {
    * @returns {Promise<void>}
    */
   async function onFileChange({ path, summary, diff, kind, source, itemId, stage, oldText, newText }) {
-    if (!visibility.changes) {
+    if (source === "snapshot" ? visibility.snapshots === "off" : visibility.fileChanges === "hidden") {
       return;
     }
 

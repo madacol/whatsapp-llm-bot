@@ -367,7 +367,7 @@ describe("WhatsApp transport community creation", () => {
       assert.ok(turn.io.selectMany, "Expected WhatsApp transport turn IO to provide selectMany");
       const selection = await turn.io.selectMany(
         "Pick outputs",
-        [{ id: "toolStatus", label: "⚪ Show pinned tool status" }],
+        [{ id: "toolsPinned", label: "⚪ Show pinned tool status" }],
         { deleteOnSelect: true },
       );
       await turn.io.reply(assistantOutputEvent([{ type: "markdown", text: JSON.stringify(selection) }]));
@@ -419,13 +419,13 @@ describe("WhatsApp transport community creation", () => {
       replyHandled,
       delay(5_000).then(() => "timeout"),
     ]);
-    assert.deepEqual(result, { kind: "selected", ids: ["toolStatus"] });
+    assert.deepEqual(result, { kind: "selected", ids: ["toolsPinned"] });
     assert.ok(
       sentMessages.some((entry) => "delete" in entry.message && /** @type {{ delete?: { id?: string } }} */ (entry.message).delete?.id === pollEntry.id),
       `Expected poll delete settlement, got ${JSON.stringify(sentMessages)}`,
     );
     assert.ok(
-      sentMessages.some((entry) => typeof entry.message.text === "string" && entry.message.text.includes("\"toolStatus\"")),
+      sentMessages.some((entry) => typeof entry.message.text === "string" && entry.message.text.includes("\"toolsPinned\"")),
       `Expected selected reply, got ${JSON.stringify(sentMessages)}`,
     );
   });

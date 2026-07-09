@@ -14,13 +14,16 @@ import { setDb } from "../db.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 import { runtimeEvent } from "../outbound-events.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import { createFixtureCapture, setDefaultFixtureCaptureForTesting } from "../diagnostics/capture.js";
 import { createAcpRuntimeModel } from "../harnesses/acp-events.js";
 import { MAX_RENDERED_IMAGES_PER_BLOCK } from "../message-renderer.js";
 
-const VISIBLE_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true };
-const COMPACT_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false };
+/** @type {import("../chat-output-visibility.js").OutputVisibility} */
+const VISIBLE_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "fullDetails" };
+/** @type {import("../chat-output-visibility.js").OutputVisibility} */
+const COMPACT_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "indicatorInspectable" };
 
 /**
  * @param {Omit<FileChangeEvent, "kind" | "changeKind"> & { changeKind?: "add" | "delete" | "update" }} input
@@ -717,6 +720,8 @@ describe("sendEvent – runtime events", () => {
   it("shows thinking in the pinned status when reasoning updates", async () => {
     const { sock, sent } = createMockSock();
     const chatId = "runtime-thinking-status-chat";
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, reasoning: "pinnedIndicator" };
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -725,7 +730,7 @@ describe("sendEvent – runtime events", () => {
         provider: "codex",
         turn: { id: "turn-1", chatId, status: "started" },
       },
-    });
+    }, undefined, undefined, { outputVisibility });
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
       event: {
@@ -736,7 +741,7 @@ describe("sendEvent – runtime events", () => {
         contentParts: ["Inspecting the request."],
         summaryParts: [],
       },
-    });
+    }, undefined, undefined, { outputVisibility });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔄 *CODEX*  turn started", linkPreview: null },
@@ -1159,7 +1164,8 @@ describe("sendEvent – runtime events", () => {
   it("routes tool and command rows through pinned status when tool status is enabled", async () => {
     const { sock, sent } = createMockSock();
     const chatId = "runtime-pinned-tool-status-chat";
-    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, toolStatus: true };
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "pinnedIndicator" };
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1254,7 +1260,8 @@ describe("sendEvent – runtime events", () => {
   it("keeps tool-first pinned status and lifecycle status on the same message", async () => {
     const { sock, sent } = createMockSock();
     const chatId = "runtime-tool-first-pinned-status-chat";
-    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, toolStatus: true };
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, tools: "pinnedIndicator" };
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1329,9 +1336,11 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
-  it("keeps final usage accounting in pinned status after action rows are omitted", async () => {
+  it("keeps final usage accounting in pinned status when usage is pinned", async () => {
     const { sock, sent } = createMockSock();
     const chatId = "runtime-action-focused-usage-chat";
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, usage: "pinned" };
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1340,7 +1349,7 @@ describe("sendEvent – runtime events", () => {
         provider: "codex",
         turn: { id: "turn-1", chatId, status: "started" },
       },
-    });
+    }, undefined, undefined, { outputVisibility });
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1352,13 +1361,13 @@ describe("sendEvent – runtime events", () => {
           status: "completed",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility });
 
     await sendEvent(sock, chatId, {
       kind: "usage",
       cost: "0.000000",
       tokens: { prompt: 12, completion: 8, cached: 0 },
-    });
+    }, undefined, undefined, { outputVisibility });
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1367,7 +1376,7 @@ describe("sendEvent – runtime events", () => {
         provider: "codex",
         turn: { id: "turn-1", chatId, status: "completed" },
       },
-    });
+    }, undefined, undefined, { outputVisibility });
 
     const pinnedStatusTexts = sent
       .filter((entry) => typeof entry.msg.text === "string" && (
@@ -1376,11 +1385,52 @@ describe("sendEvent – runtime events", () => {
       ))
       .map((entry) => /** @type {string} */ (entry.msg.text));
 
-    assert.ok(sent.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Cost: 0.000000")), `Expected usage output, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+    assert.equal(sent.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Cost: 0.000000")), false);
     assert.deepEqual(pinnedStatusTexts, [
       "🔄 *CODEX*  turn started",
       "📊 *USAGE*  cost 0.000000",
       "✅ *CODEX*  turn completed",
+    ]);
+  });
+
+  it("keeps the current plan step in pinned status when plans are pinned", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-pinned-plan-chat";
+    /** @type {import("../chat-output-visibility.js").OutputVisibility} */
+    const outputVisibility = { ...DEFAULT_OUTPUT_VISIBILITY, plans: "pinnedCurrentStep" };
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    }, undefined, undefined, { outputVisibility });
+
+    await sendEvent(sock, chatId, {
+      kind: "plan",
+      presentation: createPlanPresentationFromState({
+        entries: [
+          { text: "Inspect formatter", status: "completed" },
+          { text: "Patch pinned plan status", status: "in_progress" },
+          { text: "Run focused tests", status: "pending" },
+        ],
+      }),
+    }, undefined, undefined, { outputVisibility });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 3600,
+      },
+      {
+        text: "📋 *PLAN*  *Plan*  _Working on: Patch pinned plan status_",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
     ]);
   });
 

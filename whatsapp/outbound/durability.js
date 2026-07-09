@@ -251,14 +251,13 @@ async function resolveQueuedOutputVisibility(chatId, store) {
 
 /**
  * @param {string} chatId
- * @param {OutboundEvent} event
  * @param {import("../../store.js").Store | undefined} store
  * @returns {Promise<{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }>}
  */
-async function buildWhatsAppSendOptions(chatId, event, store) {
+async function buildWhatsAppSendOptions(chatId, store) {
   return {
     editHandleStore: store,
-    ...(event.kind === "runtime_event" ? { outputVisibility: await resolveQueuedOutputVisibility(chatId, store) } : {}),
+    outputVisibility: await resolveQueuedOutputVisibility(chatId, store),
   };
 }
 
@@ -332,7 +331,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
         event,
         input.options,
         input.reactionRuntime ?? deps.reactionRuntime,
-        await buildWhatsAppSendOptions(input.chatId, event, input.store ?? deps.store),
+        await buildWhatsAppSendOptions(input.chatId, input.store ?? deps.store),
       );
     } catch (error) {
       if (!isRecoverableWhatsAppSendError(error)) {
@@ -373,7 +372,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
           input.event,
           input.options,
           input.reactionRuntime ?? deps.reactionRuntime,
-          await buildWhatsAppSendOptions(input.chatId, input.event, input.store ?? deps.store),
+          await buildWhatsAppSendOptions(input.chatId, input.store ?? deps.store),
         );
       } catch (error) {
         if (!isRecoverableWhatsAppSendError(error)) {
@@ -466,7 +465,7 @@ export function createWhatsAppOutboundDurability(defaults = {}) {
     }
     return deps.deliverEvent(sock, chatId, payload.event, payload.options, reactionRuntime, {
       editHandleStore: store,
-      ...(await buildWhatsAppSendOptions(chatId, payload.event, store)),
+      ...(await buildWhatsAppSendOptions(chatId, store)),
     });
   }
 

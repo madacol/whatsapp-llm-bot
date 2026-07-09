@@ -955,6 +955,7 @@ type HarnessRunConfig = {
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never' | null;
   approvalsReviewer?: 'user' | 'auto_review' | 'guardian_subagent' | null;
+  snapshotFileChanges?: boolean | null;
   additionalDirectories?: string[] | null;
   protectedPaths?: string[] | null;
   ignoredFileChangePaths?: string[] | null;
