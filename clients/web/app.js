@@ -67,6 +67,9 @@ const WAKE_CUE_MS = WAKE_CUE_TONES.reduce((total, [, seconds]) => total + second
  *   busy: boolean;
  *   busyCount: number;
  *   assistantAudioUrl: string;
+ *   activeTurnRequestId: string;
+ *   cancelBusy: boolean;
+ *   clearBusy: boolean;
  *   wakeListening: boolean;
  *   wakeTriggered: boolean;
  *   wakeRecorder: MediaRecorder | null;
@@ -113,6 +116,9 @@ const state = {
   busy: false,
   busyCount: 0,
   assistantAudioUrl: "",
+  activeTurnRequestId: "",
+  cancelBusy: false,
+  clearBusy: false,
   wakeListening: false,
   wakeTriggered: false,
   wakeRecorder: null,
@@ -166,6 +172,8 @@ const els = {
   wakeCaptureSeconds: getElement("wake-capture-seconds", HTMLInputElement),
   wakeSilenceSeconds: getElement("wake-silence-seconds", HTMLInputElement),
   checkApi: getElement("check-api", HTMLButtonElement),
+  cancelTurn: getElement("cancel-turn", HTMLButtonElement),
+  clearHistory: getElement("clear-history", HTMLButtonElement),
   startListening: getElement("start-listening", HTMLButtonElement),
   stopListening: getElement("stop-listening", HTMLButtonElement),
   statePill: getElement("state-pill", HTMLSpanElement),
@@ -186,6 +194,8 @@ els.wakeThreshold.addEventListener("input", saveSettings);
 els.wakeCaptureSeconds.addEventListener("input", saveSettings);
 els.wakeSilenceSeconds.addEventListener("input", saveSettings);
 els.checkApi.addEventListener("click", () => void checkApi());
+els.cancelTurn.addEventListener("click", () => void cancelActiveTurn());
+els.clearHistory.addEventListener("click", () => void clearMessageHistory());
 els.startListening.addEventListener("click", () => void startWakeListening());
 els.stopListening.addEventListener("click", () => void stopWakeListening("Detector stopped."));
 window.addEventListener("beforeunload", cleanup);
@@ -521,6 +531,89 @@ async function checkApi() {
     handleError(error);
   } finally {
     setBusy(false);
+  }
+}
+
+/**
+ * @param {typeof DEFAULT_SETTINGS} settings
+ * @param {string} commandText
+ * @param {string} requestLabel
+ * @returns {Promise<unknown>}
+ */
+async function submitCommandTurn(settings, commandText, requestLabel) {
+  const url = buildApiUrl(
+    settings.baseUrl,
+    `/api/transports/${encodeURIComponent(settings.transportId)}/turns`,
+    { wait: "true" },
+  );
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      requestId: `web-${requestLabel}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      chatId: settings.chatId,
+      senderIds: [settings.senderId],
+      senderName: settings.senderName,
+      timestamp: new Date().toISOString(),
+      content: [
+        { type: "text", text: commandText },
+      ],
+      facts: {
+        isGroup: false,
+        addressedToBot: true,
+        repliedToBot: false,
+      },
+    }),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(formatHttpError(response.status, raw));
+  }
+  return parseJsonOrText(raw);
+}
+
+async function cancelActiveTurn() {
+  const settings = readSettings();
+  if (!state.activeTurnRequestId || state.cancelBusy) {
+    return;
+  }
+  try {
+    validateApiBaseUrl(settings.baseUrl);
+    state.cancelBusy = true;
+    renderControls();
+    setStatus("Cancelling", "Sending cancellation request.");
+    const body = await submitCommandTurn(settings, "!c", "cancel");
+    setStatus("Cancelling", "Cancellation requested.");
+    appendDiagnostics({ cancel: body });
+  } catch (error) {
+    handleError(error);
+  } finally {
+    state.cancelBusy = false;
+    renderControls();
+  }
+}
+
+async function clearMessageHistory() {
+  const settings = readSettings();
+  if (state.clearBusy) {
+    return;
+  }
+  try {
+    validateApiBaseUrl(settings.baseUrl);
+    state.clearBusy = true;
+    renderControls();
+    setStatus("Clearing", "Clearing conversation history.");
+    const body = await submitCommandTurn(settings, "/clear", "clear");
+    els.assistantText.textContent = "No response yet.";
+    setStatus("Ready", "Conversation history cleared.");
+    appendDiagnostics({ clear: body });
+  } catch (error) {
+    handleError(error);
+  } finally {
+    state.clearBusy = false;
+    renderControls();
   }
 }
 
@@ -1434,9 +1527,11 @@ async function submitAudio(blob) {
   };
 
   setBusy(true);
+  state.activeTurnRequestId = requestId;
   setStatus("Uploading", `Uploading ${formatBytes(blob.size)} as ${mimeType}.`);
   els.assistantText.textContent = "Waiting for assistant...";
   state.assistantAudioQueue = [];
+  renderControls();
   writeDiagnostics({ request: { url, requestId, mimeType, bytes: blob.size } });
   const eventStream = await createTurnEventStream(settings, requestId);
   eventStream.start();
@@ -1466,6 +1561,9 @@ async function submitAudio(blob) {
     return await renderAssistantResponse(settings, body);
   } finally {
     await eventStream.stop();
+    if (state.activeTurnRequestId === requestId) {
+      state.activeTurnRequestId = "";
+    }
     setBusy(false);
   }
 }
@@ -1977,6 +2075,8 @@ function renderControls() {
   const isCaptureActive = isWakeCapturing;
   const wakeSupported = localWakeSupported();
   els.startListening.disabled = state.busy || isCaptureActive || isWakeArmed || !wakeSupported;
+  els.cancelTurn.disabled = !state.activeTurnRequestId || state.cancelBusy;
+  els.clearHistory.disabled = state.clearBusy;
   els.stopListening.disabled = !isWakeArmed;
   els.wakePhrase.disabled = isWakeArmed || isCaptureActive;
   els.wakeThreshold.disabled = isWakeArmed || isCaptureActive;
