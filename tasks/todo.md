@@ -10,4 +10,4 @@
 
 ## Blocked
 
-- Android audio client POC. [details](android-audio-client.md)
+- Android offline wake-word integration and real-device APK validation. [details](android-audio-client.md)

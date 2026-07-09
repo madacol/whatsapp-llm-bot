@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -16,18 +18,35 @@ public final class MainActivity extends Activity implements VoiceTurnController.
     private static final int REQUEST_RECORD_AUDIO = 200;
 
     private VoiceTurnController controller;
-    private final WakeWordDetector wakeWordDetector = new SherpaWakeWordDetector();
+    private WakeWordDetector wakeWordDetector;
+    private Button recordButton;
+    private Button cancelButton;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable wakeCaptureTimeout = () -> {
+        if (controller != null && controller.isRecording()) {
+            recordButton.setText("Record");
+            onStatus("Wake capture limit reached. Sending audio.");
+            controller.stopAndSend(config());
+        }
+    };
     private EditText baseUrl;
     private EditText token;
     private EditText transportId;
     private EditText chatId;
+    private EditText senderId;
+    private EditText senderName;
+    private EditText wakePhrase;
+    private EditText wakeThreshold;
+    private EditText wakeCaptureSeconds;
+    private EditText wakeSilenceSeconds;
     private TextView status;
-    private Button recordButton;
+    private TextView assistantText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         controller = new VoiceTurnController(this, this);
+        wakeWordDetector = new PlatformSpeechWakeWordDetector(this);
         setContentView(buildContentView());
         requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, REQUEST_RECORD_AUDIO);
     }
@@ -43,41 +62,99 @@ public final class MainActivity extends Activity implements VoiceTurnController.
         token = field("API token", preferences.getString("token", ""));
         transportId = field("Transport ID", preferences.getString("transportId", "voice"));
         chatId = field("Chat ID", preferences.getString("chatId", "api:android-1"));
+        senderId = field("Sender ID", preferences.getString("senderId", "android-user"));
+        senderName = field("Sender name", preferences.getString("senderName", "Android"));
+        wakePhrase = field("Wake phrase", preferences.getString("wakePhrase", "jarvis"));
+        wakeThreshold = field("Wake threshold", preferences.getString("wakeThreshold", "0.5"));
+        wakeCaptureSeconds = field("Max seconds", preferences.getString("wakeCaptureSeconds", "120"));
+        wakeSilenceSeconds = field("Silence seconds", preferences.getString("wakeSilenceSeconds", "1.5"));
+
+        Button checkApiButton = button("Check API", () -> {
+            saveConfig();
+            controller.checkApi(config());
+        });
+
+        Button clearHistoryButton = button("Clear History", () -> {
+            saveConfig();
+            controller.clearHistory(config());
+        });
+
+        cancelButton = button("Cancel Turn", () -> {
+            saveConfig();
+            controller.cancelActiveTurn(config());
+        });
+        cancelButton.setEnabled(false);
 
         recordButton = new Button(this);
         recordButton.setText("Record");
         recordButton.setOnClickListener((view) -> toggleRecord());
 
-        Button wakeButton = new Button(this);
-        wakeButton.setText("Start wake detector");
-        wakeButton.setOnClickListener((view) -> wakeWordDetector.start(new WakeWordDetector.Listener() {
+        Button wakeButton = button("Start wake detector", () -> {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, REQUEST_RECORD_AUDIO);
+                return;
+            }
+            saveConfig();
+            wakeWordDetector.start(wakePhrase.getText().toString(), new WakeWordDetector.Listener() {
             @Override
             public void onWakeWord(String keyword) {
                 runOnUiThread(() -> {
-                    onStatus("Wake: " + keyword);
+                    onStatus("Wake: " + keyword + ". Recording.");
                     if (!controller.isRecording()) {
+                        recordButton.setText("Stop and send");
                         controller.startRecording();
+                        scheduleWakeCaptureTimeout();
                     }
                 });
+            }
+
+            @Override
+            public void onWakeStatus(String text) {
+                runOnUiThread(() -> onStatus(text));
             }
 
             @Override
             public void onWakeError(Exception error) {
                 runOnUiThread(() -> onError(error));
             }
-        }));
+            });
+        });
+
+        Button stopWakeButton = button("Stop wake detector", () -> {
+            wakeWordDetector.stop();
+            mainHandler.removeCallbacks(wakeCaptureTimeout);
+            onStatus("Wake detector stopped.");
+        });
 
         status = new TextView(this);
         status.setText("Idle");
-        status.setMinLines(8);
+        status.setMinLines(4);
+
+        assistantText = new TextView(this);
+        assistantText.setText("No response yet.");
+        assistantText.setMinLines(6);
 
         root.addView(label("HTTP API"));
         root.addView(baseUrl);
         root.addView(token);
         root.addView(transportId);
         root.addView(chatId);
+        root.addView(senderId);
+        root.addView(senderName);
+        root.addView(checkApiButton);
+        root.addView(label("Wake Capture"));
+        root.addView(wakePhrase);
+        root.addView(wakeThreshold);
+        root.addView(wakeCaptureSeconds);
+        root.addView(wakeSilenceSeconds);
         root.addView(recordButton);
+        root.addView(cancelButton);
+        root.addView(clearHistoryButton);
         root.addView(wakeButton);
+        root.addView(stopWakeButton);
+        root.addView(label("Assistant"));
+        root.addView(assistantText);
+        root.addView(label("Status"));
         root.addView(status);
 
         ScrollView scroll = new ScrollView(this);
@@ -104,6 +181,13 @@ public final class MainActivity extends Activity implements VoiceTurnController.
         return view;
     }
 
+    private Button button(String text, Runnable action) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setOnClickListener((view) -> action.run());
+        return button;
+    }
+
     private void toggleRecord() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, REQUEST_RECORD_AUDIO);
@@ -112,6 +196,7 @@ public final class MainActivity extends Activity implements VoiceTurnController.
         saveConfig();
         if (controller.isRecording()) {
             recordButton.setText("Record");
+            mainHandler.removeCallbacks(wakeCaptureTimeout);
             controller.stopAndSend(config());
         } else {
             recordButton.setText("Stop and send");
@@ -125,8 +210,8 @@ public final class MainActivity extends Activity implements VoiceTurnController.
             token.getText().toString(),
             transportId.getText().toString(),
             chatId.getText().toString(),
-            "android-user",
-            "Android"
+            senderId.getText().toString(),
+            senderName.getText().toString()
         );
     }
 
@@ -136,7 +221,28 @@ public final class MainActivity extends Activity implements VoiceTurnController.
             .putString("token", token.getText().toString())
             .putString("transportId", transportId.getText().toString())
             .putString("chatId", chatId.getText().toString())
+            .putString("senderId", senderId.getText().toString())
+            .putString("senderName", senderName.getText().toString())
+            .putString("wakePhrase", wakePhrase.getText().toString())
+            .putString("wakeThreshold", wakeThreshold.getText().toString())
+            .putString("wakeCaptureSeconds", wakeCaptureSeconds.getText().toString())
+            .putString("wakeSilenceSeconds", wakeSilenceSeconds.getText().toString())
             .apply();
+    }
+
+    private void scheduleWakeCaptureTimeout() {
+        mainHandler.removeCallbacks(wakeCaptureTimeout);
+        mainHandler.postDelayed(wakeCaptureTimeout, wakeCaptureMillis());
+    }
+
+    private long wakeCaptureMillis() {
+        try {
+            double seconds = Double.parseDouble(wakeCaptureSeconds.getText().toString().trim());
+            double boundedSeconds = Math.max(2, Math.min(120, seconds));
+            return (long) (boundedSeconds * 1000);
+        } catch (NumberFormatException ignored) {
+            return 120_000;
+        }
     }
 
     @Override
@@ -145,14 +251,36 @@ public final class MainActivity extends Activity implements VoiceTurnController.
     }
 
     @Override
+    public void onAssistantText(String text, boolean replace) {
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        String current = assistantText.getText().toString().trim();
+        if (replace || current.isEmpty() || "No response yet.".equals(current) || "Waiting for assistant...".equals(current)) {
+            assistantText.setText(trimmed);
+        } else {
+            assistantText.setText(current + "\n\n" + trimmed);
+        }
+    }
+
+    @Override
+    public void onTurnActive(boolean active) {
+        cancelButton.setEnabled(active);
+    }
+
+    @Override
     public void onError(Exception error) {
+        mainHandler.removeCallbacks(wakeCaptureTimeout);
         status.setText(error.getClass().getSimpleName() + ": " + error.getMessage());
         recordButton.setText("Record");
+        cancelButton.setEnabled(controller.hasActiveTurn());
     }
 
     @Override
     protected void onDestroy() {
         wakeWordDetector.stop();
+        mainHandler.removeCallbacks(wakeCaptureTimeout);
         controller.shutdown();
         super.onDestroy();
     }

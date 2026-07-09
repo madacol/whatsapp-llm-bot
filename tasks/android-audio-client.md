@@ -38,11 +38,13 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 
 ## Current Status
 
-Blocked for real-device validation and wake-word integration. First implementation slice is a complete-clip POC: Android records a full utterance after wake-word detection, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
+Blocked for real-device validation and production-quality offline wake-word integration. First implementation slice is a complete-clip POC: Android records a full utterance, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
 
 The previous local disk-space blocker is resolved enough for debug builds: on 2026-07-09 the project built successfully with a temporary minimal command-line toolchain under `/tmp`, using about 1.4 GB for Gradle, Gradle cache, Android command-line tools, SDK platform/build-tools, and build outputs.
 
 No Android device is currently visible through `adb devices`, so install/logcat validation is still blocked on connecting or exposing a physical device. If the backend is running on the Pi, the Android device eventually needs network reachability to the bot API.
+
+The Android app should track improvements made to the web audio client where the improvement is backend-facing or client-workflow-facing. Browser-only internals such as openWakeWord/ORT code do not port directly until the Android sherpa-onnx wake-word implementation is added. As an interim POC, Android uses the platform `SpeechRecognizer` to detect the configured wake phrase without vendoring large model/native assets.
 
 ## Progress
 
@@ -50,13 +52,27 @@ No Android device is currently visible through `adb devices`, so install/logcat 
 - Added authenticated media download API: `GET /api/media/:mediaPath`.
 - Added provider-backed HTTP API speech synthesis using the same OpenAI/OpenRouter direction as `clients/voice-pi/tts_openrouter.py`.
 - Added a small Android source scaffold under `clients/android/` with manual record/send/playback against the audio-turn API.
-- Added an explicit Android wake-word seam. The sherpa-onnx concrete detector still needs the Android KWS native libraries/assets and real-device testing.
+- Added an explicit Android wake-word seam.
+- Replaced the sherpa placeholder with an Android platform speech recognizer fallback:
+  - listens for the configured wake phrase;
+  - detects wake phrase matches from partial and final recognition results;
+  - starts the existing recording path after detection;
+  - auto-sends after the configured max capture seconds;
+  - leaves silence-based endpointing for a future VAD/KWS implementation.
+- Ported current web audio-client parity into Android:
+  - configurable sender id and sender name;
+  - API health check;
+  - turn cancellation through `!c`;
+  - conversation clearing through `/clear`;
+  - intermediate assistant text while an audio turn is still running;
+  - queued assistant audio playback from transport events before the final HTTP response completes;
+  - token/query preservation when resolving assistant media URLs.
 - Built `clients/android/app/build/outputs/apk/debug/app-debug.apk` successfully using a minimal temporary toolchain:
   - Android command-line tools: `/tmp/android-sdk-min/cmdline-tools/latest`
   - SDK packages: `platform-tools` 37.0.0, `platforms;android-35`, `build-tools;35.0.0`, plus AGP-installed `build-tools;34.0.0`
   - Gradle: `/tmp/android-lite/gradle-8.10.2`
   - Gradle user home: `/tmp/android-lite/gradle-user-home`
-  - Measured footprint after build: `/tmp/android-lite` 779 MB, `/tmp/android-sdk-min` 627 MB, `clients/android/app/build` 1.3 MB.
+  - Measured footprint after web-parity build: `/tmp/android-lite` 780 MB, `/tmp/android-sdk-min` 627 MB, `clients/android/app/build` 1.5 MB.
 
 ## Verification
 
@@ -66,11 +82,13 @@ No Android device is currently visible through `adb devices`, so install/logcat 
 - `ANDROID_HOME=/tmp/android-sdk-min GRADLE_USER_HOME=/tmp/android-lite/gradle-user-home /tmp/android-lite/gradle-8.10.2/bin/gradle --no-daemon --max-workers=1 assembleDebug`
 - `/tmp/android-sdk-min/build-tools/35.0.0/apksigner verify --verbose clients/android/app/build/outputs/apk/debug/app-debug.apk`
 - `/tmp/android-sdk-min/build-tools/35.0.0/aapt dump badging clients/android/app/build/outputs/apk/debug/app-debug.apk`
+- `git diff --check`
 - `/tmp/android-sdk-min/platform-tools/adb devices` starts successfully with elevated local daemon permission, but no device is attached.
 
 ## Remaining
 
-- Vendor or fetch sherpa-onnx Android KWS assets/native libraries and replace the current placeholder detector.
+- Validate the platform speech wake detector on a physical Android device.
+- Vendor or fetch sherpa-onnx Android KWS assets/native libraries and replace the current platform speech fallback when offline production-quality wake detection is required.
 - Build/install the APK on a physical Android device and verify microphone permission, audio upload, assistant audio playback, and wake-word behavior with `adb logcat`.
 
 ## Acceptance
