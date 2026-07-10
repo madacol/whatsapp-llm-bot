@@ -2,6 +2,8 @@
 
 Completed task details are archived here instead of deleted.
 
+- `/compact` is now a generic ACP session command with provider opt-in through `session/compact`. [details](generic-acp-compact-command.md)
+- `/compact` now requests Codex App Server context compaction through the ACP/Codex session seam. [details](codex-compact-command.md)
 - Pinned transcription presentation now uses categorized app messages instead of a dedicated transcription event. [details](transcription-presentation-model-cleanup.md)
 - Pinned transcription and pinned middle assistant visibility implemented, with minimal preset now using both pinned modes. [details](transcription-pinned-visibility.md)
 - Output visibility categories now have vertical WhatsApp show/suppress coverage, and `tools: hidden` suppresses new runtime tool/command messages at the renderer boundary. [details](output-visibility-vertical-coverage.md)

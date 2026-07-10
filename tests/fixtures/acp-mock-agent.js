@@ -291,6 +291,18 @@ async function handleMessage(message) {
     });
     return;
   }
+  if (message.method === "session/compact") {
+    send({
+      id: message.id,
+      result: {
+        sessionId: stringParam(message, "sessionId"),
+        compacted: true,
+        compactRequested: true,
+        openedWith: lastSessionOpenMethod,
+      },
+    });
+    return;
+  }
   if (message.method === "session/prompt") {
     await handlePrompt(message);
     return;

@@ -871,6 +871,38 @@ export async function rollbackAcpSession(input) {
 }
 
 /**
+ * @param {AcpForkInput} input
+ * @returns {Promise<unknown>}
+ */
+export async function compactAcpSession(input) {
+  const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
+  try {
+    if (hasAcpSessionCapability(capabilities, "resume")) {
+      await connection.sendRequest("session/resume", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      }, { timeoutMs: ACP_SESSION_REQUEST_TIMEOUT_MS });
+    } else if (supportsAcpLoadSession(capabilities)) {
+      await connection.sendRequest("session/load", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      }, { timeoutMs: ACP_SESSION_REQUEST_TIMEOUT_MS });
+    } else {
+      throw new Error(`ACP agent does not advertise required session resume capability: ${JSON.stringify(buildCapabilityErrorDetails(capabilities))}`);
+    }
+    const result = await connection.sendRequest("session/compact", {
+      sessionId: input.sessionId,
+    }, { timeoutMs: ACP_PROMPT_TIMEOUT_MS, refreshOnActivity: true });
+    if (!isRecord(result) || result.compactRequested !== true) {
+      throw new Error("ACP agent did not acknowledge session/compact.");
+    }
+    return result;
+  } finally {
+    await connection.close();
+  }
+}
+
+/**
  * @param {AcpRunInput} input
  * @returns {Promise<{ result: AgentResult, sessionId: string | null, capabilities: Record<string, unknown> }>}
  */

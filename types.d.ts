@@ -1044,6 +1044,7 @@ type HarnessAdapter = {
   stopAll: () => Promise<void>;
   listSessions: () => HarnessRuntimeSession[];
   rollbackThread: (sessionId: string, numTurns: number) => Promise<unknown | null>;
+  compactThread?: (sessionId: string) => Promise<unknown>;
   streamEvents: AsyncIterable<{ type: string; provider: string } & Record<string, unknown>>;
   subscribeEvents?: (handler: (event: { type: string; provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void;
 };

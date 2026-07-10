@@ -204,6 +204,19 @@ describe("ACP harness", () => {
     assert.deepEqual(harness.listActiveSessions?.(), []);
   });
 
+  it("lists /compact for non-Codex ACP harnesses", () => {
+    const harness = createAcpHarness({
+      name: "claude",
+      label: "Claude",
+      sessionKind: "claude",
+      config: {
+        command: "fake-acp",
+      },
+    });
+
+    assert.ok(harness.listSlashCommands().some((command) => command.name === "compact"));
+  });
+
   it("forks provider sessions through the ACP session/fork RFD", async () => {
     /** @type {Array<[string, HarnessSessionRef["kind"], string]>} */
     const harnessCases = [
@@ -1449,6 +1462,35 @@ describe("ACP harness", () => {
     assert.deepEqual(await adapter.rollbackThread("mock-session-1", 2), {
       sessionId: "mock-session-1",
       rolledBackTurns: 2,
+    });
+  });
+
+  it("exposes ACP compact extension requests through the adapter", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    await adapter.startSession({ chatId: "compact-rfd-chat" });
+    await adapter.sendTurn({
+      chatId: "compact-rfd-chat",
+      input: "Run the mock",
+      messages: [{ role: "user", content: [{ type: "text", text: "Run the mock" }] }],
+    });
+
+    assert.deepEqual(await adapter.compactThread?.("mock-session-1"), {
+      sessionId: "mock-session-1",
+      compacted: true,
+      compactRequested: true,
+      openedWith: "session/resume",
     });
   });
 });

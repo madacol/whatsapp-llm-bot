@@ -1,6 +1,7 @@
 import { createHarnessEventStreamController } from "./adapter.js";
 import { deriveAcpHarnessCapabilities, hasAcpSessionCapability } from "./acp-capabilities.js";
 import {
+  compactAcpSession,
   forkAcpSession,
   getAcpInitialSessionControlState,
   getAcpInitialSessionConfigOptions,
@@ -501,6 +502,11 @@ export function createAcpHarness(options = {}) {
           sessions.clear();
         },
         listSessions: () => [...sessions.values()],
+        compactThread: async (sessionId) => compactAcpSession({
+          ...commandSpec,
+          sessionId,
+          runConfig: sessionRunConfigs.get(sessionId),
+        }),
         rollbackThread: async (sessionId, numTurns) => rollbackAcpSession({
           ...commandSpec,
           sessionId,
@@ -567,6 +573,7 @@ export function createAcpHarness(options = {}) {
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
       ...(sessionKind === "codex" ? [{ name: "status", description: "Show Codex CLI status and usage" }] : []),
+      { name: "compact", description: `Compact the current ${label} ACP session context` },
       { name: "fork", description: `Fork the current ${label} ACP session` },
       { name: "back", description: `Return to the previous ${label} ACP fork parent` },
       { name: "config", description: `Show or set ${label} ACP config options` },
@@ -847,6 +854,18 @@ async function persistAcpCommandConfigValue(params) {
 }
 
 /**
+ * @param {string} message
+ * @returns {boolean}
+ */
+function isUnsupportedCompactError(message) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("did not acknowledge session/compact")
+    || normalized.includes("method not found")
+    || normalized.includes("unknown method")
+    || (normalized.includes("session/compact") && normalized.includes("not found"));
+}
+
+/**
  * @param {{
  *   harnessName: string,
  *   label: string,
@@ -854,6 +873,7 @@ async function persistAcpCommandConfigValue(params) {
  *   commandSpec: { command: string, args: string[] },
  *   cancelActiveQuery: (chatId: string | HarnessSessionRef) => boolean,
  *   loadControlState?: typeof loadAcpCommandControlState,
+ *   compactSession?: typeof compactAcpSession,
  *   readCodexStatus?: () => Promise<string>,
  * }} options
  * @returns {(input: HarnessCommandContext) => Promise<boolean>}
@@ -880,6 +900,29 @@ function createGenericAcpCommandHandler(options) {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await appOutput.replyWithToolResult(`Codex status failed: ${message}`);
+      }
+      return true;
+    }
+
+    if (/^compact$/i.test(trimmed)) {
+      const currentSessionId = input.chatInfo?.harness_session_id ?? null;
+      if (!currentSessionId) {
+        await appOutput.replyWithToolResult(`Can't compact yet. Start a ${options.label} ACP session first.`);
+        return true;
+      }
+      try {
+        await (options.compactSession ?? compactAcpSession)({
+          ...options.commandSpec,
+          sessionId: currentSessionId,
+        });
+        await appOutput.replyWithToolResult(`${options.label} ACP context compaction requested.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (isUnsupportedCompactError(message)) {
+          await appOutput.replyWithToolResult(`${options.label} ACP does not support \`/compact\`.`);
+        } else {
+          await appOutput.replyWithToolResult(`${options.label} ACP compact failed: ${message}`);
+        }
       }
       return true;
     }

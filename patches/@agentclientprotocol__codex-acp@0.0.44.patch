@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e257714e4 100755
+index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..ea384b9eeb612e100e796e823c8f076a56d38b1d 100755
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -16757,6 +16757,115 @@ function createJsonStream(readable, writable) {
@@ -530,7 +530,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
    async newSession(request) {
      await this.refreshSkills(request.cwd, request._meta);
      const response = await this.codexClient.threadStart({
-@@ -19327,13 +19665,28 @@ var CodexAcpClient = class {
+@@ -19327,13 +19665,33 @@ var CodexAcpClient = class {
        input,
        approvalPolicy: agentMode.approvalPolicy,
        sandboxPolicy: agentMode.sandboxPolicy,
@@ -557,10 +557,15 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
 +      throw error;
 +    }
 +  }
++  async compactSession(sessionId) {
++    return await this.codexClient.threadCompactStart({
++      threadId: sessionId
++    });
++  }
    async listSkills(params) {
      return this.codexClient.listSkills(params ?? {});
    }
-@@ -19443,6 +19796,9 @@ var CodexAcpClient = class {
+@@ -19443,6 +19801,9 @@ var CodexAcpClient = class {
        turnId: params.turnId
      });
    }
@@ -570,7 +575,35 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
    async fetchAvailableModels() {
      const models = [];
      let cursor = null;
-@@ -19900,7 +20256,9 @@ var CodexAcpServer = class {
+@@ -19629,6 +19990,11 @@ var CodexCommands = class {
+         description: "Display session configuration and token usage.",
+         input: null
+       },
++      {
++        name: "compact",
++        description: "Compact the conversation to reduce context usage.",
++        input: null
++      },
+       {
+         name: "logout",
+         description: "Sign out of Codex. This option is available when you are logged in via ChatGPT.",
+@@ -19664,6 +20030,15 @@ var CodexCommands = class {
+         });
+         return true;
+       }
++      case "compact": {
++        await this.runWithProcessCheck(() => this.codexAcpClient.compactSession(sessionId));
++        const session = new ACPSessionConnection(this.connection, sessionId);
++        await session.update({
++          sessionUpdate: "agent_message_chunk",
++          content: { type: "text", text: "Codex context compaction requested." }
++        });
++        return true;
++      }
+       case "logout": {
+         await this.runWithProcessCheck(() => this.codexAcpClient.logout());
+         const session = new ACPSessionConnection(this.connection, sessionId);
+@@ -19900,7 +20275,9 @@ var CodexAcpServer = class {
          },
          sessionCapabilities: {
            resume: {},
@@ -581,7 +614,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
          },
          mcpCapabilities: {
            http: true,
-@@ -19912,6 +20270,26 @@ var CodexAcpServer = class {
+@@ -19912,6 +20289,33 @@ var CodexAcpServer = class {
    }
    async extMethod(method, params) {
      const methodRequest = { method, params };
@@ -605,10 +638,17 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
 +      }));
 +      return {};
 +    }
++    if (method === "session/compact") {
++      const sessionId = params && typeof params === "object" && typeof params.sessionId === "string" ? params.sessionId : null;
++      if (!sessionId) {
++        throw RequestError.invalidParams(params, "session/compact requires sessionId");
++      }
++      return await this.compactSession({ sessionId });
++    }
      if (!isExtMethodRequest(methodRequest)) {
        return {};
      }
-@@ -19967,6 +20345,7 @@ var CodexAcpServer = class {
+@@ -19967,6 +20371,7 @@ var CodexAcpServer = class {
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -616,7 +656,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -19982,7 +20361,8 @@ var CodexAcpServer = class {
+@@ -19982,7 +20387,8 @@ var CodexAcpServer = class {
      this.publishAvailableCommandsAsync(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -626,7 +666,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
    }
    async getActiveAccount() {
      if (this.codexAcpClient.getModelProvider()) {
-@@ -19997,6 +20377,7 @@ var CodexAcpServer = class {
+@@ -19997,6 +20403,7 @@ var CodexAcpServer = class {
        sessionId,
        modelState,
        modeState,
@@ -634,7 +674,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
        thread
      } = await this.getOrCreateSessionWithHistory(params);
      await this.streamThreadHistory(sessionId, thread);
-@@ -20007,12 +20388,13 @@ var CodexAcpServer = class {
+@@ -20007,12 +20414,13 @@ var CodexAcpServer = class {
      });
      return {
        models: modelState,
@@ -650,7 +690,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
      logger.log("Session resumed", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20020,7 +20402,30 @@ var CodexAcpServer = class {
+@@ -20020,7 +20428,30 @@ var CodexAcpServer = class {
      });
      return {
        models: modelState,
@@ -682,7 +722,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
      };
    }
    async listSessions(params) {
-@@ -20030,7 +20435,7 @@ var CodexAcpServer = class {
+@@ -20030,7 +20461,7 @@ var CodexAcpServer = class {
    }
    async newSession(params) {
      logger.log("Starting new session...");
@@ -691,7 +731,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
      logger.log("New session created", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20039,7 +20444,8 @@ var CodexAcpServer = class {
+@@ -20039,7 +20470,8 @@ var CodexAcpServer = class {
      return {
        sessionId,
        models: modelState,
@@ -701,7 +741,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
      };
    }
    async authenticate(_params) {
-@@ -20102,6 +20508,42 @@ var CodexAcpServer = class {
+@@ -20102,6 +20534,50 @@ var CodexAcpServer = class {
      sessionState.supportedInputModalities = model.inputModalities;
      return {};
    }
@@ -736,6 +776,14 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
 +    sessionState.fastMode = params.value;
 +    return { configOptions: this.createConfigOptions(sessionState) };
 +  }
++  async compactSession(params) {
++    logger.log("Compact session requested", {
++      sessionId: params.sessionId
++    });
++    this.getSessionState(params.sessionId);
++    await this.runWithProcessCheck(() => this.codexAcpClient.compactSession(params.sessionId));
++    return { compactRequested: true };
++  }
 +  failFastMode(cause) {
 +    const reason = cause instanceof Error ? cause.message : String(cause);
 +    const message = `Codex fast mode failed: ${reason}`;
@@ -744,7 +792,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
    publishAvailableCommandsAsync(sessionId) {
      void this.availableCommands.publish(sessionId);
    }
-@@ -20145,6 +20587,55 @@ var CodexAcpServer = class {
+@@ -20145,6 +20621,55 @@ var CodexAcpServer = class {
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -800,7 +848,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -20160,10 +20651,12 @@ var CodexAcpServer = class {
+@@ -20160,10 +20685,12 @@ var CodexAcpServer = class {
      await this.availableCommands.publish(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -813,7 +861,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
        thread
      };
    }
-@@ -20259,7 +20752,7 @@ var CodexAcpServer = class {
+@@ -20259,7 +20786,7 @@ var CodexAcpServer = class {
        toolCallId: item.id,
        kind: "search",
        title: this.formatWebSearchTitle(item),
@@ -822,7 +870,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
        rawInput: {
          query: item.query,
          action: item.action
-@@ -20449,20 +20942,28 @@ ${item.text}`
+@@ -20449,20 +20976,28 @@ ${item.text}`
        }
        const modelId = ModelId.fromString(sessionState.currentModelId);
        const modelLacksReasoning = sessionState.supportedReasoningEfforts.length > 0 && sessionState.supportedReasoningEfforts.every((e) => e.reasoningEffort === "none");
@@ -856,7 +904,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
        if (turnCompleted.turn.status === "interrupted") {
          await this.connection.sessionUpdate({
            sessionId: params.sessionId,
-@@ -20566,6 +21067,81 @@ var import_node2 = __toESM(require_node(), 1);
+@@ -20566,6 +21101,81 @@ var import_node2 = __toESM(require_node(), 1);
  var CommandExecutionApprovalRequest = new import_node2.RequestType("item/commandExecution/requestApproval");
  var FileChangeApprovalRequest = new import_node2.RequestType("item/fileChange/requestApproval");
  var McpServerElicitationRequest = new import_node2.RequestType("mcpServer/elicitation/request");
@@ -938,7 +986,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
  var CodexAppServerClient = class {
    connection;
    approvalHandlers = /* @__PURE__ */ new Map();
-@@ -20650,12 +21226,18 @@ var CodexAppServerClient = class {
+@@ -20650,12 +21260,18 @@ var CodexAppServerClient = class {
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }
@@ -957,17 +1005,20 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
    async threadList(params) {
      return await this.sendRequest({ method: "thread/list", params });
    }
-@@ -20665,6 +21247,9 @@ var CodexAppServerClient = class {
+@@ -20665,6 +21281,12 @@ var CodexAppServerClient = class {
    async threadRead(params) {
      return await this.sendRequest({ method: "thread/read", params });
    }
 +  async threadSettingsUpdate(params) {
 +    return await this.sendRequest({ method: "thread/settings/update", params });
 +  }
++  async threadCompactStart(params) {
++    return await this.sendRequest({ method: "thread/compact/start", params });
++  }
    async listMcpServerStatus(params) {
      return await this.sendRequest({ method: "mcpServerStatus/list", params });
    }
-@@ -20725,12 +21310,46 @@ var CodexAppServerClient = class {
+@@ -20725,12 +21347,46 @@ var CodexAppServerClient = class {
      this.codexEventHandlers.push(callback);
    }
    notificationHandlers = /* @__PURE__ */ new Map();
@@ -1014,7 +1065,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..3766e6591c6470c036c526084541ed5e
        }
        return;
      }
-@@ -20987,16 +21606,21 @@ function startAcpServer() {
+@@ -20987,16 +21643,21 @@ function startAcpServer() {
      defaultAuthRequest: defaultAuthRequest ?? null
    });
    const codexConnection = startCodexConnection(codexPath);

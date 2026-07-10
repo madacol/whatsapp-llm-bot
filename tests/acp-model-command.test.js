@@ -30,11 +30,58 @@ function createContext() {
 }
 
 /**
+ * @param {string[]} replies
+ * @returns {ExecuteActionContext}
+ */
+function createRecordingContext(replies) {
+  const context = createContext();
+  context.reply = async (event) => {
+    replies.push(event.kind === "app_message" && typeof event.content === "string" ? event.content : JSON.stringify(event));
+    return createNoopMessageHandle();
+  };
+  return context;
+}
+
+/**
+ * @param {string | null} sessionId
+ * @param {HarnessSessionRef["kind"]} [kind]
+ * @returns {import("../store.js").ChatRow}
+ */
+function createChatInfo(sessionId, kind = "codex") {
+  return /** @type {import("../store.js").ChatRow} */ ({
+    chat_id: "acp-model-command-test",
+    is_enabled: true,
+    system_prompt: null,
+    model: null,
+    respond_on_any: false,
+    respond_on_mention: true,
+    respond_on_reply: true,
+    respond_on: "mention",
+    debug: false,
+    media_to_text_models: {},
+    model_roles: {},
+    memory: false,
+    memory_threshold: null,
+    active_persona: null,
+    harness: null,
+    harness_cwd: null,
+    output_visibility: {},
+    harness_config: {},
+    harness_session_kind: kind,
+    harness_session_id: sessionId,
+    harness_session_history: [],
+    harness_fork_stack: [],
+    timestamp: "2026-03-23T20:00:00.000Z",
+  });
+}
+
+/**
  * @param {(sessionId: string | null, commandSpec: { command: string, args: string[] }) => Promise<{ configOptions: Record<string, unknown>[], modelState: { currentModelId?: string, availableModels: Array<{ modelId: string, name: string, description?: string }> } | null }>} loadControlState
  * @param {(() => Promise<string>) | undefined} [readCodexStatus]
+ * @param {((input: { command: string, args?: string[], sessionId: string }) => Promise<unknown>) | undefined} [compactSession]
  * @returns {(input: HarnessCommandContext) => Promise<boolean>}
  */
-function createModelCommandHandler(loadControlState, readCodexStatus = undefined) {
+function createModelCommandHandler(loadControlState, readCodexStatus = undefined, compactSession = undefined) {
   return __testAcpModelCommand.createGenericAcpCommandHandler({
     harnessName: "codex",
     label: "Codex",
@@ -43,6 +90,7 @@ function createModelCommandHandler(loadControlState, readCodexStatus = undefined
     cancelActiveQuery: () => false,
     loadControlState,
     readCodexStatus,
+    compactSession,
   });
 }
 
@@ -150,6 +198,70 @@ describe("ACP /model command option derivation", () => {
     assert.match(replies[0] ?? "", /Weekly limit: \[██░░\] 15% left/);
   });
 
+  it("handles /compact by compacting the active ACP session", async () => {
+    /** @type {Array<{ command: string, args?: string[], sessionId: string }>} */
+    const compactCalls = [];
+    /** @type {string[]} */
+    const replies = [];
+    const handler = createModelCommandHandler(async () => ({
+      configOptions: [],
+      modelState: null,
+    }), undefined, async (input) => {
+      compactCalls.push(input);
+      return { ok: true };
+    });
+
+    assert.equal(await handler({
+      chatId: "codex-compact-command",
+      chatInfo: createChatInfo("codex-session-1"),
+      command: "compact",
+      context: createRecordingContext(replies),
+    }), true);
+
+    assert.deepEqual(compactCalls, [{ command: "mock-acp", args: [], sessionId: "codex-session-1" }]);
+    assert.deepEqual(replies, ["Codex ACP context compaction requested."]);
+  });
+
+  it("reports /compact when no Codex session exists", async () => {
+    /** @type {string[]} */
+    const replies = [];
+    const handler = createModelCommandHandler(async () => ({
+      configOptions: [],
+      modelState: null,
+    }), undefined, async () => {
+      throw new Error("compact should not run without a session");
+    });
+
+    assert.equal(await handler({
+      chatId: "codex-compact-missing-session",
+      chatInfo: createChatInfo(null),
+      command: "compact",
+      context: createRecordingContext(replies),
+    }), true);
+
+    assert.match(replies[0] ?? "", /Start a Codex ACP session first/);
+  });
+
+  it("reports /compact provider failures", async () => {
+    /** @type {string[]} */
+    const replies = [];
+    const handler = createModelCommandHandler(async () => ({
+      configOptions: [],
+      modelState: null,
+    }), undefined, async () => {
+      throw new Error("thread/compact/start unavailable");
+    });
+
+    assert.equal(await handler({
+      chatId: "codex-compact-failure",
+      chatInfo: createChatInfo("codex-session-1"),
+      command: "compact",
+      context: createRecordingContext(replies),
+    }), true);
+
+    assert.match(replies[0] ?? "", /Codex ACP compact failed: thread\/compact\/start unavailable/);
+  });
+
   it("does not claim /status for non-Codex ACP harnesses", async () => {
     const handler = __testAcpModelCommand.createGenericAcpCommandHandler({
       harnessName: "claude",
@@ -168,6 +280,58 @@ describe("ACP /model command option derivation", () => {
       command: "status",
       context: createContext(),
     }), false);
+  });
+
+  it("passes /compact to non-Codex ACP providers that implement compaction", async () => {
+    /** @type {Array<{ command: string, args?: string[], sessionId: string }>} */
+    const compactCalls = [];
+    /** @type {string[]} */
+    const replies = [];
+    const handler = __testAcpModelCommand.createGenericAcpCommandHandler({
+      harnessName: "claude",
+      label: "Claude",
+      sessionKind: "claude",
+      commandSpec: { command: "mock-acp", args: [] },
+      cancelActiveQuery: () => false,
+      loadControlState: async () => ({ configOptions: [], modelState: null }),
+      compactSession: async (input) => {
+        compactCalls.push(input);
+        return { compactRequested: true };
+      },
+    });
+
+    assert.equal(await handler({
+      chatId: "claude-compact-command",
+      chatInfo: createChatInfo("claude-session-1", "claude"),
+      command: "compact",
+      context: createRecordingContext(replies),
+    }), true);
+    assert.deepEqual(compactCalls, [{ command: "mock-acp", args: [], sessionId: "claude-session-1" }]);
+    assert.deepEqual(replies, ["Claude ACP context compaction requested."]);
+  });
+
+  it("reports unsupported /compact for ACP providers without the compact extension", async () => {
+    /** @type {string[]} */
+    const replies = [];
+    const handler = __testAcpModelCommand.createGenericAcpCommandHandler({
+      harnessName: "pi",
+      label: "Pi",
+      sessionKind: "pi",
+      commandSpec: { command: "mock-acp", args: [] },
+      cancelActiveQuery: () => false,
+      loadControlState: async () => ({ configOptions: [], modelState: null }),
+      compactSession: async () => {
+        throw new Error("ACP agent did not acknowledge session/compact.");
+      },
+    });
+
+    assert.equal(await handler({
+      chatId: "pi-compact-command",
+      chatInfo: createChatInfo("pi-session-1", "pi"),
+      command: "compact",
+      context: createRecordingContext(replies),
+    }), true);
+    assert.deepEqual(replies, ["Pi ACP does not support `/compact`."]);
   });
 
   it("throws when fast mode is requested but the ACP agent did not expose it", async () => {
