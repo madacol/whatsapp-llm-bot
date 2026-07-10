@@ -13,6 +13,8 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 - Follow-up on 2026-07-01: Android target can assume medium/high-end Android hardware; low-end-phone constraints are not required.
 - Follow-up on 2026-07-09: the Android app must not commit the real API deployment URL; use private build-time configuration, and remove private deployment hostnames from tracked code/docs.
 - Follow-up on 2026-07-09: Android wake detection should work like the current web client's ONNX openWakeWord flow, not the restart-based Android speech recognizer behavior that repeatedly starts/stops the microphone session.
+- Follow-up on 2026-07-10: purge concrete `100.x.x.x` API addresses from Git history, keep the real Android API domain in ignored `.env`, and do not publish the private deployment domain in tracked source or history.
+- Follow-up on 2026-07-10: `WEB_AUDIO_API_TARGET` is a functional server environment variable, but `website.json` service environment entries are literal systemd values in the deploy tool, not `.env` interpolation. Tracked `website.json` must therefore not contain a fake or private API target.
 - `clients/voice-pi/openwakeword_always_on.py` and `clients/voice-pi/capture_after_wake.py` currently use openWakeWord for `hey_jarvis` detection, then VAD endpointing to capture the user's turn.
 - `sherpa-onnx` is the preferred POC wake-word candidate: it is Apache-2.0, supports Android and Kotlin/Java APIs, includes keyword spotting, has an Android keyword spotting app, and supports custom keyword files.
 - `clients/voice-pi/README.md` says the Pi client is a frontend for `http-api-transport.js`, and the intended next step is moving STT/TTS into `whatsapp-llm-bot` while clients keep wake/capture/upload/playback.
@@ -40,13 +42,22 @@ Turn the existing HTTP API transport voice client direction into an Android clie
 
 ## Current Status
 
-Blocked only for real-device validation. First implementation slice is a complete-clip POC: Android records a full utterance, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
+Active. First implementation slice is a complete-clip POC: Android records a full utterance, uploads the audio to the API, the backend runs the assistant flow and provider-backed TTS, and Android downloads/plays the returned audio.
 
 The previous local disk-space blocker is resolved enough for debug builds: on 2026-07-09 the project built successfully with a temporary minimal command-line toolchain under `/tmp`, using about 1.4 GB for Gradle, Gradle cache, Android command-line tools, SDK platform/build-tools, and build outputs.
 
 No Android device is currently visible through `adb devices`, so install/logcat validation is still blocked on connecting or exposing a physical device. If the backend is running remotely, the Android device needs network reachability to the configured bot API.
 
 The Android app should track improvements made to the web audio client where the improvement is backend-facing or client-workflow-facing. The current wake detector ports the web client's ONNX openWakeWord Jarvis path into Android using continuous `AudioRecord` capture and Microsoft ONNX Runtime Android.
+
+Current operational state on 2026-07-10:
+
+- Android source and web manifest cleanup commit has been rewritten locally to `dd81786` after removing concrete `100.x.x.x` addresses and synthetic private placeholders from reachable history.
+- The real Android API URL is intentionally sourced from ignored `.env` / build-time environment through `ANDROID_API_BASE_URL`; tracked source must not reveal it.
+- `website.json` no longer declares `WEB_AUDIO_API_TARGET`. The web server still supports `process.env.WEB_AUDIO_API_TARGET`; the real value must be supplied through private runtime/deployment configuration, not committed JSON.
+- Final local cleanup after the second rewrite deleted `refs/original`, expired reflogs, ran GC, and verified no concrete `100.x.x.x` addresses or synthetic private placeholders remain in current files, reachable commit trees, diff history, or raw objects.
+- Unrelated in-progress ACP compact-command work was stashed before the second history rewrite and still needs to be restored after force-pushing the rewritten history.
+- Next critical actions: commit this task-tracking update, force-push rewritten `origin/master`, restore the unrelated stash, and re-check worktree state.
 
 ## Progress
 
@@ -69,6 +80,9 @@ The Android app should track improvements made to the web audio client where the
   - fallback to localhost when no private build-time URL is configured;
   - migration away from previous local development defaults without committing the real deployment URL.
 - Redacted private deployment hostnames from tracked current-tree code/docs/evidence.
+- Updated Android stored-URL migration so old development API URLs are replaced by the build-configured API URL, including previous Tailscale/CGNAT-style development addresses on the API port.
+- Removed tracked `WEB_AUDIO_API_TARGET` from `website.json`; the web server environment variable remains supported, but the deployment target must be configured privately at runtime.
+- Rewrote Git history once to purge concrete `100.x.x.x` addresses and a second time to remove synthetic private placeholders from historical `website.json` values.
 - Ported current web audio-client parity into Android:
   - configurable sender id and sender name;
   - API health check;
@@ -96,13 +110,21 @@ The Android app should track improvements made to the web audio client where the
 - `/tmp/android-sdk-min/build-tools/35.0.0/aapt dump badging clients/android/app/build/outputs/apk/debug/app-debug.apk`
 - `git diff --check`
 - `/tmp/android-sdk-min/platform-tools/adb devices` starts successfully with elevated local daemon permission, but no device is attached.
-- A redacted private-host search over the current tracked source/docs path set returned no matches after redaction.
+- A current-tree search over tracked source/docs returned no concrete `100.x.x.x` API addresses after redaction.
+- Before the second rewrite, reachable-history and raw-object scans returned no concrete `100.x.x.x` addresses. Synthetic private placeholders remained only in rewritten historical `website.json`, which triggered the second rewrite.
+- After the second rewrite and GC, these checks returned no matches:
+  - current-tree `rg` for concrete `100.x.x.x` addresses and synthetic private placeholders;
+  - `git log --all -G` for the same patterns;
+  - exhaustive `git rev-list --all` plus `git grep` over each reachable commit tree;
+  - raw object scan with `git cat-file --batch-all-objects --batch | rg -a`.
 - `unzip -l clients/android/app/build/outputs/apk/debug/app-debug.apk | rg "onnx|libonnx|melspec|embedding|jarvis"` confirms the APK contains only arm64 ONNX Runtime native libraries and the three openWakeWord model assets.
 
 ## Remaining
 
 - Validate the openWakeWord wake detector on a physical Android device.
-- Decide separately whether history should be rewritten to remove private deployment hostnames from old commits. Current tracked files are redacted, but old commits still contain those strings.
+- Force-push rewritten `master` after the second rewrite.
+- Restore the unrelated ACP compact-command dirty work from the stash after the force-push.
+- Rebuild or confirm the APK still uses the ignored `.env` domain through `ANDROID_API_BASE_URL`, then hand off the APK path.
 - Build/install the APK on a physical Android device and verify microphone permission, audio upload, assistant audio playback, and wake-word behavior with `adb logcat`.
 
 ## Acceptance

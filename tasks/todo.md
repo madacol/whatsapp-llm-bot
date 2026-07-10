@@ -2,6 +2,8 @@
 
 ## Active
 
+- Finish Android private API config, Git-history scrub, APK handoff, and real-device validation. [details](android-audio-client.md)
+
 ## Todo
 
 - Add `/BTW` as a transport-agnostic forked side session command. [details](btw-forked-side-session-command.md)
@@ -9,5 +11,3 @@
 - Centralize WhatsApp presentation intent classification by category ownership. [details](agent-output-presentation-category-ownership.md)
 
 ## Blocked
-
-- Android real-device APK validation and private-host history rewrite decision. [details](android-audio-client.md)
