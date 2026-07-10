@@ -56,8 +56,9 @@ Current operational state on 2026-07-10:
 - The real Android API URL is intentionally sourced from ignored `.env` / build-time environment through `ANDROID_API_BASE_URL`; tracked source must not reveal it.
 - `website.json` no longer declares `WEB_AUDIO_API_TARGET`. The web server still supports `process.env.WEB_AUDIO_API_TARGET`; the real value must be supplied through private runtime/deployment configuration, not committed JSON.
 - Final local cleanup after the second rewrite deleted `refs/original`, expired reflogs, ran GC, and verified no concrete `100.x.x.x` addresses or synthetic private placeholders remain in current files, reachable commit trees, diff history, or raw objects.
-- Unrelated in-progress ACP compact-command work was stashed before the second history rewrite and still needs to be restored after force-pushing the rewritten history.
-- Next critical actions: commit this task-tracking update, force-push rewritten `origin/master`, restore the unrelated stash, and re-check worktree state.
+- Rewritten `master` was force-pushed after the second rewrite, then the unrelated in-progress ACP compact-command work was restored from the temporary stash and the stash ref was removed.
+- Current working tree intentionally contains unrelated ACP compact-command changes restored from before the history rewrite. Do not revert them while finishing Android/APK work.
+- The debug APK was clean-rebuilt from the ignored `.env` domain URL after discovering the inherited shell `ANDROID_API_BASE_URL` still pointed at an old development IP and was overriding `.env`. The final build passed the checks below and is ready to hand off.
 
 ## Progress
 
@@ -117,14 +118,22 @@ Current operational state on 2026-07-10:
   - `git log --all -G` for the same patterns;
   - exhaustive `git rev-list --all` plus `git grep` over each reachable commit tree;
   - raw object scan with `git cat-file --batch-all-objects --batch | rg -a`.
+- Clean-rebuilt the debug APK with the ignored `.env` domain forced through `-PandroidApiBaseUrl=...` so the stale process-level `ANDROID_API_BASE_URL` could not override it.
+- Verified without printing the private URL:
+  - generated Android `BuildConfig.DEFAULT_API_BASE_URL` matches `.env`;
+  - `.env` API URL is an HTTPS domain, not an IP URL;
+  - APK DEX strings contain the `.env` URL;
+  - APK DEX strings contain no concrete `100.x.x.x` address and no synthetic private placeholders.
+- APK verification:
+  - `apksigner verify --verbose clients/android/app/build/outputs/apk/debug/app-debug.apk` passed with APK Signature Scheme v2;
+  - `aapt dump badging` reports `com.madabot.voicepoc`, `versionCode=2`, `versionName=0.1.1`, `minSdk=26`, `targetSdk=35`;
+  - APK size is 30 MB;
+  - current local build footprint is `/tmp/android-lite` 936 MB, `/tmp/android-sdk-min` 627 MB, and `clients/android/app/build` 260 MB.
 - `unzip -l clients/android/app/build/outputs/apk/debug/app-debug.apk | rg "onnx|libonnx|melspec|embedding|jarvis"` confirms the APK contains only arm64 ONNX Runtime native libraries and the three openWakeWord model assets.
 
 ## Remaining
 
 - Validate the openWakeWord wake detector on a physical Android device.
-- Force-push rewritten `master` after the second rewrite.
-- Restore the unrelated ACP compact-command dirty work from the stash after the force-push.
-- Rebuild or confirm the APK still uses the ignored `.env` domain through `ANDROID_API_BASE_URL`, then hand off the APK path.
 - Build/install the APK on a physical Android device and verify microphone permission, audio upload, assistant audio playback, and wake-word behavior with `adb logcat`.
 
 ## Acceptance
