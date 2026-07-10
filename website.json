@@ -23,9 +23,6 @@
       ]
     },
     "service": {
-      "environment": {
-        "WEB_AUDIO_API_TARGET": "http://127.0.0.1:3200"
-      },
       "command": [
         "/usr/bin/node",
         "clients/web/server.js"

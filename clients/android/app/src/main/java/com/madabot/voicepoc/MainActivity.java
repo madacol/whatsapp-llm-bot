@@ -14,6 +14,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.net.URI;
+
 public final class MainActivity extends Activity implements VoiceTurnController.Listener {
     private static final int REQUEST_RECORD_AUDIO = 200;
     private static final int DEFAULT_API_PORT = 3200;
@@ -191,11 +193,54 @@ public final class MainActivity extends Activity implements VoiceTurnController.
     }
 
     private static boolean isPreviousDevelopmentBaseUrl(String value) {
-        if (LOCAL_DEFAULT_API_BASE_URL.equals(value)) {
+        try {
+            URI uri = URI.create(value);
+            String host = uri.getHost();
+            if (host == null || uri.getPort() != DEFAULT_API_PORT) {
+                return LOCAL_DEFAULT_API_BASE_URL.equals(value);
+            }
+            return isDevelopmentHost(host);
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isDevelopmentHost(String host) {
+        if ("localhost".equals(host) || "127.0.0.1".equals(host)) {
             return true;
         }
-        return value.startsWith("http://192.168.")
-            && (value.endsWith(":" + DEFAULT_API_PORT) || value.endsWith(":" + DEFAULT_API_PORT + "/"));
+        int[] octets = parseIpv4(host);
+        if (octets == null) {
+            return false;
+        }
+        return octets[0] == 10
+            || octets[0] == 127
+            || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
+            || (octets[0] == 192 && octets[1] == 168)
+            || (octets[0] == 100 && octets[1] >= 64 && octets[1] <= 127);
+    }
+
+    private static int[] parseIpv4(String host) {
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) {
+            return null;
+        }
+        int[] octets = new int[4];
+        for (int index = 0; index < parts.length; index += 1) {
+            try {
+                if (parts[index].isEmpty()) {
+                    return null;
+                }
+                int octet = Integer.parseInt(parts[index]);
+                if (octet < 0 || octet > 255) {
+                    return null;
+                }
+                octets[index] = octet;
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return octets;
     }
 
     private TextView label(String text) {
